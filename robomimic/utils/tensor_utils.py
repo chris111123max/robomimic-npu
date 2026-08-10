@@ -314,7 +314,7 @@ def to_numpy(x):
         if tensor.is_cuda:
             return tensor.detach().cpu().numpy()
         else:
-            return tensor.detach().numpy()
+            return tensor.detach().cpu().numpy()
     return recursive_dict_list_tuple_apply(
         x,
         {

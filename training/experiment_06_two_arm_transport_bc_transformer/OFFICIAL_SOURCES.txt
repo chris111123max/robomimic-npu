@@ -1,0 +1,18 @@
+Official sources used for Experiment 06
+=======================================
+
+1. robomimic official Transformer tutorial:
+   https://robomimic.github.io/docs/tutorials/training_transformers.html
+
+2. robomimic official tuned BC-Transformer template:
+   robomimic/config/default_templates/bc_transformer.json
+
+3. robomimic official low-dimensional experiment generator:
+   robomimic/scripts/generate_paper_configs.py
+
+The experiment config combines:
+- the official tuned Transformer architecture / optimizer settings;
+- the official Transport low-dimensional observation definition;
+- the official PH validation split convention;
+- the official low-dimensional 50-rollout / 50-epoch evaluation protocol;
+- the local dataset and output paths.

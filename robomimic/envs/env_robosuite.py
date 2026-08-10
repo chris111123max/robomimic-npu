@@ -115,7 +115,11 @@ class EnvRobosuite(EB.EnvBase):
         self._init_kwargs = deepcopy(kwargs)
         self.env = robosuite.make(self._env_name, **kwargs)
         self.lang = lang
-        self._lang_emb = LangUtils.get_lang_emb(self.lang)
+        # Do not load CLIP for experiments without language input
+        if self.lang is None or self.lang == "" or self.lang == "dummy":
+            self._lang_emb = None
+        else:
+            self._lang_emb = LangUtils.get_lang_emb(self.lang)
 
         if self._is_v1:
             # Make sure joint position observations and eef vel observations are active

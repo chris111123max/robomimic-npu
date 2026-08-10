@@ -6,6 +6,10 @@ import math
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
+try:
+    import torch_npu
+except ImportError:
+    torch_npu = None
 
 
 def soft_update(source, target, tau):
@@ -46,9 +50,21 @@ def get_torch_device(try_to_use_cuda):
     Returns:
         device (torch.Device): device to use for models
     """
-    if try_to_use_cuda and torch.cuda.is_available():
-        torch.backends.cudnn.benchmark = True
-        device = torch.device("cuda:0")
+    if try_to_use_cuda:
+
+        # NVIDIA CUDA
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            device = torch.device("cuda:0")
+
+        # Ascend NPU
+        elif (
+            torch_npu is not None
+            and hasattr(torch, "npu")
+            and torch.npu.is_available()
+        ):
+            device = torch.device("npu:0")
+
     else:
         device = torch.device("cpu")
     return device

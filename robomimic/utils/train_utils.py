@@ -76,15 +76,15 @@ def get_exp_dir(config, auto_remove_exp_dir=False, resume=False):
     output_dir = None
     if config.experiment.save.enabled:
         output_dir = os.path.join(base_output_dir, time_str, "models")
-        os.makedirs(output_dir, exist_ok=resume)
+        os.makedirs(output_dir, exist_ok=True)
 
     # tensorboard directory
     log_dir = os.path.join(base_output_dir, time_str, "logs")
-    os.makedirs(log_dir, exist_ok=resume)
+    os.makedirs(log_dir, exist_ok=True)
 
     # video directory
     video_dir = os.path.join(base_output_dir, time_str, "videos")
-    os.makedirs(video_dir, exist_ok=resume)
+    os.makedirs(video_dir, exist_ok=True)
 
     time_dir = os.path.join(base_output_dir, time_str)
     
@@ -630,6 +630,11 @@ def save_model(model, config, env_meta, shape_meta, ckpt_path, variable_state=No
     if action_normalization_stats is not None:
         action_normalization_stats = deepcopy(action_normalization_stats)
         params["action_normalization_stats"] = TensorUtils.to_list(action_normalization_stats)
+    # Ensure checkpoint parent directory exists
+    ckpt_parent = os.path.dirname(ckpt_path)
+    if ckpt_parent:
+        os.makedirs(ckpt_parent, exist_ok=True)
+
     torch.save(params, ckpt_path)
     print("save checkpoint to {}".format(ckpt_path))
 

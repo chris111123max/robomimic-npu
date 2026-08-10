@@ -58,6 +58,14 @@ def train(config, device, resume=False):
     print("")
     log_dir, ckpt_dir, video_dir, time_dir = TrainUtils.get_exp_dir(config, resume=resume)
 
+        # Safety check: make sure all experiment directories exist
+    if ckpt_dir is not None:
+        os.makedirs(ckpt_dir, exist_ok=True)
+
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(video_dir, exist_ok=True)
+    os.makedirs(time_dir, exist_ok=True)
+
     # path for latest model and backup (to support @resume functionality)
     latest_model_path = os.path.join(time_dir, "last.pth")
     latest_model_backup_path = os.path.join(time_dir, "last_bak.pth")

@@ -121,3 +121,10 @@ venv.bak/
 
 # private macros
 macros_private.py
+
+# Ascend NPU generated cache
+kernel_meta/
+**/kernel_meta/
+
+# Ascend NPU generated cache
+**/kernel_meta/
