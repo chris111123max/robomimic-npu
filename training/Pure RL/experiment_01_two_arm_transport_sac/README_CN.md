@@ -24,17 +24,17 @@
 - `parallel_envs = 16`
 - `episodes_per_epoch = 64`，即每个 epoch 进行 4 批并行 episode。
 - 每局最多 700 steps，成功时提前结束。
-- `num_epochs = 30`
-- 每 3 个 epoch 评估一次，每次并行评估 16 局；30 个 epoch 共评估 10 次。
+- `num_epochs = 40`
+- 每 4 个 epoch 评估一次，每次并行评估 16 局；40 个 epoch 共评估 10 次，最后一次位于 Epoch 40。
 - Replay Buffer 达到 1000 条 transition 后开始更新。
 
 若所有 episode 都跑满，训练 transition 总量为：
 
 ```text
-64 × 700 × 30 = 1,344,000
+64 × 700 × 40 = 1,792,000
 ```
 
-依据原单环境第一个 epoch 的实测采集和 NPU 更新时间，这套设置预计约运行 10 小时。并行后的准确耗时应以第一个正式 epoch 的 `Time_Epoch` 为准。
+依据原单环境第一个 epoch 的实测采集和 NPU 更新时间，这套设置预计会超过原先的 10 小时预算。并行后的准确耗时应以第一个正式 epoch 的 `Time_Epoch` 为准。
 
 ## 启动
 

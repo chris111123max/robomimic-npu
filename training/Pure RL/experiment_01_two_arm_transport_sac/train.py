@@ -1019,7 +1019,10 @@ def train(config, config_path):
             )
 
             eval_time = 0.0
-            if epoch % eval_cfg["eval_every_n_epochs"] == 0:
+            if (
+                epoch % eval_cfg["eval_every_n_epochs"] == 0
+                or epoch == train_cfg["num_epochs"]
+            ):
                 eval_metrics = evaluate(env_pool, policy, config, counters, epoch)
                 eval_time = eval_metrics["Eval_Time"]
                 epoch_metrics.update(eval_metrics)
