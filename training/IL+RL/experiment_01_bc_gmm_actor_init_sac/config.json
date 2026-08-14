@@ -1,0 +1,158 @@
+{
+    "experiment": {
+        "name": "experiment_01_bc_gmm_actor_init_sac",
+        "seed": 1,
+        "output_dir": "/data/home/3220251075/lerobot_workspace/training_runs/IL+RL/experiment_01_bc_gmm_actor_init_sac"
+    },
+    "paths": {
+        "dataset": "/data/home/3220251075/lerobot_workspace/datasets/transport/PH/low_dim_v15.hdf5",
+        "teacher_checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/two_arm_transport_bc_gmm_official_ph_low_dim/two_arm_transport_bc_gmm_official_ph_low_dim/20260809191307/models/model_epoch_1850_low_dim_v15_success_0.3.pth"
+    },
+    "observation": {
+        "keys": [
+            "robot0_eef_pos",
+            "robot0_eef_quat",
+            "robot0_gripper_qpos",
+            "robot1_eef_pos",
+            "robot1_eef_quat",
+            "robot1_gripper_qpos",
+            "object"
+        ],
+        "shapes": {
+            "robot0_eef_pos": [3],
+            "robot0_eef_quat": [4],
+            "robot0_gripper_qpos": [2],
+            "robot1_eef_pos": [3],
+            "robot1_eef_quat": [4],
+            "robot1_gripper_qpos": [2],
+            "object": [41]
+        },
+        "obs_dim": 59,
+        "action_dim": 14,
+        "normalize": false
+    },
+    "environment": {
+        "metadata_dataset": "/data/home/3220251075/lerobot_workspace/datasets/transport/PH/low_dim_v15.hdf5",
+        "expected_env_name": "TwoArmTransport",
+        "observation_keys": [
+            "robot0_eef_pos",
+            "robot0_eef_quat",
+            "robot0_gripper_qpos",
+            "robot1_eef_pos",
+            "robot1_eef_quat",
+            "robot1_gripper_qpos",
+            "object"
+        ],
+        "observation_shapes": {
+            "robot0_eef_pos": [3],
+            "robot0_eef_quat": [4],
+            "robot0_gripper_qpos": [2],
+            "robot1_eef_pos": [3],
+            "robot1_eef_quat": [4],
+            "robot1_gripper_qpos": [2],
+            "object": [41]
+        },
+        "obs_dim": 59,
+        "action_dim": 14,
+        "parallel_envs": 16,
+        "parallel_start_method": "forkserver",
+        "parallel_startup_timeout_seconds": 300,
+        "parallel_step_timeout_seconds": 120,
+        "obs_normalization": false,
+        "action_transform": "none",
+        "max_episode_steps": 700,
+        "terminate_on_success": true,
+        "render": false,
+        "render_offscreen": false,
+        "use_image_obs": false
+    },
+    "teacher": {
+        "checkpoint_filename": "model_epoch_1850_low_dim_v15_success_0.3.pth",
+        "expected_epoch": 1850,
+        "low_noise_eval": true,
+        "target_generation_seed": 11001,
+        "cache_batch_size": 100
+    },
+    "stage1": {
+        "network": {
+            "actor_hidden_sizes": [1024, 1024]
+        },
+        "optimizer": {
+            "type": "Adam",
+            "actor_lr": 0.0001
+        },
+        "training": {
+            "num_epochs": 200,
+            "batch_size": 100,
+            "train_steps_per_epoch": 100,
+            "seed": 1
+        },
+        "validation": {
+            "filter_key": "valid",
+            "train_filter_key": "train",
+            "fixed_num_states": 1000,
+            "steps_per_epoch": 10
+        },
+        "evaluation": {
+            "every_n_epochs": 20,
+            "episodes": 16,
+            "max_episode_steps": 700,
+            "terminate_on_success": true,
+            "seeds": [12001, 12002, 12003, 12004, 12005, 12006, 12007, 12008, 12009, 12010, 12011, 12012, 12013, 12014, 12015, 12016]
+        },
+        "selection": {
+            "target_retention": 0.9,
+            "success_first": true,
+            "validation_mse_second": true,
+            "earlier_epoch_third": true
+        }
+    },
+    "stage2": {
+        "network": {
+            "actor_hidden_sizes": [1024, 1024],
+            "critic_hidden_sizes": [1024, 1024]
+        },
+        "sac": {
+            "discount": 0.99,
+            "soft_target_tau": 0.005,
+            "target_update_period": 1,
+            "reward_scale": 1.0,
+            "use_automatic_entropy_tuning": true,
+            "target_entropy": null,
+            "policy_lr": 0.0001,
+            "qf_lr": 0.0001,
+            "optimizer": "Adam"
+        },
+        "training": {
+            "num_epochs": 40,
+            "episodes_per_epoch": 64,
+            "batch_size": 100,
+            "replay_buffer_size": 1000000,
+            "learning_starts": 1000,
+            "updates_per_env_step": 1.0
+        },
+        "evaluation": {
+            "eval_every_n_epochs": 4,
+            "eval_episodes": 16,
+            "max_episode_steps": 700,
+            "terminate_on_success": true,
+            "seed_offset": 10000
+        }
+    },
+    "logging": {
+        "terminal_output_to_txt": true,
+        "tensorboard": true,
+        "metrics_jsonl": true
+    },
+    "checkpoint": {
+        "save_last": true,
+        "save_best_success": true,
+        "save_every_n_epochs": 1,
+        "save_replay_buffer": false
+    },
+    "device": {
+        "use_accelerator": true,
+        "gpu_id": 0,
+        "require_npu": true
+    }
+}
