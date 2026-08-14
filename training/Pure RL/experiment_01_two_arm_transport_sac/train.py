@@ -4,11 +4,13 @@ from collections import OrderedDict
 from copy import deepcopy
 import datetime
 import json
+import multiprocessing as mp
 import os
 from pathlib import Path
 import random
 import sys
 import time
+import traceback
 
 import gym
 import numpy as np
@@ -16,7 +18,7 @@ import torch
 
 from rlkit.data_management.env_replay_buffer import EnvReplayBuffer
 from rlkit.torch.networks import FlattenMlp
-from rlkit.torch.sac.policies import MakeDeterministic, TanhGaussianPolicy
+from rlkit.torch.sac.policies import TanhGaussianPolicy
 from rlkit.torch.sac.sac import SACTrainer
 import rlkit.torch.pytorch_util as ptu
 
@@ -200,6 +202,207 @@ class TwoArmTransportLowDimAdapter:
                 return
 
 
+def initialize_observation_modalities(config):
+    """Initialize robomimic's process-local observation modality registry."""
+    ObsUtils.initialize_obs_utils_with_obs_specs(
+        {
+            "obs": {
+                "low_dim": list(config["environment"]["observation_keys"]),
+                "rgb": [],
+                "depth": [],
+                "scan": [],
+            }
+        }
+    )
+
+
+def parallel_env_worker(connection, config, env_meta, seed):
+    """Own one robosuite environment in a CPU worker process."""
+    env = None
+    try:
+        random.seed(seed)
+        np.random.seed(seed)
+        initialize_observation_modalities(config)
+        env = create_adapter(
+            config,
+            env_meta,
+            config["environment"]["max_episode_steps"],
+            config["environment"]["terminate_on_success"],
+            seed,
+        )
+        connection.send(
+            (
+                "ready",
+                {
+                    "action_low": env.action_low,
+                    "action_high": env.action_high,
+                    "effective_action_transform": env.effective_action_transform,
+                },
+            )
+        )
+
+        while True:
+            command, payload = connection.recv()
+            if command == "reset":
+                env.max_episode_steps = int(payload["max_episode_steps"])
+                env.terminate_on_success = bool(payload["terminate_on_success"])
+                reset_seed = int(payload["seed"])
+                random.seed(reset_seed)
+                np.random.seed(reset_seed)
+                env.seed(reset_seed)
+                connection.send(("result", env.reset()))
+            elif command == "step":
+                next_obs, reward, done, info = env.step(payload)
+                compact_info = {
+                    "success": bool(info["success"]),
+                    "terminated": bool(info["terminated"]),
+                    "time_limit_truncated": bool(info["time_limit_truncated"]),
+                }
+                connection.send(("result", (next_obs, reward, done, compact_info)))
+            elif command == "close":
+                connection.send(("closed", None))
+                break
+            else:
+                raise ValueError(f"Unknown parallel environment command: {command}")
+    except (EOFError, KeyboardInterrupt):
+        pass
+    except Exception:
+        try:
+            connection.send(("error", traceback.format_exc()))
+        except Exception:
+            pass
+    finally:
+        if env is not None:
+            env.close()
+        connection.close()
+
+
+class ParallelEnvPool:
+    """Synchronous vector environment backed by spawn-safe CPU processes."""
+
+    def __init__(self, config, env_meta, num_envs, seed):
+        self.num_envs = int(num_envs)
+        self.obs_dim = int(config["environment"]["obs_dim"])
+        self.action_dim = int(config["environment"]["action_dim"])
+        self.max_episode_steps = int(config["environment"]["max_episode_steps"])
+        if self.num_envs <= 0:
+            raise ValueError("environment.parallel_envs must be positive")
+
+        context = mp.get_context("spawn")
+        self.connections = []
+        self.processes = []
+        try:
+            for worker_id in range(self.num_envs):
+                parent_connection, child_connection = context.Pipe()
+                process = context.Process(
+                    target=parallel_env_worker,
+                    args=(child_connection, config, env_meta, seed + worker_id),
+                    name=f"robosuite-env-{worker_id:02d}",
+                    daemon=True,
+                )
+                process.start()
+                child_connection.close()
+                self.connections.append(parent_connection)
+                self.processes.append(process)
+
+            specs = [self._receive(worker_id, "ready") for worker_id in range(self.num_envs)]
+        except Exception:
+            self.close(force=True)
+            raise
+
+        reference = specs[0]
+        for worker_id, spec in enumerate(specs[1:], start=1):
+            if not np.array_equal(spec["action_low"], reference["action_low"]) or not np.array_equal(
+                spec["action_high"], reference["action_high"]
+            ):
+                self.close(force=True)
+                raise AssertionError(f"Action bounds differ in environment worker {worker_id}")
+
+        self.action_low = np.asarray(reference["action_low"], dtype=np.float32)
+        self.action_high = np.asarray(reference["action_high"], dtype=np.float32)
+        self.effective_action_transform = reference["effective_action_transform"]
+        self.action_space = gym.spaces.Box(
+            low=self.action_low,
+            high=self.action_high,
+            dtype=np.float32,
+        )
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(self.obs_dim,),
+            dtype=np.float32,
+        )
+
+    def _receive(self, worker_id, expected_status="result"):
+        status, payload = self.connections[worker_id].recv()
+        if status == "error":
+            raise RuntimeError(f"Environment worker {worker_id} failed:\n{payload}")
+        if status != expected_status:
+            raise RuntimeError(
+                f"Environment worker {worker_id} returned {status!r}, expected {expected_status!r}"
+            )
+        return payload
+
+    def reset(self, worker_ids, seeds, max_episode_steps, terminate_on_success):
+        worker_ids = list(worker_ids)
+        seeds = list(seeds)
+        if len(worker_ids) != len(seeds):
+            raise ValueError("worker_ids and seeds must have the same length")
+        for worker_id, seed in zip(worker_ids, seeds):
+            self.connections[worker_id].send(
+                (
+                    "reset",
+                    {
+                        "seed": int(seed),
+                        "max_episode_steps": int(max_episode_steps),
+                        "terminate_on_success": bool(terminate_on_success),
+                    },
+                )
+            )
+        return {
+            worker_id: self._receive(worker_id) for worker_id in worker_ids
+        }
+
+    def step(self, worker_ids, actions):
+        worker_ids = list(worker_ids)
+        actions = np.asarray(actions, dtype=np.float32)
+        if actions.shape != (len(worker_ids), self.action_dim):
+            raise AssertionError(
+                f"Expected action batch {(len(worker_ids), self.action_dim)}, got {actions.shape}"
+            )
+        for worker_id, action in zip(worker_ids, actions):
+            self.connections[worker_id].send(("step", action))
+        return {
+            worker_id: self._receive(worker_id) for worker_id in worker_ids
+        }
+
+    def close(self, force=False):
+        connections = getattr(self, "connections", [])
+        processes = getattr(self, "processes", [])
+        if not force:
+            for connection, process in zip(connections, processes):
+                if process.is_alive():
+                    try:
+                        connection.send(("close", None))
+                    except (BrokenPipeError, EOFError, OSError):
+                        pass
+            for worker_id, (connection, process) in enumerate(zip(connections, processes)):
+                if process.is_alive():
+                    try:
+                        self._receive(worker_id, "closed")
+                    except (BrokenPipeError, EOFError, OSError, RuntimeError):
+                        pass
+        for process in processes:
+            process.join(timeout=5.0)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5.0)
+        for connection in connections:
+            connection.close()
+        self.connections = []
+        self.processes = []
+
+
 def load_config(config_path, smoke_test):
     with config_path.open("r", encoding="utf-8") as config_file:
         config = json.load(config_file)
@@ -208,10 +411,10 @@ def load_config(config_path, smoke_test):
         config["experiment"]["output_dir"] = "/tmp/robomimic_pure_sac_smoke"
         config["environment"]["max_episode_steps"] = 5
         config["training"]["num_epochs"] = 1
-        config["training"]["episodes_per_epoch"] = 1
+        config["training"]["episodes_per_epoch"] = config["environment"]["parallel_envs"]
         config["training"]["replay_buffer_size"] = 1000
         config["training"]["learning_starts"] = 1
-        config["evaluation"]["eval_episodes"] = 1
+        config["evaluation"]["eval_episodes"] = config["environment"]["parallel_envs"]
         config["evaluation"]["max_episode_steps"] = 5
         config["checkpoint"]["save_every_n_epochs"] = 1
     config["runtime"] = {"smoke_test": bool(smoke_test)}
@@ -226,12 +429,16 @@ def validate_config(config):
         raise ValueError("Pure SAC baseline requires obs_dim=59")
     if env_cfg["action_dim"] != 14:
         raise ValueError("Pure SAC baseline requires action_dim=14")
+    if env_cfg["parallel_envs"] <= 0:
+        raise ValueError("environment.parallel_envs must be positive")
     if env_cfg["obs_normalization"] is not False:
         raise ValueError("Dataset observation normalization is forbidden for this baseline")
     if train_cfg["batch_size"] <= 0 or train_cfg["learning_starts"] <= 0:
         raise ValueError("batch_size and learning_starts must be positive")
     if train_cfg["updates_per_env_step"] <= 0:
         raise ValueError("updates_per_env_step must be positive")
+    if not config["runtime"]["smoke_test"] and train_cfg["episodes_per_epoch"] < env_cfg["parallel_envs"]:
+        raise ValueError("episodes_per_epoch must be at least parallel_envs in formal training")
     if sac_cfg["optimizer"] != "Adam":
         raise ValueError("This experiment currently supports the required Adam optimizer only")
 
@@ -351,118 +558,248 @@ def build_sac(config, train_env):
     return policy, qf1, qf2, target_qf1, target_qf2, trainer
 
 
-def policy_action(policy, observation, deterministic):
+def policy_actions(policy, observations, deterministic):
+    observations = np.asarray(observations, dtype=np.float32)
+    if observations.ndim != 2:
+        raise AssertionError(f"Expected a 2-D observation batch, got {observations.shape}")
     with torch.no_grad():
-        action, _ = policy.get_action(observation, deterministic=deterministic)
-    action = np.asarray(action, dtype=np.float32)
-    return action
+        actions = policy.get_actions(observations, deterministic=deterministic)
+    return np.asarray(actions, dtype=np.float32)
 
 
-def run_training_episode(
-    epoch,
-    episode,
-    env,
-    policy,
-    replay_buffer,
-    trainer,
-    config,
-    counters,
-):
+def perform_sac_updates(new_transitions, replay_buffer, trainer, config, counters):
+    """Preserve one update per eligible transition under vector collection."""
     train_cfg = config["training"]
-    observation = env.reset()
-    episode_return = 0.0
-    success = False
+    before_steps = counters["training_env_steps"] - int(new_transitions)
+    learning_starts = int(train_cfg["learning_starts"])
+    eligible_before = max(0, before_steps - learning_starts + 1)
+    eligible_after = max(0, counters["training_env_steps"] - learning_starts + 1)
+    newly_eligible = eligible_after - eligible_before
+    counters["update_budget"] += newly_eligible * float(train_cfg["updates_per_env_step"])
+    updates_now = int(counters["update_budget"])
+    counters["update_budget"] -= updates_now
+
+    update_start = time.perf_counter()
+    for _ in range(updates_now):
+        trainer.train(replay_buffer.random_batch(train_cfg["batch_size"]))
+        counters["gradient_steps"] += 1
+    if updates_now:
+        synchronize_device()
+    return time.perf_counter() - update_start
+
+
+def run_parallel_training_epoch(
+    epoch, env_pool, policy, replay_buffer, trainer, config, counters
+):
+    env_cfg = config["environment"]
+    train_cfg = config["training"]
+    episode_target = int(train_cfg["episodes_per_epoch"])
+    worker_count = min(env_pool.num_envs, episode_target)
+    next_episode = 1
+    active = {}
+    results = []
     collect_time = 0.0
     update_time = 0.0
 
-    for _ in range(env.max_episode_steps):
-        collect_start = time.perf_counter()
-        action = policy_action(policy, observation, deterministic=False)
-        next_observation, reward, done, info = env.step(action)
-        collect_time += time.perf_counter() - collect_start
-
-        success = bool(info["success"])
-        terminal = float(success)
-        replay_buffer.add_sample(
-            observation=observation,
-            action=action,
-            reward=reward,
-            terminal=terminal,
-            next_observation=next_observation,
-            env_info={},
-        )
-        counters["training_env_steps"] += 1
-        episode_return += reward
-        observation = next_observation
-
-        if replay_buffer.num_steps_can_sample() >= train_cfg["learning_starts"]:
-            counters["update_budget"] += float(train_cfg["updates_per_env_step"])
-            updates_now = int(counters["update_budget"])
-            counters["update_budget"] -= updates_now
-            update_start = time.perf_counter()
-            for _update in range(updates_now):
-                trainer.train(replay_buffer.random_batch(train_cfg["batch_size"]))
-                counters["gradient_steps"] += 1
-            if updates_now:
-                synchronize_device()
-            update_time += time.perf_counter() - update_start
-
-        if done:
-            break
-
-    result = {
-        "Epoch": epoch,
-        "Episode": episode,
-        "Episode_Return": episode_return,
-        "Episode_Length": env.episode_steps,
-        "Success": float(success),
-        "Training_Env_Steps_Total": counters["training_env_steps"],
-        "Gradient_Steps_Total": counters["gradient_steps"],
-        "Replay_Buffer_Size": replay_buffer.num_steps_can_sample(),
-    }
-    print(
-        "Train Episode | "
-        f"Epoch={epoch:03d} Episode={episode:02d} "
-        f"Return={episode_return:.3f} Length={env.episode_steps} "
-        f"Success={int(success)} EnvSteps={counters['training_env_steps']} "
-        f"GradSteps={counters['gradient_steps']} "
-        f"Replay={replay_buffer.num_steps_can_sample()}"
+    initial_worker_ids = list(range(worker_count))
+    initial_episode_ids = list(range(1, worker_count + 1))
+    next_episode = worker_count + 1
+    reset_start = time.perf_counter()
+    reset_observations = env_pool.reset(
+        initial_worker_ids,
+        [config["experiment"]["seed"] + epoch * 100000 + episode for episode in initial_episode_ids],
+        env_cfg["max_episode_steps"],
+        env_cfg["terminate_on_success"],
     )
-    return result, collect_time, update_time
+    collect_time += time.perf_counter() - reset_start
+    for worker_id, episode_id in zip(initial_worker_ids, initial_episode_ids):
+        active[worker_id] = {
+            "episode": episode_id,
+            "observation": reset_observations[worker_id],
+            "return": 0.0,
+            "length": 0,
+            "success": False,
+        }
+
+    while active:
+        worker_ids = sorted(active)
+        observation_batch = np.stack(
+            [active[worker_id]["observation"] for worker_id in worker_ids], axis=0
+        )
+        collect_start = time.perf_counter()
+        action_batch = policy_actions(policy, observation_batch, deterministic=False)
+        transitions = env_pool.step(worker_ids, action_batch)
+
+        completed_workers = []
+        for batch_index, worker_id in enumerate(worker_ids):
+            state = active[worker_id]
+            next_observation, reward, done, info = transitions[worker_id]
+            success = bool(info["success"])
+            replay_buffer.add_sample(
+                observation=state["observation"],
+                action=action_batch[batch_index],
+                reward=reward,
+                terminal=float(success),
+                next_observation=next_observation,
+                env_info={},
+            )
+            counters["training_env_steps"] += 1
+            state["observation"] = next_observation
+            state["return"] += reward
+            state["length"] += 1
+            state["success"] = success
+            if done:
+                completed_workers.append(worker_id)
+
+        for worker_id in completed_workers:
+            state = active.pop(worker_id)
+            result = {
+                "Epoch": epoch,
+                "Episode": state["episode"],
+                "Episode_Return": state["return"],
+                "Episode_Length": state["length"],
+                "Success": float(state["success"]),
+                "Training_Env_Steps_Total": counters["training_env_steps"],
+                "Gradient_Steps_Total": counters["gradient_steps"],
+                "Replay_Buffer_Size": replay_buffer.num_steps_can_sample(),
+            }
+            results.append(result)
+            print(
+                "Train Episode | "
+                f"Epoch={epoch:03d} Episode={state['episode']:02d} Worker={worker_id:02d} "
+                f"Return={state['return']:.3f} Length={state['length']} "
+                f"Success={int(state['success'])} EnvSteps={counters['training_env_steps']} "
+                f"GradSteps={counters['gradient_steps']} "
+                f"Replay={replay_buffer.num_steps_can_sample()}"
+            )
+
+        refill_workers = []
+        refill_episodes = []
+        for worker_id in completed_workers:
+            if next_episode <= episode_target:
+                refill_workers.append(worker_id)
+                refill_episodes.append(next_episode)
+                next_episode += 1
+        if refill_workers:
+            reset_observations = env_pool.reset(
+                refill_workers,
+                [config["experiment"]["seed"] + epoch * 100000 + episode for episode in refill_episodes],
+                env_cfg["max_episode_steps"],
+                env_cfg["terminate_on_success"],
+            )
+            for worker_id, episode_id in zip(refill_workers, refill_episodes):
+                active[worker_id] = {
+                    "episode": episode_id,
+                    "observation": reset_observations[worker_id],
+                    "return": 0.0,
+                    "length": 0,
+                    "success": False,
+                }
+        collect_time += time.perf_counter() - collect_start
+        update_time += perform_sac_updates(
+            len(worker_ids), replay_buffer, trainer, config, counters
+        )
+
+    results.sort(key=lambda item: item["Episode"])
+    return results, collect_time, update_time
 
 
-def evaluate(eval_env, deterministic_policy, config, counters):
+def evaluate(env_pool, policy, config, counters, epoch):
     eval_cfg = config["evaluation"]
-    returns = []
-    lengths = []
-    successes = []
+    episode_target = int(eval_cfg["eval_episodes"])
+    worker_count = min(env_pool.num_envs, episode_target)
+    next_episode = worker_count + 1
+    active = {}
+    results = []
     eval_start = time.perf_counter()
 
-    for episode in range(1, eval_cfg["eval_episodes"] + 1):
-        observation = eval_env.reset()
-        episode_return = 0.0
-        success = False
-        for _ in range(eval_env.max_episode_steps):
-            with torch.no_grad():
-                action, _ = deterministic_policy.get_action(observation)
-            action = np.asarray(action, dtype=np.float32)
-            observation, reward, done, info = eval_env.step(action)
-            counters["evaluation_env_steps"] += 1
-            episode_return += reward
-            success = bool(info["success"])
-            if done:
-                break
-        returns.append(episode_return)
-        lengths.append(eval_env.episode_steps)
-        successes.append(float(success))
-        print(
-            "Eval Episode  | "
-            f"Episode={episode:02d} Return={episode_return:.3f} "
-            f"Length={eval_env.episode_steps} Success={int(success)}"
+    worker_ids = list(range(worker_count))
+    episode_ids = list(range(1, worker_count + 1))
+    reset_observations = env_pool.reset(
+        worker_ids,
+        [
+            config["experiment"]["seed"]
+            + eval_cfg["seed_offset"]
+            + epoch * 100000
+            + episode
+            for episode in episode_ids
+        ],
+        eval_cfg["max_episode_steps"],
+        eval_cfg["terminate_on_success"],
+    )
+    for worker_id, episode_id in zip(worker_ids, episode_ids):
+        active[worker_id] = {
+            "episode": episode_id,
+            "observation": reset_observations[worker_id],
+            "return": 0.0,
+            "length": 0,
+            "success": False,
+        }
+
+    while active:
+        worker_ids = sorted(active)
+        observation_batch = np.stack(
+            [active[worker_id]["observation"] for worker_id in worker_ids], axis=0
         )
+        action_batch = policy_actions(policy, observation_batch, deterministic=True)
+        transitions = env_pool.step(worker_ids, action_batch)
+        completed_workers = []
+        for worker_id in worker_ids:
+            state = active[worker_id]
+            next_observation, reward, done, info = transitions[worker_id]
+            counters["evaluation_env_steps"] += 1
+            state["observation"] = next_observation
+            state["return"] += reward
+            state["length"] += 1
+            state["success"] = bool(info["success"])
+            if done:
+                completed_workers.append(worker_id)
+
+        for worker_id in completed_workers:
+            state = active.pop(worker_id)
+            results.append(state)
+            print(
+                "Eval Episode  | "
+                f"Episode={state['episode']:02d} Worker={worker_id:02d} "
+                f"Return={state['return']:.3f} Length={state['length']} "
+                f"Success={int(state['success'])}"
+            )
+
+        refill_workers = []
+        refill_episodes = []
+        for worker_id in completed_workers:
+            if next_episode <= episode_target:
+                refill_workers.append(worker_id)
+                refill_episodes.append(next_episode)
+                next_episode += 1
+        if refill_workers:
+            reset_observations = env_pool.reset(
+                refill_workers,
+                [
+                    config["experiment"]["seed"]
+                    + eval_cfg["seed_offset"]
+                    + epoch * 100000
+                    + episode
+                    for episode in refill_episodes
+                ],
+                eval_cfg["max_episode_steps"],
+                eval_cfg["terminate_on_success"],
+            )
+            for worker_id, episode_id in zip(refill_workers, refill_episodes):
+                active[worker_id] = {
+                    "episode": episode_id,
+                    "observation": reset_observations[worker_id],
+                    "return": 0.0,
+                    "length": 0,
+                    "success": False,
+                }
 
     synchronize_device()
     eval_time = time.perf_counter() - eval_start
+    results.sort(key=lambda item: item["episode"])
+    returns = [item["return"] for item in results]
+    lengths = [item["length"] for item in results]
+    successes = [float(item["success"]) for item in results]
     return {
         "Eval_Return_Mean": float(np.mean(returns)),
         "Eval_Return_Std": float(np.std(returns)),
@@ -539,6 +876,7 @@ def print_startup_summary(config, config_path, run_dir, env_meta, train_env):
     print("Observation Shapes    :", env_cfg["observation_shapes"])
     print("obs_dim               :", env_cfg["obs_dim"])
     print("action_dim            :", env_cfg["action_dim"])
+    print("Parallel Environments :", env_cfg["parallel_envs"])
     print("action low            :", train_env.action_low)
     print("action high           :", train_env.action_high)
     print("Action Transform      :", train_env.effective_action_transform)
@@ -568,20 +906,9 @@ def train(config, config_path):
     configure_device(config)
     set_random_seeds(seed)
 
-    # EnvRobosuite consults robomimic's process-global observation modality
-    # mapping during reset. Official robomimic training initializes this from
-    # its Config object; this standalone RL experiment has a plain JSON config,
-    # so register the explicitly configured low-dimensional keys here.
-    ObsUtils.initialize_obs_utils_with_obs_specs(
-        {
-            "obs": {
-                "low_dim": list(config["environment"]["observation_keys"]),
-                "rgb": [],
-                "depth": [],
-                "scan": [],
-            }
-        }
-    )
+    # This registry is process-local. Initialize it in the NPU trainer process;
+    # every spawned environment worker initializes its own copy as well.
+    initialize_observation_modalities(config)
 
     run_dir, logs_dir, models_dir = create_run_directory(config)
     effective_config_path = run_dir / "config.json"
@@ -605,8 +932,7 @@ def train(config, config_path):
             print("WARNING: tensorboardX is unavailable; TensorBoard logging disabled.")
     metrics_path = logs_dir / "metrics.jsonl"
 
-    train_env = None
-    eval_env = None
+    env_pool = None
     try:
         dataset_path = Path(config["environment"]["metadata_dataset"])
         env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=str(dataset_path))
@@ -616,32 +942,28 @@ def train(config, config_path):
                 f"Expected environment {expected_env_name}, metadata contains {env_meta['env_name']}"
             )
 
-        train_env = create_adapter(
+        env_pool = ParallelEnvPool(
             config,
             env_meta,
-            config["environment"]["max_episode_steps"],
-            config["environment"]["terminate_on_success"],
+            config["environment"]["parallel_envs"],
             seed,
         )
-        eval_env = create_adapter(
-            config,
-            env_meta,
-            config["evaluation"]["max_episode_steps"],
-            config["evaluation"]["terminate_on_success"],
-            seed + config["evaluation"]["seed_offset"],
-        )
 
-        initial_obs = train_env.reset()
+        initial_obs = env_pool.reset(
+            [0],
+            [seed],
+            config["environment"]["max_episode_steps"],
+            config["environment"]["terminate_on_success"],
+        )[0]
         if initial_obs.shape != (59,):
             raise AssertionError(f"Initial observation expected (59,), got {initial_obs.shape}")
-        if train_env.action_space.shape != (14,):
-            raise AssertionError(f"Action space expected (14,), got {train_env.action_space.shape}")
+        if env_pool.action_space.shape != (14,):
+            raise AssertionError(f"Action space expected (14,), got {env_pool.action_space.shape}")
 
-        policy, qf1, qf2, target_qf1, target_qf2, trainer = build_sac(config, train_env)
-        deterministic_policy = MakeDeterministic(policy)
+        policy, qf1, qf2, target_qf1, target_qf2, trainer = build_sac(config, env_pool)
         replay_buffer = EnvReplayBuffer(
             config["training"]["replay_buffer_size"],
-            train_env,
+            env_pool,
         )
 
         # Static runtime shape assertions before collecting data.
@@ -656,7 +978,7 @@ def train(config, config_path):
                 raise AssertionError("Q2 output must have shape (1,1)")
         synchronize_device()
 
-        print_startup_summary(config, config_path, run_dir, env_meta, train_env)
+        print_startup_summary(config, config_path, run_dir, env_meta, env_pool)
         print(policy)
         print(qf1)
 
@@ -678,20 +1000,15 @@ def train(config, config_path):
             collect_time = 0.0
             update_time = 0.0
 
-            for episode in range(1, train_cfg["episodes_per_epoch"] + 1):
-                result, episode_collect_time, episode_update_time = run_training_episode(
-                    epoch=epoch,
-                    episode=episode,
-                    env=train_env,
-                    policy=policy,
-                    replay_buffer=replay_buffer,
-                    trainer=trainer,
-                    config=config,
-                    counters=counters,
-                )
-                episode_results.append(result)
-                collect_time += episode_collect_time
-                update_time += episode_update_time
+            episode_results, collect_time, update_time = run_parallel_training_epoch(
+                epoch=epoch,
+                env_pool=env_pool,
+                policy=policy,
+                replay_buffer=replay_buffer,
+                trainer=trainer,
+                config=config,
+                counters=counters,
+            )
 
             epoch_metrics = OrderedDict(
                 Epoch=epoch,
@@ -703,7 +1020,7 @@ def train(config, config_path):
 
             eval_time = 0.0
             if epoch % eval_cfg["eval_every_n_epochs"] == 0:
-                eval_metrics = evaluate(eval_env, deterministic_policy, config, counters)
+                eval_metrics = evaluate(env_pool, policy, config, counters, epoch)
                 eval_time = eval_metrics["Eval_Time"]
                 epoch_metrics.update(eval_metrics)
 
@@ -775,10 +1092,8 @@ def train(config, config_path):
     finally:
         if writer is not None:
             writer.close()
-        if train_env is not None:
-            train_env.close()
-        if eval_env is not None:
-            eval_env.close()
+        if env_pool is not None:
+            env_pool.close()
         sys.stdout = original_stdout
         sys.stderr = original_stderr
         log_handle.close()

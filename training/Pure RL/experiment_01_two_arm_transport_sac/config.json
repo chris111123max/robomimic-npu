@@ -27,6 +27,7 @@
         },
         "obs_dim": 59,
         "action_dim": 14,
+        "parallel_envs": 16,
         "obs_normalization": false,
         "action_transform": "none",
         "max_episode_steps": 700,
@@ -52,15 +53,15 @@
     },
     "training": {
         "num_epochs": 30,
-        "episodes_per_epoch": 10,
+        "episodes_per_epoch": 64,
         "batch_size": 100,
         "replay_buffer_size": 1000000,
         "learning_starts": 1000,
         "updates_per_env_step": 1.0
     },
     "evaluation": {
-        "eval_every_n_epochs": 1,
-        "eval_episodes": 10,
+        "eval_every_n_epochs": 3,
+        "eval_episodes": 16,
         "max_episode_steps": 700,
         "terminate_on_success": true,
         "seed_offset": 10000
