@@ -32,7 +32,13 @@ esac
 
 source "$WORKSPACE/miniconda3/etc/profile.d/conda.sh"
 conda activate robosuite_npu
+
+# CANN's generated set_env.sh reads variables such as PYTHONPATH before
+# assigning them. A clean nohup shell may not define those variables, so do
+# not apply this script's nounset policy while sourcing the vendor script.
+set +u
 source "$WORKSPACE/Ascend/ascend-toolkit/set_env.sh"
+set -u
 
 export PYTHONPATH="$WORKSPACE/robomimic:$WORKSPACE/robomimic/rlkit:${PYTHONPATH:-}"
 export ASCEND_RT_VISIBLE_DEVICES="${NPU_ID:-0}"
