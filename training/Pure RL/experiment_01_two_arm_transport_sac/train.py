@@ -22,6 +22,7 @@ import rlkit.torch.pytorch_util as ptu
 
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
+import robomimic.utils.obs_utils as ObsUtils
 
 
 class TeeStream:
@@ -566,6 +567,21 @@ def train(config, config_path):
     seed = int(config["experiment"]["seed"])
     configure_device(config)
     set_random_seeds(seed)
+
+    # EnvRobosuite consults robomimic's process-global observation modality
+    # mapping during reset. Official robomimic training initializes this from
+    # its Config object; this standalone RL experiment has a plain JSON config,
+    # so register the explicitly configured low-dimensional keys here.
+    ObsUtils.initialize_obs_utils_with_obs_specs(
+        {
+            "obs": {
+                "low_dim": list(config["environment"]["observation_keys"]),
+                "rgb": [],
+                "depth": [],
+                "scan": [],
+            }
+        }
+    )
 
     run_dir, logs_dir, models_dir = create_run_directory(config)
     effective_config_path = run_dir / "config.json"
