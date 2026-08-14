@@ -12,7 +12,8 @@
 
 ## 并行结构
 
-- 使用 `multiprocessing` 的 `spawn` 模式启动 16 个独立 robosuite worker。
+- 使用 `multiprocessing` 的 Linux `forkserver` 模式逐个启动 16 个独立 robosuite worker，避免 16 个 `spawn` 进程同时重复导入完整训练栈造成内存和 CPU 峰值。
+- 每个 worker 启动时会打印进度；启动超过 300 秒或单次环境响应超过 120 秒时会明确报错，不再无限等待。
 - 主进程在 NPU 上一次批量计算最多 16 个动作。
 - 16 个 CPU worker 同时执行环境 step，结果返回主进程后写入同一个 Replay Buffer。
 - 训练和评估顺序使用同一组 16 个 worker，任何时刻都不会同时创建 32 个环境。

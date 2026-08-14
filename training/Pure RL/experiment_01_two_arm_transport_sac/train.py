@@ -281,18 +281,37 @@ class ParallelEnvPool:
     """Synchronous vector environment backed by spawn-safe CPU processes."""
 
     def __init__(self, config, env_meta, num_envs, seed):
+        env_cfg = config["environment"]
         self.num_envs = int(num_envs)
-        self.obs_dim = int(config["environment"]["obs_dim"])
-        self.action_dim = int(config["environment"]["action_dim"])
-        self.max_episode_steps = int(config["environment"]["max_episode_steps"])
+        self.obs_dim = int(env_cfg["obs_dim"])
+        self.action_dim = int(env_cfg["action_dim"])
+        self.max_episode_steps = int(env_cfg["max_episode_steps"])
+        self.startup_timeout_seconds = float(
+            env_cfg.get("parallel_startup_timeout_seconds", 300)
+        )
+        self.step_timeout_seconds = float(
+            env_cfg.get("parallel_step_timeout_seconds", 120)
+        )
         if self.num_envs <= 0:
             raise ValueError("environment.parallel_envs must be positive")
 
-        context = mp.get_context("spawn")
+        start_method = env_cfg.get("parallel_start_method", "forkserver")
+        if start_method not in mp.get_all_start_methods():
+            raise RuntimeError(
+                f"Multiprocessing start method {start_method!r} is unavailable; "
+                f"available methods: {mp.get_all_start_methods()}"
+            )
+        context = mp.get_context(start_method)
         self.connections = []
         self.processes = []
+        specs = []
         try:
             for worker_id in range(self.num_envs):
+                print(
+                    f"Starting environment worker {worker_id + 1:02d}/{self.num_envs:02d} "
+                    f"with {start_method}...",
+                    flush=True,
+                )
                 parent_connection, child_connection = context.Pipe()
                 process = context.Process(
                     target=parallel_env_worker,
@@ -304,8 +323,17 @@ class ParallelEnvPool:
                 child_connection.close()
                 self.connections.append(parent_connection)
                 self.processes.append(process)
-
-            specs = [self._receive(worker_id, "ready") for worker_id in range(self.num_envs)]
+                spec = self._receive(
+                    worker_id,
+                    "ready",
+                    timeout_seconds=self.startup_timeout_seconds,
+                )
+                specs.append(spec)
+                print(
+                    f"Environment worker {worker_id + 1:02d}/{self.num_envs:02d} ready "
+                    f"(pid={process.pid}).",
+                    flush=True,
+                )
         except Exception:
             self.close(force=True)
             raise
@@ -333,8 +361,24 @@ class ParallelEnvPool:
             dtype=np.float32,
         )
 
-    def _receive(self, worker_id, expected_status="result"):
-        status, payload = self.connections[worker_id].recv()
+    def _receive(self, worker_id, expected_status="result", timeout_seconds=None):
+        if timeout_seconds is None:
+            timeout_seconds = self.step_timeout_seconds
+        connection = self.connections[worker_id]
+        process = self.processes[worker_id]
+        if not connection.poll(timeout_seconds):
+            raise TimeoutError(
+                f"Environment worker {worker_id} timed out after {timeout_seconds:.1f}s "
+                f"while waiting for {expected_status!r}; "
+                f"alive={process.is_alive()} exitcode={process.exitcode}"
+            )
+        try:
+            status, payload = connection.recv()
+        except EOFError as error:
+            raise RuntimeError(
+                f"Environment worker {worker_id} closed its pipe unexpectedly; "
+                f"alive={process.is_alive()} exitcode={process.exitcode}"
+            ) from error
         if status == "error":
             raise RuntimeError(f"Environment worker {worker_id} failed:\n{payload}")
         if status != expected_status:
@@ -360,7 +404,9 @@ class ParallelEnvPool:
                 )
             )
         return {
-            worker_id: self._receive(worker_id) for worker_id in worker_ids
+            worker_id: self._receive(
+                worker_id, timeout_seconds=self.step_timeout_seconds
+            ) for worker_id in worker_ids
         }
 
     def step(self, worker_ids, actions):
@@ -373,7 +419,9 @@ class ParallelEnvPool:
         for worker_id, action in zip(worker_ids, actions):
             self.connections[worker_id].send(("step", action))
         return {
-            worker_id: self._receive(worker_id) for worker_id in worker_ids
+            worker_id: self._receive(
+                worker_id, timeout_seconds=self.step_timeout_seconds
+            ) for worker_id in worker_ids
         }
 
     def close(self, force=False):
@@ -389,7 +437,7 @@ class ParallelEnvPool:
             for worker_id, (connection, process) in enumerate(zip(connections, processes)):
                 if process.is_alive():
                     try:
-                        self._receive(worker_id, "closed")
+                        self._receive(worker_id, "closed", timeout_seconds=5.0)
                     except (BrokenPipeError, EOFError, OSError, RuntimeError):
                         pass
         for process in processes:
@@ -431,6 +479,12 @@ def validate_config(config):
         raise ValueError("Pure SAC baseline requires action_dim=14")
     if env_cfg["parallel_envs"] <= 0:
         raise ValueError("environment.parallel_envs must be positive")
+    if env_cfg.get("parallel_start_method") not in ("forkserver", "spawn"):
+        raise ValueError("parallel_start_method must be 'forkserver' or 'spawn'")
+    if env_cfg.get("parallel_startup_timeout_seconds", 0) <= 0:
+        raise ValueError("parallel_startup_timeout_seconds must be positive")
+    if env_cfg.get("parallel_step_timeout_seconds", 0) <= 0:
+        raise ValueError("parallel_step_timeout_seconds must be positive")
     if env_cfg["obs_normalization"] is not False:
         raise ValueError("Dataset observation normalization is forbidden for this baseline")
     if train_cfg["batch_size"] <= 0 or train_cfg["learning_starts"] <= 0:
@@ -877,6 +931,7 @@ def print_startup_summary(config, config_path, run_dir, env_meta, train_env):
     print("obs_dim               :", env_cfg["obs_dim"])
     print("action_dim            :", env_cfg["action_dim"])
     print("Parallel Environments :", env_cfg["parallel_envs"])
+    print("Parallel Start Method :", env_cfg["parallel_start_method"])
     print("action low            :", train_env.action_low)
     print("action high           :", train_env.action_high)
     print("Action Transform      :", train_env.effective_action_transform)
