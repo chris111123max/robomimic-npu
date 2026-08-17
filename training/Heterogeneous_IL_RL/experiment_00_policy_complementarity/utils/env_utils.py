@@ -7,12 +7,27 @@ import numpy as np
 
 import robomimic.utils.env_utils as RobomimicEnvUtils
 import robomimic.utils.file_utils as FileUtils
+import robomimic.utils.obs_utils as ObsUtils
 
 from utils.result_utils import observation_hash, simulator_state_hash, state_vector_hash
 
 
 def load_dataset_env_metadata(dataset_path):
     return FileUtils.get_env_metadata_from_dataset(dataset_path=str(dataset_path))
+
+
+def initialize_observation_utils_from_checkpoint(checkpoint_path):
+    """Initialize robomimic's process-global observation modality registry.
+
+    EnvRobosuite.get_observation requires this registry even when no policy has
+    been constructed yet. Official evaluators initialize it as a side effect of
+    policy_from_checkpoint; the standalone state-bank builder must do so
+    explicitly from the same checkpoint config.
+    """
+    checkpoint = FileUtils.maybe_dict_from_checkpoint(ckpt_path=str(checkpoint_path))
+    config, _ = FileUtils.config_from_checkpoint(ckpt_dict=checkpoint)
+    ObsUtils.initialize_obs_utils_with_config(config)
+    return checkpoint
 
 
 def create_dataset_environment(dataset_path):

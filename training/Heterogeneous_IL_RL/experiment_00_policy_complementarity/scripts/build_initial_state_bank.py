@@ -12,7 +12,10 @@ EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
-from utils.env_utils import capture_initial_condition, close_environment, create_dataset_environment
+from utils.env_utils import (
+    capture_initial_condition, close_environment, create_dataset_environment,
+    initialize_observation_utils_from_checkpoint,
+)
 from utils.result_utils import (
     atomic_json, atomic_npz, observation_hash, read_json, simulator_state_hash,
     state_vector_hash, validate_state_bank_file,
@@ -63,6 +66,11 @@ def build(config_path, run_dir, num_seeds=None, force_rebuild=False):
     existing = read_json(manifest_path) if manifest_path.exists() else {"states": []}
     entries = {int(row["initial_state_id"]): row for row in existing.get("states", [])}
 
+    # This stage runs in a fresh subprocess and has not loaded a RolloutPolicy.
+    # EnvRobosuite.get_observation still requires the global ObsUtils registry.
+    initialize_observation_utils_from_checkpoint(
+        config["policies"]["bc"]["checkpoint_path"]
+    )
     env, env_metadata = create_dataset_environment(config["dataset_path"])
     if env_metadata["env_name"] != config["expected_environment_name"]:
         raise RuntimeError(f"Dataset environment is {env_metadata['env_name']}, expected {config['expected_environment_name']}")

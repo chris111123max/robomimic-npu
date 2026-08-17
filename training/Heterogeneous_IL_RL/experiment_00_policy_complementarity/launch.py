@@ -13,7 +13,10 @@ EXPERIMENT_DIR = Path(__file__).resolve().parent
 if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
-from utils.env_utils import close_environment, create_dataset_environment, load_dataset_env_metadata
+from utils.env_utils import (
+    close_environment, create_dataset_environment,
+    initialize_observation_utils_from_checkpoint, load_dataset_env_metadata,
+)
 from utils.policy_loader import checkpoint_metadata, load_policy, release_policy, select_device
 from utils.result_utils import POLICY_ORDER, atomic_json, read_json
 
@@ -68,6 +71,12 @@ def validate_config(config):
         raise RuntimeError(
             f"Dataset environment is {dataset_meta['env_name']}, expected {config['expected_environment_name']}"
         )
+    # Official evaluators load a policy before env.reset(), which initializes
+    # ObsUtils as a side effect. Validation creates the common dataset env first,
+    # so initialize from the first native checkpoint explicitly.
+    initialize_observation_utils_from_checkpoint(
+        config["policies"][POLICY_ORDER[0]]["checkpoint_path"]
+    )
     env, _ = create_dataset_environment(dataset_path)
     initial_observation = env.reset()
     device = select_device()

@@ -26,6 +26,8 @@ The four checkpoint paths live only in `config/experiment_config.json`, under th
 
 `utils/policy_loader.py` calls the official `FileUtils.policy_from_checkpoint`. Architecture, observation configuration, normalization, GMM evaluation behavior, RNN state, and Transformer history therefore come from each original checkpoint. Every rollout calls `RolloutPolicy.start_episode()`, whose project implementation switches to evaluation mode and calls the underlying policy's `reset()`. Temporal state cannot leak between episodes.
 
+The standalone validation and state-bank stages initialize robomimic's process-global observation modality registry from the BC checkpoint config before the first `EnvRobosuite.reset()`. This mirrors the initialization side effect of the official policy-first evaluator while still creating the common environment from dataset metadata.
+
 Policy sampling gets a deterministic per-(policy, initial-state) RNG seed, independent of evaluation order. This preserves the checkpoint's native stochastic evaluation semantics; it does not replace GMM sampling with a mean action. Environment initialization remains fixed by the restored state bank.
 
 ## Files
