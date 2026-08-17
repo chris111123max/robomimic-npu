@@ -28,6 +28,64 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def metadata_difference_paths(left, right, prefix=""):
+    """Return human-readable paths that differ between two JSON objects."""
+    if isinstance(left, dict) and isinstance(right, dict):
+        differences = []
+        for key in sorted(set(left) | set(right)):
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key not in left or key not in right:
+                differences.append(path)
+            else:
+                differences.extend(metadata_difference_paths(left[key], right[key], path))
+        return differences
+    return [] if canonical(left) == canonical(right) else [prefix]
+
+
+def validate_environment_compatibility(policy_name, checkpoint_meta, dataset_meta):
+    """Validate policy/environment semantics without requiring byte-identical metadata.
+
+    Checkpoints and datasets can legitimately differ in env_version, rendering
+    defaults, or optional kwargs. The common rollout environment always comes
+    from the dataset metadata, so only task and action-semantics fields are hard
+    compatibility requirements here. Observation and action tensor interfaces
+    are checked separately against the instantiated environment.
+    """
+    if checkpoint_meta.get("env_name") != dataset_meta.get("env_name"):
+        raise RuntimeError(
+            f"{policy_name} checkpoint belongs to {checkpoint_meta.get('env_name')}, "
+            f"not {dataset_meta.get('env_name')}"
+        )
+    if checkpoint_meta.get("type") != dataset_meta.get("type"):
+        raise RuntimeError(
+            f"{policy_name} environment type differs: "
+            f"checkpoint={checkpoint_meta.get('type')}, dataset={dataset_meta.get('type')}"
+        )
+
+    checkpoint_kwargs = checkpoint_meta.get("env_kwargs", {})
+    dataset_kwargs = dataset_meta.get("env_kwargs", {})
+    semantic_keys = (
+        "robots", "env_configuration", "controller_configs",
+        "gripper_types", "control_freq",
+    )
+    for key in semantic_keys:
+        if key in checkpoint_kwargs and key in dataset_kwargs:
+            if canonical(checkpoint_kwargs[key]) != canonical(dataset_kwargs[key]):
+                raise RuntimeError(
+                    f"{policy_name} action-semantic metadata differs for env_kwargs.{key}: "
+                    f"checkpoint={checkpoint_kwargs[key]!r}, dataset={dataset_kwargs[key]!r}"
+                )
+
+    differences = metadata_difference_paths(checkpoint_meta, dataset_meta)
+    if differences:
+        preview = ", ".join(differences[:20])
+        suffix = " ..." if len(differences) > 20 else ""
+        print(
+            f"  metadata note       : {len(differences)} non-identical field(s): "
+            f"{preview}{suffix}"
+        )
+
+
 def prepare_run_directory(config, requested_run_dir):
     if requested_run_dir:
         run_dir = Path(requested_run_dir).expanduser().resolve()
@@ -90,10 +148,9 @@ def validate_config(config):
         for policy_name in POLICY_ORDER:
             checkpoint_path = config["policies"][policy_name]["checkpoint_path"]
             metadata = checkpoint_metadata(policy_name, checkpoint_path)
-            if metadata["environment_name"] != dataset_meta["env_name"]:
-                raise RuntimeError(f"{policy_name} checkpoint belongs to {metadata['environment_name']}")
-            if canonical(metadata["environment_metadata"]) != canonical(dataset_meta):
-                raise RuntimeError(f"{policy_name} checkpoint environment metadata differs from the dataset metadata")
+            validate_environment_compatibility(
+                policy_name, metadata["environment_metadata"], dataset_meta,
+            )
             if metadata["checkpoint_horizon"] != int(config["horizon"]):
                 raise RuntimeError(
                     f"{policy_name} checkpoint horizon={metadata['checkpoint_horizon']} differs from experiment horizon={config['horizon']}"

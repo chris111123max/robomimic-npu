@@ -28,6 +28,8 @@ The four checkpoint paths live only in `config/experiment_config.json`, under th
 
 The standalone validation and state-bank stages initialize robomimic's process-global observation modality registry from the BC checkpoint config before the first `EnvRobosuite.reset()`. This mirrors the initialization side effect of the official policy-first evaluator while still creating the common environment from dataset metadata.
 
+Checkpoint compatibility does not require byte-identical metadata because checkpoint and dataset files can legitimately carry different environment-version, rendering, or optional-default fields. Validation strictly checks the TwoArmTransport name and environment type plus shared robot, controller, control-frequency, and gripper semantics. It then validates every checkpoint's observation keys and shapes, action dimension, horizon, and one native inference result against the single dataset-metadata environment. Non-semantic metadata differences are printed for auditability.
+
 Policy sampling gets a deterministic per-(policy, initial-state) RNG seed, independent of evaluation order. This preserves the checkpoint's native stochastic evaluation semantics; it does not replace GMM sampling with a mean action. Environment initialization remains fixed by the restored state bank.
 
 ## Files
