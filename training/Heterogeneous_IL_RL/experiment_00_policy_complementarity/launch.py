@@ -346,7 +346,12 @@ def run_parallel_policy_evaluation(
 
 
 def run_validation_subprocess(config_path, run_dir, log_handle, device_mask=None):
-    """Validate in a disposable process so the launcher retains no NPU context."""
+    """Validate in a disposable process so the launcher retains no NPU context.
+
+    Output goes to a regular file instead of PIPE. Some CANN helper processes
+    inherit stdout; a pipe reader can otherwise wait forever for EOF after the
+    direct validation child has already exited.
+    """
     command = [
         sys.executable, "-u", str(EXPERIMENT_DIR / "launch.py"),
         "--stage", "validate", "--config", str(config_path),
@@ -360,18 +365,20 @@ def run_validation_subprocess(config_path, run_dir, log_handle, device_mask=None
         f"Command: {' '.join(command)}",
         log_handle,
     )
-    process = subprocess.Popen(
-        command, cwd=str(EXPERIMENT_DIR), env=environment,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
-    )
-    validation_succeeded = False
+    validation_log_path = Path(run_dir) / "logs" / "validation.log"
+    with validation_log_path.open("w", encoding="utf-8") as validation_log:
+        process = subprocess.Popen(
+            command, cwd=str(EXPERIMENT_DIR), env=environment,
+            stdout=validation_log, stderr=subprocess.STDOUT,
+            text=True,
+        )
+        return_code = process.wait()
+
+    validation_text = validation_log_path.read_text(encoding="utf-8", errors="replace")
     success_marker = "Configuration, checkpoints, imports, metadata, observation specs, and policy inference: OK"
-    for line in process.stdout:
-        if success_marker in line:
-            validation_succeeded = True
+    validation_succeeded = success_marker in validation_text
+    for line in validation_text.splitlines(keepends=True):
         write_logged(f"[validation] {line}", log_handle)
-    return_code = process.wait()
     if return_code:
         if validation_succeeded:
             write_logged(
