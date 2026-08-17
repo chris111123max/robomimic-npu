@@ -3,9 +3,12 @@
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +21,7 @@ from utils.env_utils import (
     initialize_observation_utils_from_checkpoint, load_dataset_env_metadata,
 )
 from utils.policy_loader import checkpoint_metadata, load_policy, release_policy, select_device
-from utils.result_utils import POLICY_ORDER, atomic_json, read_json
+from utils.result_utils import POLICY_ORDER, atomic_json, read_json, rebuild_result_tables
 
 
 DEFAULT_CONFIG = EXPERIMENT_DIR / "config" / "experiment_config.json"
@@ -188,6 +191,187 @@ def validate_config(config):
     print("\nConfiguration, checkpoints, imports, metadata, observation specs, and policy inference: OK")
 
 
+def write_logged(message, log_handle, lock=None):
+    print(message, end="" if message.endswith("\n") else "\n", flush=True)
+    if lock is None:
+        log_handle.write(message)
+        if not message.endswith("\n"):
+            log_handle.write("\n")
+        log_handle.flush()
+    else:
+        with lock:
+            log_handle.write(message)
+            if not message.endswith("\n"):
+                log_handle.write("\n")
+            log_handle.flush()
+
+
+def preflight_parallel_devices(devices, log_handle, require_idle=True):
+    """Record hardware status and execute a real tensor op through each mask."""
+    devices = [str(device) for device in devices]
+    if len(devices) != len(POLICY_ORDER) or len(set(devices)) != len(devices):
+        raise ValueError(
+            f"parallel_evaluation.devices must contain {len(POLICY_ORDER)} unique entries; got {devices}"
+        )
+    write_logged("=" * 84 + "\nNPU parallel-evaluation preflight\n" + "=" * 84, log_handle)
+    try:
+        status = subprocess.run(
+            ["npu-smi", "info"], cwd=str(EXPERIMENT_DIR), text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60, check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("npu-smi was not found in PATH; source the CANN environment first") from exc
+    write_logged(status.stdout or "<npu-smi produced no output>", log_handle)
+    if status.returncode:
+        raise RuntimeError(f"npu-smi info failed with exit code {status.returncode}")
+    process_rows = re.findall(
+        r"^\|\s*(\d+)\s+(\d+)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|",
+        status.stdout or "", flags=re.MULTILINE,
+    )
+    if require_idle and process_rows:
+        descriptions = [
+            f"physical_npu={npu}, chip={chip}, pid={pid}, process={name.strip()}"
+            for npu, chip, pid, name in process_rows
+        ]
+        raise RuntimeError(
+            "NPU preflight found active accelerator processes; refusing to oversubscribe all four cards: "
+            + "; ".join(descriptions)
+        )
+
+    probe = (
+        "import torch, torch_npu; "
+        "assert hasattr(torch, 'npu') and torch.npu.is_available(), 'NPU unavailable'; "
+        "x=torch.ones(32, device='npu:0'); y=(x*x).sum(); "
+        "torch.npu.synchronize(); "
+        "print('logical_device=npu:0 result=', float(y.cpu().item()))"
+    )
+    for device in devices:
+        environment = os.environ.copy()
+        environment["ASCEND_RT_VISIBLE_DEVICES"] = device
+        result = subprocess.run(
+            [sys.executable, "-c", probe], cwd=str(EXPERIMENT_DIR), env=environment,
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            timeout=120, check=False,
+        )
+        write_logged(
+            f"[NPU mask {device}] return_code={result.returncode}\n{result.stdout}",
+            log_handle,
+        )
+        if result.returncode:
+            raise RuntimeError(f"NPU tensor probe failed for ASCEND_RT_VISIBLE_DEVICES={device}")
+    write_logged(f"NPU preflight passed for masks: {devices}\n", log_handle)
+
+
+def run_parallel_policy_evaluation(
+    config_path, run_dir, policy_devices, force_eval, log_handle,
+):
+    """Run one isolated evaluator per policy and aggregate only after all exit."""
+    policy_devices = [(policy, str(device)) for policy, device in policy_devices]
+    atomic_json(
+        Path(run_dir) / "parallel_assignment.json",
+        {
+            "mode": "one_policy_per_npu",
+            "assignments": [
+                {"policy_name": policy, "ascend_rt_visible_devices": device, "worker_device": "npu:0"}
+                for policy, device in policy_devices
+            ],
+        },
+    )
+    output_lock = threading.Lock()
+    processes = []
+    threads = []
+
+    def pump_output(policy_name, device, process, worker_log_path):
+        with worker_log_path.open("a", encoding="utf-8") as worker_log:
+            for line in process.stdout:
+                worker_log.write(line)
+                worker_log.flush()
+                tagged = f"[{policy_name}|NPU-mask-{device}] {line}"
+                write_logged(tagged, log_handle, lock=output_lock)
+
+    write_logged("=" * 84 + "\nLaunching four policy workers\n" + "=" * 84, log_handle)
+    try:
+        for policy_name, device in policy_devices:
+            command = [
+                sys.executable, "-u",
+                str(EXPERIMENT_DIR / "scripts" / "evaluate_policy_bank.py"),
+                "--run-dir", str(run_dir), "--config", str(config_path),
+                "--policy", policy_name, "--defer-aggregate",
+            ]
+            if force_eval:
+                command.append("--force-eval")
+            environment = os.environ.copy()
+            environment["ASCEND_RT_VISIBLE_DEVICES"] = device
+            write_logged(
+                f"Policy worker: {policy_name} -> ASCEND_RT_VISIBLE_DEVICES={device}\n"
+                f"Command: {' '.join(command)}",
+                log_handle,
+            )
+            process = subprocess.Popen(
+                command, cwd=str(EXPERIMENT_DIR), env=environment,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            processes.append((policy_name, device, process))
+            thread = threading.Thread(
+                target=pump_output,
+                args=(policy_name, device, process, run_dir / "logs" / f"eval_{policy_name}.log"),
+                daemon=False,
+            )
+            thread.start()
+            threads.append(thread)
+
+        return_codes = []
+        for policy_name, device, process in processes:
+            return_codes.append((policy_name, device, process.wait()))
+        for thread in threads:
+            thread.join()
+    except BaseException:
+        for _, _, process in processes:
+            if process.poll() is None:
+                process.terminate()
+        for thread in threads:
+            thread.join(timeout=10)
+        raise
+
+    completed, errors = rebuild_result_tables(run_dir)
+    expected = len(POLICY_ORDER) * len(read_json(run_dir / "seed_manifest.json")["environment_seeds"])
+    write_logged(
+        f"Parallel evaluation aggregate: complete={len(completed)}/{expected}, errors={len(errors)}",
+        log_handle,
+    )
+    failed = [(policy, device, code) for policy, device, code in return_codes if code]
+    if failed:
+        raise RuntimeError(f"Policy worker process failures: {failed}")
+
+
+def run_validation_subprocess(config_path, run_dir, log_handle, device_mask=None):
+    """Validate in a disposable process so the launcher retains no NPU context."""
+    command = [
+        sys.executable, "-u", str(EXPERIMENT_DIR / "launch.py"),
+        "--stage", "validate", "--config", str(config_path),
+        "--run-dir", str(run_dir),
+    ]
+    environment = os.environ.copy()
+    if device_mask is not None:
+        environment["ASCEND_RT_VISIBLE_DEVICES"] = str(device_mask)
+    write_logged(
+        "Validation runs in a disposable subprocess to release its NPU context before evaluation.\n"
+        f"Command: {' '.join(command)}",
+        log_handle,
+    )
+    process = subprocess.Popen(
+        command, cwd=str(EXPERIMENT_DIR), env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    for line in process.stdout:
+        write_logged(f"[validation] {line}", log_handle)
+    return_code = process.wait()
+    if return_code:
+        raise subprocess.CalledProcessError(return_code, command)
+
+
 def run_stage(script_name, config_path, run_dir, num_seeds=None, force_flag=None, log_handle=None):
     command = [
         sys.executable, "-u", str(EXPERIMENT_DIR / "scripts" / script_name),
@@ -221,6 +405,7 @@ def main():
     parser.add_argument("--run-dir")
     parser.add_argument("--force-rebuild", action="store_true")
     parser.add_argument("--force-eval", action="store_true")
+    parser.add_argument("--sequential-eval", action="store_true")
     args = parser.parse_args()
     config_path = Path(args.config).expanduser().resolve()
     config = read_json(config_path)
@@ -236,8 +421,24 @@ def main():
     print(f"Num seeds: {count}")
     print("=" * 84, flush=True)
     with log_path.open("a", encoding="utf-8") as log_handle:
-        if args.stage in ("validate", "build", "eval", "all"):
+        parallel_cfg = config.get("parallel_evaluation", {})
+        parallel_enabled = bool(parallel_cfg.get("enabled", False)) and not args.sequential_eval
+        devices = [str(device) for device in parallel_cfg.get("devices", [])]
+        if args.stage in ("eval", "all") and parallel_enabled:
+            if len(devices) != len(POLICY_ORDER) or len(set(devices)) != len(devices):
+                raise ValueError(
+                    f"parallel_evaluation.devices must contain four unique masks; got {devices}"
+                )
+            if bool(parallel_cfg.get("preflight_device_check", True)):
+                preflight_parallel_devices(
+                    devices, log_handle,
+                    require_idle=bool(parallel_cfg.get("require_idle_devices", True)),
+                )
+        if args.stage == "validate":
             validate_config(config)
+        elif args.stage in ("build", "eval", "all"):
+            validation_mask = devices[0] if parallel_enabled and devices else None
+            run_validation_subprocess(copied_config, run_dir, log_handle, validation_mask)
         if args.stage in ("build", "all"):
             run_stage(
                 "build_initial_state_bank.py", copied_config, run_dir, count,
@@ -246,10 +447,16 @@ def main():
         if args.stage in ("eval", "all"):
             if not (run_dir / "initial_state_manifest.json").is_file():
                 raise FileNotFoundError("Initial state bank is missing; run --stage build first")
-            run_stage(
-                "evaluate_policy_bank.py", copied_config, run_dir, None,
-                "--force-eval" if args.force_eval else None, log_handle,
-            )
+            if parallel_enabled:
+                run_parallel_policy_evaluation(
+                    copied_config, run_dir, zip(POLICY_ORDER, devices),
+                    args.force_eval, log_handle,
+                )
+            else:
+                run_stage(
+                    "evaluate_policy_bank.py", copied_config, run_dir, None,
+                    "--force-eval" if args.force_eval else None, log_handle,
+                )
         if args.stage in ("analyze", "all"):
             run_stage("analyze_complementarity.py", copied_config, run_dir, log_handle=log_handle)
     print(f"Run directory: {run_dir}")

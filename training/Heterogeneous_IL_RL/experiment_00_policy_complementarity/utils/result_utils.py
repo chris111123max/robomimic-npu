@@ -161,6 +161,7 @@ RESULT_FIELDS = [
     "initial_state_id", "environment_seed", "policy_name", "checkpoint_path", "success",
     "episode_return", "episode_length", "success_step", "termination_reason", "state_hash",
     "observation_hash", "policy_sampling_seed", "trajectory_path", "wall_time_seconds",
+    "worker_visible_device",
 ]
 
 ERROR_FIELDS = [

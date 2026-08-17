@@ -15,6 +15,12 @@
     "save_sim_states": false,
     "compressed": true
   },
+  "parallel_evaluation": {
+    "enabled": true,
+    "devices": ["0", "1", "2", "3"],
+    "preflight_device_check": true,
+    "require_idle_devices": true
+  },
   "policies": {
     "bc": {
       "checkpoint_path": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_official_ph_low_dim/two_arm_transport_bc_official_ph_low_dim/20260809191431/models/model_epoch_750_low_dim_v15_success_0.2.pth"

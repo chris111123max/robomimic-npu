@@ -64,6 +64,12 @@ Runs are written outside the source tree under:
 
 Each episode writes its compressed low-dimensional trajectory and per-episode JSON atomically, then rebuilds aggregate result and error CSV files atomically. A completed pair is skipped only when its result hash and trajectory structure validate. Runtime exceptions are stored with tracebacks as errors, never converted to failures. Analysis marks `ERROR` / `MISSING`, writes an incomplete summary, and returns nonzero instead of presenting incomplete data as a valid 100×4 experiment.
 
+Formal evaluation is configured for four-way NPU parallelism. The launcher first records `npu-smi info`, refuses to oversubscribe cards that already have active accelerator processes, and executes a real tensor probe through masks `0`, `1`, `2`, and `3`. It then builds the state bank once and starts exactly one isolated policy worker per mask. Workers write only their own per-policy trajectories and atomic episode JSON files; aggregate CSV files are deliberately deferred until all workers exit, eliminating concurrent aggregate-write races. Separate worker logs are written to `logs/eval_<policy>.log`, and tagged output is also copied into `logs/experiment.log`.
+
+The selected mapping is also persisted in `parallel_assignment.json` inside the run directory.
+
+The default assignment is `0: bc`, `1: bc_gmm`, `2: bc_gmm_rnn`, and `3: bc_gmm_transformer`. Each child sees its selected physical mask as logical `npu:0`, matching the repository device helper. Use `--sequential-eval` only as a diagnostic fallback. Resume remains safe: completed policy/state pairs are validated and skipped independently by all workers.
+
 Use `--run-dir <existing-run>` to resume. Do not pass `--force-rebuild` or `--force-eval` unless intentional recomputation is desired. A smoke run and formal run must use separate newly created timestamp directories.
 
 When all 400 pairs are valid, inspect:

@@ -3,6 +3,7 @@
 
 import argparse
 import copy
+import os
 import sys
 import time
 import traceback
@@ -21,7 +22,7 @@ from utils.env_utils import (
 )
 from utils.policy_loader import load_policy, release_policy, select_device, set_policy_sampling_seed
 from utils.result_utils import (
-    POLICY_ORDER, atomic_json, atomic_npz, load_state_bank_file, read_json,
+    POLICY_ORDER, atomic_json, atomic_npz, collect_episode_records, load_state_bank_file, read_json,
     rebuild_result_tables, validate_trajectory,
 )
 
@@ -101,7 +102,7 @@ def rollout(policy, env, initial_observation, horizon, terminate_on_success, sav
     }
 
 
-def evaluate(config_path, run_dir, force_eval=False):
+def evaluate(config_path, run_dir, force_eval=False, policy_names=None, defer_aggregate=False):
     config = read_json(config_path)
     run_dir = Path(run_dir)
     seed_manifest = read_json(run_dir / "seed_manifest.json")
@@ -111,12 +112,18 @@ def evaluate(config_path, run_dir, force_eval=False):
         raise RuntimeError("Initial-state manifest and seed manifest have different lengths")
     horizon = int(config["horizon"])
     trajectory_cfg = config["trajectory"]
+    policy_names = list(POLICY_ORDER if policy_names is None else policy_names)
+    invalid = [name for name in policy_names if name not in POLICY_ORDER]
+    if invalid or not policy_names or len(set(policy_names)) != len(policy_names):
+        raise ValueError(f"Invalid or duplicate policy selection: {policy_names}")
     device = select_device()
-    print(f"Evaluation device: {device}", flush=True)
+    visible_device = os.environ.get("ASCEND_RT_VISIBLE_DEVICES", "<unset>")
+    print(f"Evaluation device: {device} (ASCEND_RT_VISIBLE_DEVICES={visible_device})", flush=True)
+    print(f"Selected policies: {policy_names}", flush=True)
 
     env, _ = create_dataset_environment(config["dataset_path"])
     try:
-        for policy_name in POLICY_ORDER:
+        for policy_name in policy_names:
             checkpoint_path = config["policies"][policy_name]["checkpoint_path"]
             print(f"Loading policy {policy_name}: {checkpoint_path}", flush=True)
             policy, _, _ = load_policy(policy_name, checkpoint_path, device=device)
@@ -135,6 +142,7 @@ def evaluate(config_path, run_dir, force_eval=False):
                         "policy_name": policy_name,
                         "checkpoint_path": checkpoint_path,
                         "state_hash": entry["state_hash"],
+                        "worker_visible_device": visible_device,
                     }
                     try:
                         # Seed before reset_to: robosuite's XML restoration performs an
@@ -191,14 +199,22 @@ def evaluate(config_path, run_dir, force_eval=False):
                         atomic_json(result_path, error)
                         print(f"[eval {policy_name} {ordinal:03d}/{len(entries):03d}] ERROR: {exc}", flush=True)
                     finally:
-                        rebuild_result_tables(run_dir)
+                        if not defer_aggregate:
+                            rebuild_result_tables(run_dir)
             finally:
                 release_policy(policy)
     finally:
         close_environment(env)
-    completed, errors = rebuild_result_tables(run_dir)
-    expected = len(entries) * len(POLICY_ORDER)
-    print(f"Evaluation records: complete={len(completed)}/{expected}, errors={len(errors)}")
+    if defer_aggregate:
+        records = [row for row in collect_episode_records(run_dir) if row.get("policy_name") in policy_names]
+        completed = [row for row in records if row.get("status") == "complete"]
+        errors = [row for row in records if row.get("status") == "error"]
+    else:
+        completed, errors = rebuild_result_tables(run_dir)
+        completed = [row for row in completed if row.get("policy_name") in policy_names]
+        errors = [row for row in errors if row.get("policy_name") in policy_names]
+    expected = len(entries) * len(policy_names)
+    print(f"Worker records: complete={len(completed)}/{expected}, errors={len(errors)}")
 
 
 def main():
@@ -206,8 +222,13 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--force-eval", action="store_true")
+    parser.add_argument("--policy", action="append", choices=POLICY_ORDER, dest="policies")
+    parser.add_argument("--defer-aggregate", action="store_true")
     args = parser.parse_args()
-    evaluate(args.config, args.run_dir, args.force_eval)
+    evaluate(
+        args.config, args.run_dir, args.force_eval,
+        policy_names=args.policies, defer_aggregate=args.defer_aggregate,
+    )
 
 
 if __name__ == "__main__":
