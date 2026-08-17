@@ -350,7 +350,7 @@ def run_validation_subprocess(config_path, run_dir, log_handle, device_mask=None
     command = [
         sys.executable, "-u", str(EXPERIMENT_DIR / "launch.py"),
         "--stage", "validate", "--config", str(config_path),
-        "--run-dir", str(run_dir),
+        "--run-dir", str(run_dir), "--internal-hard-exit-after-validate",
     ]
     environment = os.environ.copy()
     if device_mask is not None:
@@ -365,11 +365,21 @@ def run_validation_subprocess(config_path, run_dir, log_handle, device_mask=None
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1,
     )
+    validation_succeeded = False
+    success_marker = "Configuration, checkpoints, imports, metadata, observation specs, and policy inference: OK"
     for line in process.stdout:
+        if success_marker in line:
+            validation_succeeded = True
         write_logged(f"[validation] {line}", log_handle)
     return_code = process.wait()
     if return_code:
-        raise subprocess.CalledProcessError(return_code, command)
+        if validation_succeeded:
+            write_logged(
+                f"Validation checks passed; ignoring post-success native teardown exit code {return_code}.",
+                log_handle,
+            )
+        else:
+            raise subprocess.CalledProcessError(return_code, command)
 
 
 def run_stage(script_name, config_path, run_dir, num_seeds=None, force_flag=None, log_handle=None):
@@ -406,6 +416,10 @@ def main():
     parser.add_argument("--force-rebuild", action="store_true")
     parser.add_argument("--force-eval", action="store_true")
     parser.add_argument("--sequential-eval", action="store_true")
+    parser.add_argument(
+        "--internal-hard-exit-after-validate", action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     config_path = Path(args.config).expanduser().resolve()
     config = read_json(config_path)
@@ -436,6 +450,15 @@ def main():
                 )
         if args.stage == "validate":
             validate_config(config)
+            if args.internal_hard_exit_after_validate:
+                print(
+                    "Validation subprocess completed; using immediate process exit to avoid native teardown hooks.",
+                    flush=True,
+                )
+                log_handle.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(0)
         elif args.stage in ("build", "eval", "all"):
             validation_mask = devices[0] if parallel_enabled and devices else None
             run_validation_subprocess(copied_config, run_dir, log_handle, validation_mask)
