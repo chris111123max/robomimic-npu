@@ -14,7 +14,11 @@ EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
-from utils.env_utils import close_environment, create_dataset_environment, restore_and_verify, task_succeeded
+from utils.env_utils import (
+    close_environment, create_dataset_environment,
+    deterministic_environment_stream_seed, restore_and_verify,
+    seed_environment, task_succeeded,
+)
 from utils.policy_loader import load_policy, release_policy, select_device, set_policy_sampling_seed
 from utils.result_utils import (
     POLICY_ORDER, atomic_json, atomic_npz, load_state_bank_file, read_json,
@@ -138,6 +142,12 @@ def evaluate(config_path, run_dir, force_eval=False):
                         # same per-initial-condition environment RNG stream.
                         policy_seed = set_policy_sampling_seed(
                             seed_manifest["meta_seed"], policy_name, state_id,
+                        )
+                        seed_environment(
+                            env,
+                            deterministic_environment_stream_seed(
+                                seed_manifest["meta_seed"], state_id,
+                            ),
                         )
                         state_path = run_dir / entry["state_file"]
                         state, saved_observation = load_state_bank_file(state_path)

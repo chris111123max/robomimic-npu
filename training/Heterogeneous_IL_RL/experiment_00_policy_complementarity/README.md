@@ -16,7 +16,9 @@ Every policy later starts by loading the same file and calling `EnvRobosuite.res
 
 - the persisted full-state, state-vector, and observation hashes against the manifest;
 - exact equality of the restored simulator state vector;
-- exact equality of the restored low-dimensional observation hash.
+- exact equality of the restored hash for all seven observation keys declared by the checkpoints.
+
+State-bank construction compares two independently repeated `reset_to` operations, both started from the same deterministic environment RNG stream. It intentionally does not require every extra diagnostic observation returned by the raw environment (such as unused joint velocities or site quaternions) to match the transient cache produced by the preceding random `reset()`. Those fields are not policy inputs. The policy adapter filters inputs to the checkpoint-declared keys, while trajectories may retain the full raw low-dimensional environment observation for later diagnostics.
 
 This includes TwoArmTransport model randomization encoded in model XML and `ep_meta`; raw qpos/qvel are not manipulated directly. State-bank and manifest writes are atomic and resumable.
 

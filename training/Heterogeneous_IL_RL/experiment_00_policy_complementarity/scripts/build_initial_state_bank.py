@@ -68,9 +68,10 @@ def build(config_path, run_dir, num_seeds=None, force_rebuild=False):
 
     # This stage runs in a fresh subprocess and has not loaded a RolloutPolicy.
     # EnvRobosuite.get_observation still requires the global ObsUtils registry.
-    initialize_observation_utils_from_checkpoint(
+    reference_checkpoint = initialize_observation_utils_from_checkpoint(
         config["policies"]["bc"]["checkpoint_path"]
     )
+    observation_keys = list(reference_checkpoint["shape_metadata"]["all_shapes"].keys())
     env, env_metadata = create_dataset_environment(config["dataset_path"])
     if env_metadata["env_name"] != config["expected_environment_name"]:
         raise RuntimeError(f"Dataset environment is {env_metadata['env_name']}, expected {config['expected_environment_name']}")
@@ -81,7 +82,13 @@ def build(config_path, run_dir, num_seeds=None, force_rebuild=False):
             if not force_rebuild and old and state_path.exists() and validate_state_bank_file(state_path, old):
                 print(f"[build {state_id + 1:03d}/{count:03d}] valid, skipping {state_path.name}", flush=True)
                 continue
-            state, observation = capture_initial_condition(env, environment_seed)
+            state, observation = capture_initial_condition(
+                env=env,
+                environment_seed=environment_seed,
+                meta_seed=seed_manifest["meta_seed"],
+                initial_state_id=state_id,
+                observation_keys=observation_keys,
+            )
             arrays = {
                 "model": np.asarray(state["model"]),
                 "states": np.asarray(state["states"]),
@@ -96,7 +103,10 @@ def build(config_path, run_dir, num_seeds=None, force_rebuild=False):
                 "state_file": str(state_path.relative_to(run_dir)),
                 "state_hash": simulator_state_hash(state),
                 "state_vector_hash": state_vector_hash(state["states"]),
-                "observation_hash": observation_hash(observation),
+                "verified_observation_keys": observation_keys,
+                "observation_hash": observation_hash(
+                    {key: observation[key] for key in observation_keys}
+                ),
             }
             entries[state_id] = entry
             payload = {

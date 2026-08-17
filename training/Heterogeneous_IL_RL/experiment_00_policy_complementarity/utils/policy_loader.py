@@ -11,6 +11,8 @@ import torch
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
 
+from utils.env_utils import deterministic_environment_stream_seed
+
 
 class UnifiedRolloutPolicy:
     """Native RolloutPolicy plus checkpoint-defined frame-stack semantics.
@@ -22,9 +24,10 @@ class UnifiedRolloutPolicy:
     persisted trajectories as raw low-dimensional observations.
     """
 
-    def __init__(self, rollout_policy, frame_stack):
+    def __init__(self, rollout_policy, frame_stack, observation_keys):
         self.rollout_policy = rollout_policy
         self.frame_stack = int(frame_stack)
+        self.observation_keys = tuple(observation_keys)
         self._history = None
 
     @property
@@ -36,6 +39,10 @@ class UnifiedRolloutPolicy:
         self._history = None
 
     def _stack_observation(self, observation):
+        missing = [key for key in self.observation_keys if key not in observation]
+        if missing:
+            raise RuntimeError(f"Environment is missing policy observations: {missing}")
+        observation = {key: observation[key] for key in self.observation_keys}
         if self.frame_stack <= 1:
             return observation
         if self._history is None:
@@ -108,7 +115,10 @@ def load_policy(policy_name, checkpoint_path, device=None):
                 f"{policy_name} transformer context_length={context_length} but "
                 f"train.frame_stack={frame_stack}"
             )
-    policy = UnifiedRolloutPolicy(native_policy, frame_stack=frame_stack)
+    observation_keys = list(checkpoint["shape_metadata"]["all_shapes"].keys())
+    policy = UnifiedRolloutPolicy(
+        native_policy, frame_stack=frame_stack, observation_keys=observation_keys,
+    )
     return policy, checkpoint, device
 
 
@@ -116,8 +126,7 @@ def set_policy_sampling_seed(meta_seed, policy_name, initial_state_id):
     # Python / NumPy are shared with robosuite, so give every policy the same
     # per-initial-condition environment stream. Torch drives native GMM sampling
     # and receives a separate, order-independent per-policy stream.
-    environment_material = f"{int(meta_seed)}:environment:{int(initial_state_id)}".encode("utf-8")
-    environment_seed = int.from_bytes(hashlib.sha256(environment_material).digest()[:4], "little") & 0x7FFFFFFF
+    environment_seed = deterministic_environment_stream_seed(meta_seed, initial_state_id)
     policy_material = f"{int(meta_seed)}:{policy_name}:{int(initial_state_id)}".encode("utf-8")
     policy_seed = int.from_bytes(hashlib.sha256(policy_material).digest()[:4], "little") & 0x7FFFFFFF
     random.seed(environment_seed)

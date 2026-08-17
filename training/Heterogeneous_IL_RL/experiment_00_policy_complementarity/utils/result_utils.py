@@ -127,10 +127,14 @@ def validate_state_bank_file(path, expected):
         state, observation = load_state_bank_file(path)
     except Exception:
         return False
+    observation_keys = expected.get("verified_observation_keys", sorted(observation))
+    if any(key not in observation for key in observation_keys):
+        return False
+    verified_observation = {key: observation[key] for key in observation_keys}
     return (
         simulator_state_hash(state) == expected["state_hash"]
         and state_vector_hash(state["states"]) == expected["state_vector_hash"]
-        and observation_hash(observation) == expected["observation_hash"]
+        and observation_hash(verified_observation) == expected["observation_hash"]
     )
 
 

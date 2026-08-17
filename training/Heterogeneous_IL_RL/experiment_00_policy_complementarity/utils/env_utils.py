@@ -1,6 +1,7 @@
 """Environment creation, seeding, and strict state-bank restoration."""
 
 import copy
+import hashlib
 import random
 
 import numpy as np
@@ -57,18 +58,47 @@ def seed_environment(env, seed):
                 pass
 
 
-def capture_initial_condition(env, environment_seed):
+def deterministic_environment_stream_seed(meta_seed, initial_state_id):
+    material = f"{int(meta_seed)}:environment:{int(initial_state_id)}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(material).digest()[:4], "little") & 0x7FFFFFFF
+
+
+def select_observation_keys(observation, observation_keys):
+    missing = [key for key in observation_keys if key not in observation]
+    if missing:
+        raise RuntimeError(f"Restored environment is missing policy observations: {missing}")
+    return {key: observation[key] for key in observation_keys}
+
+
+def capture_initial_condition(
+    env, environment_seed, meta_seed, initial_state_id, observation_keys,
+):
     seed_environment(env, environment_seed)
-    observation = env.reset()
+    env.reset()
     state = env.get_state()
-    # A restore immediately after capture ensures the persisted representation is usable.
-    restored_observation = env.reset_to(state)
-    restored_state = env.get_state()
-    if not np.array_equal(np.asarray(state["states"]), np.asarray(restored_state["states"])):
-        raise RuntimeError("EnvRobosuite reset_to did not exactly restore the simulator state vector")
-    if observation_hash(observation) != observation_hash(restored_observation):
-        raise RuntimeError("EnvRobosuite reset_to did not reproduce the initial low-dimensional observation")
-    return state, restored_observation
+    restore_seed = deterministic_environment_stream_seed(meta_seed, initial_state_id)
+
+    # Compare two independent official restore operations. The observation made
+    # by the original random reset can contain transient observable caches that
+    # reset_to legitimately reconstructs differently; every evaluated policy
+    # starts through reset_to, so restore-to-restore reproducibility is the
+    # relevant paired condition.
+    restored_observations = []
+    for _ in range(2):
+        seed_environment(env, restore_seed)
+        restored_observation = env.reset_to(state)
+        restored_state = env.get_state()
+        if not np.array_equal(np.asarray(state["states"]), np.asarray(restored_state["states"])):
+            raise RuntimeError("EnvRobosuite reset_to did not exactly restore the simulator state vector")
+        restored_observations.append(restored_observation)
+
+    first = select_observation_keys(restored_observations[0], observation_keys)
+    second = select_observation_keys(restored_observations[1], observation_keys)
+    if observation_hash(first) != observation_hash(second):
+        raise RuntimeError(
+            "Repeated reset_to calls did not reproduce the checkpoint observation keys"
+        )
+    return state, restored_observations[1]
 
 
 def restore_and_verify(env, state, saved_observation, manifest_entry):
@@ -77,14 +107,17 @@ def restore_and_verify(env, state, saved_observation, manifest_entry):
         raise RuntimeError("Persisted state hash does not match initial_state_manifest.json")
     if state_vector_hash(state["states"]) != manifest_entry["state_vector_hash"]:
         raise RuntimeError("Persisted simulator state-vector hash does not match manifest")
-    if observation_hash(saved_observation) != manifest_entry["observation_hash"]:
+    observation_keys = manifest_entry.get("verified_observation_keys", sorted(saved_observation))
+    saved_policy_observation = select_observation_keys(saved_observation, observation_keys)
+    if observation_hash(saved_policy_observation) != manifest_entry["observation_hash"]:
         raise RuntimeError("Persisted initial observation hash does not match manifest")
 
     restored_observation = env.reset_to(state)
     restored_state = env.get_state()
     if not np.array_equal(np.asarray(state["states"]), np.asarray(restored_state["states"])):
         raise RuntimeError("Simulator state vector differs immediately after reset_to")
-    restored_observation_hash = observation_hash(restored_observation)
+    restored_policy_observation = select_observation_keys(restored_observation, observation_keys)
+    restored_observation_hash = observation_hash(restored_policy_observation)
     if restored_observation_hash != manifest_entry["observation_hash"]:
         raise RuntimeError("Environment observation differs immediately after reset_to")
     return restored_observation
