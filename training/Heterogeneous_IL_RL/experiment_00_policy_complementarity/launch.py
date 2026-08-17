@@ -178,7 +178,8 @@ def validate_config(config):
                 print(f"  checkpoint          : {checkpoint_path}")
                 print(f"  environment         : {metadata['environment_name']}")
                 print(f"  observation keys    : {metadata['observation_keys']}")
-                print(f"  policy class        : {policy.policy.__class__.__name__}")
+                print(f"  policy class        : {policy.policy_class_name}")
+                print(f"  frame stack         : {policy.frame_stack}")
                 print(f"  action shape        : {tuple(action.shape)}")
             finally:
                 release_policy(policy)
