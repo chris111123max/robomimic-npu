@@ -89,6 +89,12 @@ def load_trajectory(path):
         }
 
 
+def trajectory_length(path):
+    """Read only the action length for fast crash-resume validation."""
+    with np.load(path, allow_pickle=False) as archive:
+        return int(archive["actions"].shape[0])
+
+
 def save_branch_state(path, state, observation, rng_state, original_action, branch_step, metadata):
     names = sorted(observation)
     arrays = {

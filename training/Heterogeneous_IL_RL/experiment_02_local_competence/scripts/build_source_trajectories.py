@@ -23,7 +23,7 @@ from utils.rng_utils import capture_rng_state, seed_policy_rng
 from utils.state_utils import (copy_observation, load_exp00_state, observation_hash,
                                branch_file_valid, load_trajectory, save_branch_state,
                                save_trajectory, simulator_state_hash,
-                               state_vector_hash)
+                               state_vector_hash, trajectory_length)
 
 
 SUMMARY_FIELDS = ["initial_state_id", "environment_seed", "direction", "source_policy", "target_policy",
@@ -70,8 +70,7 @@ def _valid_complete(row, run_dir, branch_steps):
     if row["status"] != "complete":
         return False
     try:
-        trajectory = load_trajectory(run_dir / row["trajectory_path"])
-        if len(trajectory["actions"]) != int(row["episode_length"]):
+        if trajectory_length(run_dir / row["trajectory_path"]) != int(row["episode_length"]):
             return False
         for step in branch_steps:
             if step < int(row["episode_length"]):

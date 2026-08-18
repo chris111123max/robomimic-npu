@@ -20,7 +20,7 @@ from utils.exp00_reader import RNN, TRANSFORMER
 from utils.policy_loader import load_policy, release_policy, select_device
 from utils.result_utils import atomic_csv, read_csv, read_json, stable_seed
 from utils.rng_utils import seed_policy_rng
-from utils.state_utils import load_exp00_state, load_trajectory, save_trajectory
+from utils.state_utils import load_exp00_state, load_trajectory, save_trajectory, trajectory_length
 
 
 FIELDS = ["initial_state_id", "environment_seed", "direction", "policy_name", "trial_index",
@@ -64,8 +64,7 @@ def _valid_rows(path, run_dir):
     rows = []
     for row in read_csv(path):
         try:
-            trajectory = load_trajectory(run_dir / row["trajectory_path"])
-            if len(trajectory["actions"]) == int(row["episode_length"]):
+            if trajectory_length(run_dir / row["trajectory_path"]) == int(row["episode_length"]):
                 rows.append(row)
         except Exception:
             pass
