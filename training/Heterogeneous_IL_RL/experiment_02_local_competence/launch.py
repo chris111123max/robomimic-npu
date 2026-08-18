@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,7 @@ sys.path.insert(0, str(EXPERIMENT_DIR))
 from utils.result_utils import atomic_json, ensure_dirs, read_json
 
 DEFAULT_CONFIG = EXPERIMENT_DIR / "config" / "experiment_config.json"
-STAGES = ("validate", "select", "recheck", "build", "reconstruct", "branch", "analyze", "all")
+STAGES = ("validate", "select", "recheck", "build", "reconstruct", "branch", "analyze", "resume", "all")
 
 
 def canonical(value):
@@ -125,6 +126,126 @@ def preflight_devices(config, log_handle):
     return masks
 
 
+def run_sharded_stage_workers(stage, script, config_path, run_dir, config, log_handle,
+                              common_extra=(), force=False):
+    """Run one independent process per NPU and aggregate only after all workers exit."""
+    masks = preflight_devices(config, log_handle)
+    count = int(config["num_workers"])
+    assignments = [
+        {"worker_id": worker_id, "mask": masks[worker_id],
+         "shard_index": worker_id, "shard_count": count}
+        for worker_id in range(count)
+    ]
+    assignment_roots = {
+        "recheck": run_dir / "recheck/workers",
+        "build": run_dir / "source_trajectories/workers",
+        "reconstruct": run_dir / "reconstruction/workers",
+    }
+    assignment_root = assignment_roots[stage]
+    assignment_root.mkdir(parents=True, exist_ok=True)
+    atomic_json(assignment_root / "worker_assignment.json", assignments)
+    print(f"[{stage}] launching {count} NPU workers: {assignments}", flush=True)
+
+    processes, output_handles, tail_threads, stop_events = [], [], [], []
+    log_lock = threading.Lock()
+
+    def tail_worker(path, offset, assignment, stop_event):
+        with path.open("r", encoding="utf-8", errors="replace") as source:
+            source.seek(offset)
+            while True:
+                line = source.readline()
+                if line:
+                    tagged = (
+                        f"[{stage}-worker-{assignment['worker_id']}|mask-{assignment['mask']}] {line}"
+                    )
+                    print(tagged, end="", flush=True)
+                    with log_lock:
+                        log_handle.write(tagged)
+                        log_handle.flush()
+                    continue
+                if stop_event.is_set():
+                    break
+                stop_event.wait(0.2)
+
+    try:
+        for assignment in assignments:
+            command = [
+                sys.executable, "-u", str(EXPERIMENT_DIR / "scripts" / script),
+                "--config", str(config_path), "--run-dir", str(run_dir),
+                *map(str, common_extra),
+                "--worker-id", str(assignment["worker_id"]),
+                "--shard-index", str(assignment["shard_index"]),
+                "--shard-count", str(assignment["shard_count"]),
+            ]
+            if force:
+                command.append("--force")
+            env = os.environ.copy()
+            env["ASCEND_RT_VISIBLE_DEVICES"] = assignment["mask"]
+            worker_log_path = run_dir / "logs" / f"{stage}_worker_{assignment['worker_id']}.log"
+            offset = worker_log_path.stat().st_size if worker_log_path.exists() else 0
+            output = worker_log_path.open("a", encoding="utf-8")
+            output_handles.append(output)
+            print("Command:", " ".join(command), flush=True)
+            process = subprocess.Popen(
+                command, cwd=str(EXPERIMENT_DIR), env=env,
+                stdout=output, stderr=subprocess.STDOUT, text=True,
+            )
+            processes.append((assignment, process))
+            stop_event = threading.Event()
+            stop_events.append(stop_event)
+            thread = threading.Thread(
+                target=tail_worker,
+                args=(worker_log_path, offset, assignment, stop_event),
+                daemon=True,
+            )
+            thread.start()
+            tail_threads.append(thread)
+
+        remaining = {process.pid: (assignment, process) for assignment, process in processes}
+        failures = []
+        while remaining:
+            for pid, (assignment, process) in list(remaining.items()):
+                code = process.poll()
+                if code is None:
+                    continue
+                remaining.pop(pid)
+                if code:
+                    failures.append((assignment["worker_id"], code))
+            if failures:
+                for _, process in remaining.values():
+                    if process.poll() is None:
+                        process.terminate()
+                for _, process in remaining.values():
+                    process.wait()
+                break
+            if remaining:
+                time.sleep(0.2)
+    except BaseException:
+        for _, process in processes:
+            if process.poll() is None:
+                process.terminate()
+        for _, process in processes:
+            if process.poll() is None:
+                process.wait()
+        raise
+    finally:
+        for output in output_handles:
+            output.flush()
+            output.close()
+        for stop_event in stop_events:
+            stop_event.set()
+        for thread in tail_threads:
+            thread.join(timeout=5)
+
+    if failures:
+        raise RuntimeError(f"{stage} worker failures: {failures}")
+
+    aggregate_extra = [*common_extra, "--aggregate-only"]
+    if force:
+        aggregate_extra.append("--force")
+    run_script(script, config_path, run_dir, config, log_handle, extra=aggregate_extra)
+
+
 def run_branch_workers(config_path, run_dir, config, log_handle, force):
     reconstruction = read_json(run_dir / "reconstruction/reconstruction_summary.json")
     if not reconstruction.get("branch_evaluation_allowed"):
@@ -196,7 +317,12 @@ def main():
     print(f"Steps      : {config['branch_steps']}\nRecheck K  : {config['recheck_repeats']}\nBranch K   : {config['branch_repeats']}")
     print("=" * 84, flush=True)
     with (run_dir / "logs/experiment.log").open("a", encoding="utf-8") as log:
-        stages = ("validate", "select", "recheck", "build", "reconstruct", "branch", "analyze") if args.stage == "all" else (args.stage,)
+        if args.stage == "all":
+            stages = ("validate", "select", "recheck", "build", "reconstruct", "branch", "analyze")
+        elif args.stage == "resume":
+            stages = ("recheck", "build", "reconstruct", "branch", "analyze")
+        else:
+            stages = (args.stage,)
         for stage in stages:
             print(f"\n===== STAGE {stage.upper()} =====", flush=True)
             if stage == "validate":
@@ -207,16 +333,22 @@ def main():
                 run_script("select_cross_success_cases.py", config_path, run_dir, config, log, extra)
             elif stage == "recheck":
                 extra = ["--source-run", config["source_run"], "--repeats", config["recheck_repeats"]]
-                if args.force_recheck: extra.append("--force")
-                run_script("recheck_selected_cases.py", config_path, run_dir, config, log, extra, config["npu_masks"][0])
+                run_sharded_stage_workers(
+                    "recheck", "recheck_selected_cases.py", config_path, run_dir, config, log,
+                    extra, args.force_recheck,
+                )
             elif stage == "build":
                 extra = ["--source-run", config["source_run"], "--branch-steps", ",".join(map(str, config["branch_steps"]))]
-                if args.force_source_trajectories: extra.append("--force")
-                run_script("build_source_trajectories.py", config_path, run_dir, config, log, extra, config["npu_masks"][0])
+                run_sharded_stage_workers(
+                    "build", "build_source_trajectories.py", config_path, run_dir, config, log,
+                    extra, args.force_source_trajectories,
+                )
             elif stage == "reconstruct":
                 extra = ["--branch-steps", ",".join(map(str, config["branch_steps"]))]
-                if args.force_reconstruction: extra.append("--force")
-                run_script("validate_branch_reconstruction.py", config_path, run_dir, config, log, extra, config["npu_masks"][0])
+                run_sharded_stage_workers(
+                    "reconstruct", "validate_branch_reconstruction.py", config_path, run_dir, config, log,
+                    extra, args.force_reconstruction,
+                )
             elif stage == "branch":
                 run_branch_workers(config_path, run_dir, config, log, args.force_branch_eval)
             elif stage == "analyze":

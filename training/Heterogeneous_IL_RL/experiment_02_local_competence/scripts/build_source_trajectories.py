@@ -64,41 +64,90 @@ def run_source(policy, env, observation, horizon, branch_steps):
             "rewards": rewards, "dones": dones, "successes": successes, "branches": branches}
 
 
-def build(config_path, run_dir, source_run, branch_steps, force=False):
+def _valid_complete(row, run_dir, branch_steps):
+    if row["status"] == "source_failure_not_reproduced":
+        return True
+    if row["status"] != "complete":
+        return False
+    try:
+        trajectory = load_trajectory(run_dir / row["trajectory_path"])
+        if len(trajectory["actions"]) != int(row["episode_length"]):
+            return False
+        for step in branch_steps:
+            if step < int(row["episode_length"]):
+                path = (
+                    run_dir / "branch_states" / row["direction"].lower()
+                    / f"state_{int(row['initial_state_id']):06d}_step_{step:03d}.npz"
+                )
+                if not branch_file_valid(path, step):
+                    return False
+        return True
+    except Exception:
+        return False
+
+
+def _valid_rows(path, run_dir, branch_steps):
+    if not path.exists():
+        return []
+    return [row for row in read_csv(path) if _valid_complete(row, run_dir, branch_steps)]
+
+
+def aggregate(run_dir, branch_steps, force=False):
+    run_dir = Path(run_dir)
+    cases = sorted(read_csv(run_dir / "recheck/case_summary.csv"), key=lambda row: int(row["initial_state_id"]))
+    summary_path = run_dir / "source_trajectories/source_trajectory_summary.csv"
+    candidates = [] if force else _valid_rows(summary_path, run_dir, branch_steps)
+    for path in sorted((run_dir / "source_trajectories/workers").glob("worker_*_summary.csv")):
+        candidates.extend(_valid_rows(path, run_dir, branch_steps))
+    merged = {int(row["initial_state_id"]): row for row in candidates}
+    if len(merged) != len(cases):
+        raise RuntimeError(
+            f"Source trajectory aggregation is incomplete: {len(merged)}/{len(cases)} cases"
+        )
+    rows = [merged[int(case["initial_state_id"])] for case in cases]
+    atomic_csv(summary_path, SUMMARY_FIELDS, rows)
+    complete = sum(row["status"] == "complete" for row in rows)
+    missing = sum(row["status"] == "source_failure_not_reproduced" for row in rows)
+    print(
+        f"[build] aggregate complete cases={len(rows)}, trajectories={complete}, "
+        f"source_failure_not_reproduced={missing}",
+        flush=True,
+    )
+
+
+def build(config_path, run_dir, source_run, branch_steps, force=False,
+          worker_id=0, shard_index=0, shard_count=1):
     config, run_dir = read_json(config_path), Path(run_dir)
-    cases = read_csv(run_dir / "recheck/case_summary.csv")
+    cases = sorted(read_csv(run_dir / "recheck/case_summary.csv"), key=lambda row: int(row["initial_state_id"]))
+    if not 0 <= int(shard_index) < int(shard_count):
+        raise ValueError("shard-index must satisfy 0 <= shard-index < shard-count")
+    assigned_cases = cases[int(shard_index)::int(shard_count)]
     rechecks = read_csv(run_dir / "recheck/raw_trials.csv")
     source_manifest = read_json(Path(source_run) / "initial_state_manifest.json")
     seed_manifest = read_json(Path(source_run) / "seed_manifest.json")
     entries = {int(row["initial_state_id"]): row for row in source_manifest["states"]}
     summary_path = run_dir / "source_trajectories/source_trajectory_summary.csv"
-    summary = [] if force or not summary_path.exists() else read_csv(summary_path)
-    def valid_complete(row):
-        if row["status"] == "source_failure_not_reproduced":
-            return True
-        if row["status"] != "complete":
-            return False
-        try:
-            trajectory = load_trajectory(run_dir / row["trajectory_path"])
-            if len(trajectory["actions"]) != int(row["episode_length"]):
-                return False
-            for step in branch_steps:
-                if step < int(row["episode_length"]):
-                    path = run_dir / "branch_states" / row["direction"].lower() / f"state_{int(row['initial_state_id']):06d}_step_{step:03d}.npz"
-                    if not branch_file_valid(path, step):
-                        return False
-            return True
-        except Exception:
-            return False
-    summary = [row for row in summary if valid_complete(row)]
-    done = {int(row["initial_state_id"]) for row in summary}
+    worker_path = run_dir / "source_trajectories/workers" / f"worker_{int(worker_id)}_summary.csv"
+    baseline = [] if force else _valid_rows(summary_path, run_dir, branch_steps)
+    local_rows = [] if force else _valid_rows(worker_path, run_dir, branch_steps)
+    done = {int(row["initial_state_id"]) for row in baseline + local_rows}
+    if force:
+        atomic_csv(worker_path, SUMMARY_FIELDS, [])
+    pending = sum(int(case["initial_state_id"]) not in done for case in assigned_cases)
+    print(
+        f"[build worker={worker_id}] shard={shard_index}/{shard_count} "
+        f"cases={len(assigned_cases)} pending_cases={pending}",
+        flush=True,
+    )
+    if pending == 0:
+        return
     initialize_observation_utils(config["policies"][RNN]["checkpoint_path"])
     env, _ = create_environment(config["dataset_path"]); device = select_device()
     try:
         for policy_name in (RNN, TRANSFORMER):
             policy, _, _ = load_policy(policy_name, config["policies"][policy_name]["checkpoint_path"], device)
             try:
-                for case in [c for c in cases if c["source_policy"] == policy_name]:
+                for case in [c for c in assigned_cases if c["source_policy"] == policy_name]:
                     sid = int(case["initial_state_id"])
                     if sid in done:
                         continue
@@ -162,16 +211,18 @@ def build(config_path, run_dir, source_run, branch_steps, force=False):
                                    "branch_states_saved": saved_count,
                                    "trajectory_path": str(trajectory_path.relative_to(run_dir)),
                                    "wall_time_seconds": time.monotonic() - started, "error_message": ""}
-                            print(f"[build] case {sid:06d} source policy={policy_name} failure trajectory "
-                                  f"found at {origin} trial={trial_index}; branch states={saved_count}")
+                            print(f"[build worker={worker_id}] case {sid:06d} source policy={policy_name} "
+                                  f"failure trajectory found at {origin} trial={trial_index}; "
+                                  f"branch states={saved_count}", flush=True)
                     except Exception as exc:
                         row = {**case, "status": "error", "source_trial_origin": "", "source_trial_index": "",
                                "policy_rng_seed": "", "episode_length": "", "episode_return": "",
                                "branch_states_saved": 0, "trajectory_path": "",
                                "wall_time_seconds": time.monotonic() - started,
                                "error_message": f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"}
-                    summary = [r for r in summary if int(r["initial_state_id"]) != sid] + [row]
-                    atomic_csv(summary_path, SUMMARY_FIELDS, sorted(summary, key=lambda r: int(r["initial_state_id"])))
+                    local_rows = [r for r in local_rows if int(r["initial_state_id"]) != sid] + [row]
+                    atomic_csv(worker_path, SUMMARY_FIELDS,
+                               sorted(local_rows, key=lambda r: int(r["initial_state_id"])))
                     if row["status"] == "error":
                         raise RuntimeError(row["error_message"])
             finally:
@@ -184,8 +235,18 @@ def main():
     parser = argparse.ArgumentParser(); parser.add_argument("--config", required=True)
     parser.add_argument("--run-dir", required=True); parser.add_argument("--source-run", required=True)
     parser.add_argument("--branch-steps", required=True); parser.add_argument("--force", action="store_true")
-    args = parser.parse_args(); build(args.config, args.run_dir, args.source_run,
-                                      [int(x) for x in args.branch_steps.split(",") if x], args.force)
+    parser.add_argument("--worker-id", type=int); parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1); parser.add_argument("--aggregate-only", action="store_true")
+    args = parser.parse_args()
+    steps = [int(x) for x in args.branch_steps.split(",") if x]
+    if args.aggregate_only:
+        aggregate(args.run_dir, steps, args.force)
+    else:
+        worker_id = 0 if args.worker_id is None else args.worker_id
+        build(args.config, args.run_dir, args.source_run, steps, args.force,
+              worker_id, args.shard_index, args.shard_count)
+        if args.worker_id is None:
+            aggregate(args.run_dir, steps, args.force)
 
 
 if __name__ == "__main__":

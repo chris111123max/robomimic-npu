@@ -53,18 +53,24 @@ branch state 保存官方 `EnvRobosuite.get_state()` 返回的完整 `model`、`
 
 ## 并行与续跑
 
-正式 branch stage 默认四个 worker：
+`recheck`、`build`、`reconstruct` 和 `branch` 默认都使用四个独立 worker，并分别绑定 config 中的四个 NPU mask。前三个阶段按 initial-state case 确定性分片；每个 worker 写自己的 CSV，全部 worker 正常退出后才由主进程原子聚合正式 CSV。这样既不并发改写同一个表，也可以复用旧版单进程已经写入的正式 CSV。
+
+branch stage 的策略分片为：
 
 - worker 0 / mask 0：RNN，shard 0；
 - worker 1 / mask 1：Transformer，shard 0；
 - worker 2 / mask 2：RNN，shard 1；
 - worker 3 / mask 3：Transformer，shard 1。
 
-mask 是 `ASCEND_RT_VISIBLE_DEVICES` 的可见设备 mask，不假定 `npu-smi` 的物理编号为 0–3。每个 worker 只加载一次 checkpoint，只写自己的 JSONL；主进程结束后统一聚合，避免并发 append 同一 CSV。
+mask 是 `ASCEND_RT_VISIBLE_DEVICES` 的可见设备 mask，不假定 `npu-smi` 的物理编号为 0–3。每个 worker 在自己的进程中创建环境并加载 checkpoint；主进程结束后统一聚合，避免并发 append 同一 CSV。
 
-同一 `--run-dir` 自动 resume。完整 trial 的唯一键为 `(initial_state_id, direction, branch_step, evaluated_policy, trial_index)`。重要 JSON/CSV/NPZ 使用临时文件、flush/fsync 和原子 replace。可分别使用：
+同一 `--run-dir` 自动 resume。recheck 的唯一键为 `(initial_state_id, policy_name, trial_index)`，build 为 `initial_state_id`，reconstruct 为 `(initial_state_id, branch_step)`，branch 为 `(initial_state_id, direction, branch_step, evaluated_policy, trial_index)`。worker 启动时同时读取正式聚合表和自己的分片表，因此中断只会重跑尚未完整落盘的当前任务。重要 JSON/CSV/NPZ 使用临时文件、flush/fsync 和原子 replace。可分别使用：
 
 `--force-recheck`、`--force-source-trajectories`、`--force-reconstruction`、`--force-branch-eval`、`--force-analysis`。
+
+四卡阶段的实时日志位于 `logs/<stage>_worker_<id>.log`；worker 分配表位于对应阶段的 `workers/worker_assignment.json`。recheck 运行期间的新增进度先写入 `recheck/workers/worker_<id>_trials.csv`，阶段完成后才合并回 `recheck/raw_trials.csv`。
+
+已完成 validate/select 的正式 run 可以用 `--stage resume --run-dir <原目录> --config <原目录>/config.json` 从 recheck 自动续跑到最终 analyze；它会校验并复用正式表与各 worker 分片，不需要手工指定已经完成多少条。
 
 ## 输出
 
