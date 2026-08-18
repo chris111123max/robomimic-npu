@@ -47,7 +47,7 @@ RNN 的 action 依赖内部循环隐藏状态；Transformer checkpoint 使用与
 
 ## 状态与 RNG 语义
 
-branch state 保存官方 `EnvRobosuite.get_state()` 返回的完整 `model`、`states` 和 `ep_meta`，并保存 `obs_t`、原始 `action_t`、state/observation hash 与 branch-action 前 RNG。恢复使用官方 `reset_to()`，恢复后的完整 hash、state-vector hash 和 observation hash 必须一致；mismatch 是 runtime error，不是 task failure。
+branch state 保存官方 `EnvRobosuite.get_state()` 返回的完整 `model`、`states` 和 `ep_meta`，并保存 `obs_t`、原始 `action_t`、state/observation hash 与 branch-action 前 RNG。恢复使用官方 `reset_to()`；完整 simulator state hash 和 state-vector hash 必须严格一致。由恢复状态重新派生的 low-dimensional observation 必须逐 key、逐 shape、有限且与保存的 `obs_t` 在 `atol=1e-6, rtol=0` 内一致；第一次 policy 调用使用记录时的原始 `obs_t`，避免 MuJoCo `forward()` 重算派生量产生的微小浮点漂移。超过容差是 runtime error，不是 task failure。
 
 环境 RNG 与 policy RNG 分离。每次 `reset_to` 前设置固定的环境 Python/NumPy stream；环境恢复完成后只设置 Torch CPU/NPU policy stream，因此不同 branch repeat 不会重新随机物理环境。
 

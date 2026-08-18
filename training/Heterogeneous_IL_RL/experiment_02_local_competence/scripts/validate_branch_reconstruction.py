@@ -146,7 +146,10 @@ def reconstruct(config_path, run_dir, branch_steps, force=False,
                             if not branch_file_valid(branch_path, step):
                                 raise RuntimeError("Branch state file failed its persisted hash validation")
                             branch = load_branch_state(branch_path)
-                            _, restored_hash = restore_branch_state(env, branch)
+                            _, restored_hash = restore_branch_state(
+                                env, branch,
+                                observation_atol=float(config.get("observation_reconstruction_atol", 1e-6)),
+                            )
                             row["state_hash_match"] = int(restored_hash == branch["metadata"]["state_hash"])
                             history = reconstruct_before_action(policy, trajectory["observations"], step,
                                                                 rng_state=branch["rng_state"])

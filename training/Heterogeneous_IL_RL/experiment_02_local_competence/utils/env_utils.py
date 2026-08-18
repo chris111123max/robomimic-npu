@@ -6,7 +6,7 @@ import random
 
 import numpy as np
 
-from utils.state_utils import observation_hash, simulator_state_hash, state_vector_hash
+from utils.state_utils import copy_observation, observation_hash, simulator_state_hash, state_vector_hash
 
 
 def initialize_observation_utils(checkpoint_path):
@@ -52,7 +52,37 @@ def restore_initial_state(env, state, saved_observation, manifest_entry):
     return observation
 
 
-def restore_branch_state(env, branch):
+def _validate_restored_observation(expected, restored, atol):
+    expected_keys, restored_keys = set(expected), set(restored)
+    if expected_keys != restored_keys:
+        missing = sorted(expected_keys - restored_keys)
+        extra = sorted(restored_keys - expected_keys)
+        raise RuntimeError(
+            f"Branch restore observation keys mismatch: missing={missing}, extra={extra}"
+        )
+    worst_key, worst_error = None, 0.0
+    for key in sorted(expected_keys):
+        expected_value = np.asarray(expected[key])
+        restored_value = np.asarray(restored[key])
+        if expected_value.shape != restored_value.shape:
+            raise RuntimeError(
+                f"Branch restore observation shape mismatch for {key}: "
+                f"{restored_value.shape} != {expected_value.shape}"
+            )
+        if not np.all(np.isfinite(restored_value)):
+            raise RuntimeError(f"Branch restore observation contains non-finite values for {key}")
+        error = float(np.max(np.abs(expected_value - restored_value))) if expected_value.size else 0.0
+        if error > worst_error:
+            worst_key, worst_error = key, error
+        if not np.allclose(expected_value, restored_value, rtol=0.0, atol=float(atol)):
+            raise RuntimeError(
+                f"Branch restore observation mismatch for {key}: "
+                f"max_abs_error={error:.9g}, atol={float(atol):.9g}"
+            )
+    return worst_key, worst_error
+
+
+def restore_branch_state(env, branch, observation_atol=1e-6):
     expected_state = branch["state"]
     expected_hash = branch["metadata"]["state_hash"]
     if simulator_state_hash(expected_state) != expected_hash:
@@ -64,9 +94,13 @@ def restore_branch_state(env, branch):
         raise RuntimeError(f"Branch restore full-state hash mismatch: {restored_hash} != {expected_hash}")
     if state_vector_hash(restored["states"]) != branch["metadata"]["state_vector_hash"]:
         raise RuntimeError("Branch restore state-vector hash mismatch")
-    if observation_hash(observation) != branch["metadata"]["obs_hash"]:
-        raise RuntimeError("Branch restore observation hash mismatch")
-    return observation, restored_hash
+    saved_observation = branch["observation"]
+    if observation_hash(saved_observation) != branch["metadata"]["obs_hash"]:
+        raise RuntimeError("Persisted branch observation hash is corrupt")
+    _validate_restored_observation(saved_observation, observation, observation_atol)
+    # The branch condition explicitly includes the recorded obs_t. Use that exact
+    # observation for the first policy call after restoring the physical state.
+    return copy_observation(saved_observation), restored_hash
 
 
 def task_succeeded(env):
