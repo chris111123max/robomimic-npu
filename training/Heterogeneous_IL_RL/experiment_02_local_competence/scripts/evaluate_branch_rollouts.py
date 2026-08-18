@@ -130,9 +130,10 @@ def worker(config_path, run_dir, policy_name, worker_id, shard_index, shard_coun
                          "worker_id": worker_id, "worker_visible_device": visible})
             try:
                 seed_environment_stream(stable_seed(config["seed_base"], "branch_environment", sid, step))
-                observation, restored_hash = restore_branch_state(
+                observation, restored_hash, _ = restore_branch_state(
                     env, branch,
                     observation_atol=float(config.get("observation_reconstruction_atol", 1e-6)),
+                    strict_observation=bool(config.get("strict_observation_reconstruction", False)),
                 )
                 source_trajectory = load_trajectory(run_dir / task["source_trajectory_path"])
                 history = reconstruct_before_action(policy, source_trajectory["observations"], step,

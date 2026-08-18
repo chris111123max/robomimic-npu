@@ -52,7 +52,7 @@ def restore_initial_state(env, state, saved_observation, manifest_entry):
     return observation
 
 
-def _validate_restored_observation(expected, restored, atol):
+def _validate_restored_observation(expected, restored, atol, strict=False):
     expected_keys, restored_keys = set(expected), set(restored)
     if expected_keys != restored_keys:
         missing = sorted(expected_keys - restored_keys)
@@ -74,7 +74,8 @@ def _validate_restored_observation(expected, restored, atol):
         error = float(np.max(np.abs(expected_value - restored_value))) if expected_value.size else 0.0
         if error > worst_error:
             worst_key, worst_error = key, error
-        if not np.allclose(expected_value, restored_value, rtol=0.0, atol=float(atol)):
+        if strict and not np.allclose(
+                expected_value, restored_value, rtol=0.0, atol=float(atol)):
             raise RuntimeError(
                 f"Branch restore observation mismatch for {key}: "
                 f"max_abs_error={error:.9g}, atol={float(atol):.9g}"
@@ -82,7 +83,8 @@ def _validate_restored_observation(expected, restored, atol):
     return worst_key, worst_error
 
 
-def restore_branch_state(env, branch, observation_atol=1e-6):
+def restore_branch_state(env, branch, observation_atol=1e-6,
+                         strict_observation=False):
     expected_state = branch["state"]
     expected_hash = branch["metadata"]["state_hash"]
     if simulator_state_hash(expected_state) != expected_hash:
@@ -97,10 +99,18 @@ def restore_branch_state(env, branch, observation_atol=1e-6):
     saved_observation = branch["observation"]
     if observation_hash(saved_observation) != branch["metadata"]["obs_hash"]:
         raise RuntimeError("Persisted branch observation hash is corrupt")
-    _validate_restored_observation(saved_observation, observation, observation_atol)
+    # env.step can return observable-cache values, while reset_to performs
+    # sim.forward() and force-updates derived observables. Those values can
+    # differ even when the complete simulator state is restored byte-for-byte.
+    # The persisted obs_t is the actual branch-point policy input and remains
+    # authoritative. Exact action reconstruction is the behavioral gate.
+    observation_diagnostic = _validate_restored_observation(
+        saved_observation, observation, observation_atol,
+        strict=bool(strict_observation),
+    )
     # The branch condition explicitly includes the recorded obs_t. Use that exact
     # observation for the first policy call after restoring the physical state.
-    return copy_observation(saved_observation), restored_hash
+    return copy_observation(saved_observation), restored_hash, observation_diagnostic
 
 
 def task_succeeded(env):

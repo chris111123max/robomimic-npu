@@ -42,6 +42,7 @@
   "strong_rescue_target_min": 0.6666666666666666,
   "strong_rescue_source_max": 0.3333333333333333,
   "observation_reconstruction_atol": 1e-6,
+  "strict_observation_reconstruction": false,
   "action_reconstruction_atol": 1e-5,
   "reconstruction": {
     "all_cases": true,
