@@ -78,6 +78,39 @@ def run_script(script, config_path, run_dir, config, log_handle, extra=(), mask=
         raise subprocess.CalledProcessError(code, command)
 
 
+def run_validation_script(config_path, run_dir, config, log_handle):
+    """Run validation without PIPE so inherited CANN descriptors cannot stall EOF."""
+    command = [
+        sys.executable, "-u",
+        str(EXPERIMENT_DIR / "scripts" / "validate_inputs.py"),
+        "--config", str(config_path),
+        "--run-dir", str(run_dir),
+        "--source-run", str(config["source_run"]),
+    ]
+    environment = os.environ.copy()
+    environment["ASCEND_RT_VISIBLE_DEVICES"] = str(config["npu_masks"][0])
+    validation_log = Path(run_dir) / "logs" / "validation.log"
+    print("Command:", " ".join(command), flush=True)
+    with validation_log.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            command, cwd=str(EXPERIMENT_DIR), env=environment,
+            stdout=output, stderr=subprocess.STDOUT, text=True,
+        )
+        code = process.wait()
+    text = validation_log.read_text(encoding="utf-8", errors="replace")
+    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+    log_handle.write(text)
+    if text and not text.endswith("\n"):
+        log_handle.write("\n")
+    log_handle.flush()
+    marker = "VALIDATION COMPLETE"
+    if code or marker not in text:
+        raise RuntimeError(
+            f"Validation subprocess failed: return_code={code}, "
+            f"success_marker_present={marker in text}; see {validation_log}"
+        )
+
+
 def preflight_devices(config, log_handle):
     masks = [str(x) for x in config["npu_masks"][:int(config["num_workers"])]]
     result = subprocess.run(["npu-smi", "info"], text=True, stdout=subprocess.PIPE,
@@ -167,8 +200,7 @@ def main():
         for stage in stages:
             print(f"\n===== STAGE {stage.upper()} =====", flush=True)
             if stage == "validate":
-                run_script("validate_inputs.py", config_path, run_dir, config, log,
-                           ("--source-run", config["source_run"]), mask=config["npu_masks"][0])
+                run_validation_script(config_path, run_dir, config, log)
             elif stage == "select":
                 extra = ["--source-run", config["source_run"]]
                 if args.max_cases is not None: extra += ["--max-cases", args.max_cases]
