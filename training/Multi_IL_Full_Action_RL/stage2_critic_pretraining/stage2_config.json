@@ -1,0 +1,19 @@
+{
+  "stage": "stage2_sac_critic_pretraining",
+  "random_seed": 20260820,
+  "state_dim": 59,
+  "action_dim": 14,
+  "hidden_dims": [256, 256],
+  "max_updates": 50000,
+  "batch_size": 256,
+  "gamma": 0.99,
+  "critic_lr": 0.0003,
+  "tau": 0.005,
+  "validation_every": 1000,
+  "validation_batch_size": 4096,
+  "target_policy": "frozen_bc_rnn",
+  "bellman_target_entropy_term": false,
+  "reward_shaping": false,
+  "ranking_loss": false,
+  "mc_return_supervision": false
+}

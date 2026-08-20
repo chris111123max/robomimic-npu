@@ -1,6 +1,6 @@
 # Multi-IL + Full-Action RL
 
-**STATUS: Stage 1 and 1.5 complete; Stage 2.0 target-policy sanity check implemented; Critic training not started**
+**STATUS: Stage 1 and 1.5 complete; Stage 2 critic pretraining implemented; Stage 3/4 not started**
 
 This is a separate long-lived research project. It does not reuse or overwrite `training/IL+RL`,
 and it never modifies the three Pure IL checkpoints.
@@ -27,6 +27,12 @@ checkpoint `RolloutPolicy`, freezes every network parameter, replays stored RNN 
 numerical behavior on Transformer and GMM histories. It creates no replay buffer, critic, actor, SAC
 agent, rollout, or model update. Run `stage2_critic_pretraining/validate_frozen_rnn_target.py`; its
 only result is written under `analysis/stage2`.
+
+Formal Stage 2 trains only twin feed-forward critics. It compares the identical random initialization
+against RNN-only and policy/episode-balanced Multi-IL pretraining. Every Bellman target uses the same
+frozen BC-RNN next action, raw Stage 1 reward, and `bootstrap_mask = NOT terminated`; truncated-only
+transitions continue to bootstrap. There is no actor training, entropy target, shaped reward, ranking
+loss, or Stage 3/4 execution. See `stage2_critic_pretraining/README.md`.
 
 ## Stage 1 implementation
 
