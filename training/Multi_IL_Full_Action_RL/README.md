@@ -1,6 +1,6 @@
 # Multi-IL + Full-Action RL
 
-**STATUS: Stage 1 — Heterogeneous IL Experience Collection**
+**STATUS: Stage 1 complete; Stage 1.5 dataset audit implemented; Stage 2 not started**
 
 This is a separate long-lived research project. It does not reuse or overwrite `training/IL+RL`,
 and it never modifies the three Pure IL checkpoints.
@@ -14,6 +14,13 @@ and it never modifies the three Pure IL checkpoints.
 
 The final execution rule is `a_exec = a_SAC`, not `a_IL + delta_a`. Stage 2, Stage 3, and Stage 4
 are intentionally placeholders; this implementation does not train a critic, actor, or SAC agent.
+
+Stage 1.5 is a strictly read-only bridge between collection and later training. It recursively
+discovers runtime artifacts from `training_runs`, validates candidates from their contents, selects
+the formal three-policy 100-seed family only when the choice is unambiguous, and streams an audit of
+schema, seeds, outcomes, progress flags, sparse rewards, and NaN/Inf values. It performs no rollout,
+training, reward modification, transition-budget choice, or Stage 2 work. See
+`stage1_5_dataset_audit/README.md` for commands and output definitions.
 
 ## Stage 1 implementation
 

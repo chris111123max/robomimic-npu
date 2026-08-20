@@ -1,0 +1,15 @@
+{
+  "stage": "1.5_dataset_audit",
+  "training_runs_root": "/data/home/3220251075/lerobot_workspace/training_runs",
+  "analysis_output_dir": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/analysis",
+  "expected_episodes_per_policy": 100,
+  "policy_order_for_patterns": [
+    "bc_rnn",
+    "bc_transformer",
+    "bc_gmm"
+  ],
+  "read_only_training_runs": true,
+  "run_rollouts": false,
+  "train_models": false,
+  "modify_reward": false
+}
