@@ -133,13 +133,12 @@ Each run is isolated by timestamp:
     │   ├── <policy>_metadata.json
     │   └── worker_shards/
     │       ├── logs/worker_00.log ... worker_03.log
-    │       ├── seeds/
-    │       ├── datasets/
-    │       └── runs/
+    │       └── seeds/
     └── launcher_logs/
 ```
 
-The final merged dataset retains the original single-run layout:
+The final merged dataset retains the original single-run layout. Worker HDF5/JSON shards are
+deleted automatically after a successful merge; only worker logs and seed assignments remain:
 
 ```text
 datasets/<run-id>/

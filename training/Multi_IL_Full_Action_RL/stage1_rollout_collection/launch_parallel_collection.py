@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -25,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from common import SCHEMA_VERSION, VALID_POLICY_IDS, atomic_json, git_commit, read_json
 from collect_multi_il_rollouts import same_seed_summary
+from validate_dataset import validate
 
 
 def now():
@@ -356,6 +358,18 @@ def aggregate(args, config, run_id, final_data, final_run, worker_root, seeds, a
     return summary
 
 
+def cleanup_worker_shards(worker_root):
+    """Remove intermediate HDF5/JSON shards after the merged dataset is complete.
+
+    Worker logs and seed assignments remain under the run directory for auditability;
+    only duplicated intermediate datasets and metadata are removed.
+    """
+    for name in ("datasets", "runs"):
+        path = worker_root / name
+        if path.exists():
+            shutil.rmtree(path)
+
+
 def main():
     args = parse_args()
     if args.num_episodes <= 0:
@@ -415,6 +429,9 @@ def main():
             args, config, run_id, final_data, final_run, worker_root,
             seeds, assignments, npu_ids, started,
         )
+        validation_report = validate(final_data)
+        atomic_json(final_run / "validation_report.json", validation_report)
+        cleanup_worker_shards(worker_root)
         manifest.update({"status": "complete", "end_time": summary["end_time"]})
         atomic_json(final_run / "run_manifest.json", manifest)
         print(json.dumps(summary, indent=2, ensure_ascii=False), flush=True)
