@@ -1,0 +1,5 @@
+datasets/stage1_raw/*
+!datasets/stage1_raw/README.md
+runs/*
+!runs/README.md
+stage1_rollout_collection/__pycache__/

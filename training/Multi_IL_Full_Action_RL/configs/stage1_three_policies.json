@@ -1,0 +1,32 @@
+{
+  "project": "Multi-IL + Full-Action RL",
+  "status": "Stage 1",
+  "policies": [
+    {
+      "policy_id": "bc_gmm",
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_gmm_official_ph_low_dim/models/model_epoch_1850_low_dim_v15_success_0.3.pth",
+      "known_success_rate": 0.3
+    },
+    {
+      "policy_id": "bc_rnn",
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_rnn_official_ph_low_dim/two_arm_transport_bc_rnn_official_ph_low_dim/20260811151701/models/model_epoch_1000_low_dim_v15_success_0.9.pth",
+      "known_success_rate": 0.9
+    },
+    {
+      "policy_id": "bc_transformer",
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_transformer_official_ph_low_dim/two_arm_transport_bc_transformer_official_ph_low_dim/20260810152955/models/model_epoch_1200_low_dim_v15_success_0.8.pth",
+      "known_success_rate": 0.8
+    }
+  ],
+  "collection": {
+    "default_num_episodes": 100,
+    "horizon": 700,
+    "terminate_on_success": true,
+    "initial_observation_atol": 1e-06,
+    "mc_return_gamma": null
+  },
+  "paths": {
+    "dataset_root": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/datasets/stage1_raw",
+    "run_root": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/runs/stage1_rollout_collection"
+  }
+}
