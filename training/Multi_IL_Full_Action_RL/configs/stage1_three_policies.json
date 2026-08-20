@@ -26,7 +26,7 @@
     "mc_return_gamma": null
   },
   "paths": {
-    "dataset_root": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/datasets/stage1_raw",
-    "run_root": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/runs/stage1_rollout_collection"
+    "dataset_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets",
+    "run_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/runs"
   }
 }

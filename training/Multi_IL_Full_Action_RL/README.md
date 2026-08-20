@@ -109,10 +109,40 @@ Both successful and failed episodes are retained.
 
 ## Output layout
 
+Runtime artifacts live outside the source tree under the workspace-level `training_runs` directory.
 Each run is isolated by timestamp:
 
 ```text
-datasets/stage1_raw/<run-id>/
+/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/
+└── stage1_rollout_collection/
+    ├── datasets/<run-id>/
+    │   ├── initial_states.hdf5
+    │   ├── seed_list.json
+    │   ├── same_seed_outcomes.json
+    │   ├── collection_summary.json
+    │   ├── bc_gmm/
+    │   │   ├── transitions.hdf5
+    │   │   ├── episodes.json
+    │   │   └── metadata.json
+    │   ├── bc_rnn/
+    │   └── bc_transformer/
+    ├── runs/<run-id>/
+    │   ├── run_manifest.json
+    │   ├── initial_state_manifest.json
+    │   ├── collection_summary.json
+    │   ├── <policy>_metadata.json
+    │   └── worker_shards/
+    │       ├── logs/worker_00.log ... worker_03.log
+    │       ├── seeds/
+    │       ├── datasets/
+    │       └── runs/
+    └── launcher_logs/
+```
+
+The final merged dataset retains the original single-run layout:
+
+```text
+datasets/<run-id>/
 ├── initial_states.hdf5
 ├── seed_list.json
 ├── same_seed_outcomes.json
@@ -124,7 +154,7 @@ datasets/stage1_raw/<run-id>/
 ├── bc_rnn/
 └── bc_transformer/
 
-runs/stage1_rollout_collection/<run-id>/
+runs/<run-id>/
 ├── run_manifest.json
 ├── initial_state_manifest.json
 ├── seed_list.json
@@ -151,11 +181,12 @@ and termination reason.
 
 ## Formal collection
 
-The number of episodes is a runtime argument; Stage 1 does not impose a 40K/40K/40K budget:
+The formal collector partitions seeds round-robin across four independent NPU workers and merges
+their shards back into one standard dataset. The number of episodes is a runtime argument:
 
 ```bash
 cd /data/home/3220251075/lerobot_workspace/robomimic
-NPU_ID=0 bash training/Multi_IL_Full_Action_RL/scripts/run_stage1_collection.sh 100 10000
+NPU_IDS=0,1,2,3 bash training/Multi_IL_Full_Action_RL/scripts/run_stage1_collection.sh 100 10000
 ```
 
 Arguments are `NUM_EPISODES` and optional `SEED_START`. For a custom explicit seed list, invoke the
@@ -165,8 +196,10 @@ Long-running collection can be detached safely:
 
 ```bash
 cd /data/home/3220251075/lerobot_workspace/robomimic
-LOG="multi_il_stage1_$(date +%Y%m%d_%H%M%S).out"
-nohup env NPU_ID=0 bash training/Multi_IL_Full_Action_RL/scripts/run_stage1_collection.sh 100 10000 \
+LOG_ROOT="/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/launcher_logs"
+mkdir -p "$LOG_ROOT"
+LOG="$LOG_ROOT/multi_il_stage1_$(date +%Y%m%d_%H%M%S).out"
+nohup env NPU_IDS=0,1,2,3 bash training/Multi_IL_Full_Action_RL/scripts/run_stage1_collection.sh 100 10000 \
   > "$LOG" 2>&1 < /dev/null &
 echo "PID=$!"
 echo "LOG=$LOG"
@@ -178,7 +211,7 @@ Validation requires only Python, NumPy, and h5py; it does not load policies or r
 
 ```bash
 python training/Multi_IL_Full_Action_RL/stage1_rollout_collection/validate_dataset.py \
-  --dataset-root training/Multi_IL_Full_Action_RL/datasets/stage1_raw/<run-id>
+  --dataset-root /data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/<run-id>
 ```
 
 It verifies lengths, episode continuity, IDs, seeds, action shape, shared canonical observation
