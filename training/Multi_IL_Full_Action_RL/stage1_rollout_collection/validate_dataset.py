@@ -17,7 +17,8 @@ except ImportError:  # allow --help outside the rollout environment
     h5py = None
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import SCHEMA_VERSION, VALID_POLICY_IDS, atomic_json, read_json, sha256_array
+from common import (PROGRESS_OBSERVATION_FIELDS, SCHEMA_VERSION, VALID_POLICY_IDS,
+                    atomic_json, read_json, sha256_array)
 
 
 REQUIRED_TRANSITION_DATASETS = (
@@ -57,7 +58,27 @@ def validate_policy(policy_dir, policy_id, seeds, shared_schema, require_both):
         keys = json.loads(handle.attrs["canonical_observation_keys"])
         shapes = json.loads(handle.attrs["canonical_observation_shapes"])
         action_shape = json.loads(handle.attrs["action_shape"])
-        schema = {"keys": keys, "shapes": shapes, "action_shape": action_shape}
+        progress_schema = json.loads(handle.attrs["progress_observation_schema"])
+        if progress_schema.get("storage") != "embedded_in_canonical_observation":
+            raise RuntimeError(f"{policy_id}: progress flags are not declared as canonical observation fields")
+        if progress_schema.get("duplicate_transition_datasets") is not False:
+            raise RuntimeError(f"{policy_id}: progress flags must not be duplicated")
+        fields = progress_schema.get("fields", {})
+        if set(fields) != set(PROGRESS_OBSERVATION_FIELDS):
+            raise RuntimeError(f"{policy_id}: progress observation field map is incomplete")
+        object_width = int(np.prod(shapes["object"]))
+        for field_name, field in fields.items():
+            index = int(field["flat_index"])
+            if field.get("canonical_key") != "object" or int(field.get("width", 0)) != 1:
+                raise RuntimeError(f"{policy_id}: invalid mapping for {field_name}")
+            if index < 0 or index >= object_width:
+                raise RuntimeError(f"{policy_id}: out-of-range object index for {field_name}")
+        schema = {
+            "keys": keys,
+            "shapes": shapes,
+            "action_shape": action_shape,
+            "progress_observation_schema": progress_schema,
+        }
         if shared_schema and schema != shared_schema:
             raise RuntimeError(f"{policy_id}: canonical schema differs from other policies")
         groups = sorted(handle["episodes"].keys())
@@ -90,6 +111,14 @@ def validate_policy(policy_dir, policy_id, seeds, shared_schema, require_both):
                     raise RuntimeError(f"{policy_id}/{group_name}: next_obs/{key} shape mismatch")
                 require_finite(f"{policy_id}/{group_name}/obs/{key}", group[f"obs/{key}"][:])
                 require_finite(f"{policy_id}/{group_name}/next_obs/{key}", group[f"next_obs/{key}"][:])
+            for field_name, field in fields.items():
+                index = int(field["flat_index"])
+                for section in ("obs", "next_obs"):
+                    values = np.asarray(group[f"{section}/object"][:]).reshape(length, -1)[:, index]
+                    if not np.all(np.isin(values, (0.0, 1.0))):
+                        raise RuntimeError(
+                            f"{policy_id}/{group_name}: {field_name} is not boolean-valued in {section}/object"
+                        )
             timesteps = group["timestep"][:]
             if not np.array_equal(timesteps, np.arange(length)):
                 raise RuntimeError(f"{policy_id}/{group_name}: non-contiguous timestep")

@@ -26,7 +26,8 @@ EXPERIMENT_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = EXPERIMENT_ROOT.parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from common import (SCHEMA_VERSION, VALID_POLICY_IDS, atomic_json, canonical_json,
+from common import (PROGRESS_OBSERVATION_FIELDS, SCHEMA_VERSION, VALID_POLICY_IDS,
+                    atomic_json, canonical_json,
                     compare_observations, configured_low_dim_keys, discounted_returns,
                     extract_canonical_observation, git_commit, infer_algo_type,
                     observation_hash, read_json, seed_everything, sha256_array,
@@ -225,6 +226,95 @@ def load_initial_state(handle, episode_index):
     return state, observation, metadata
 
 
+def _enabled(observable):
+    value = getattr(observable, "is_enabled")
+    return bool(value() if callable(value) else value)
+
+
+def _active(observable):
+    value = getattr(observable, "is_active")
+    return bool(value() if callable(value) else value)
+
+
+def _raw_robosuite_environment(env):
+    """Find the native robosuite environment below robomimic wrappers."""
+    current, seen = env, set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if hasattr(current, "_observables") and hasattr(current, "_get_observations"):
+            return current
+        current = getattr(current, "env", None)
+    raise RuntimeError("Could not locate native robosuite environment below wrappers")
+
+
+def progress_observation_schema(env, canonical_keys, canonical_shapes):
+    """Describe where Transport progress flags live inside canonical ``object``.
+
+    robosuite concatenates active observables by modality. Deriving offsets from
+    the installed environment avoids assuming the v1.4 or v1.5 sensor order.
+    """
+    if "object" not in canonical_keys:
+        raise RuntimeError(
+            "TwoArmTransport canonical observation has no 'object' key; explicit "
+            "progress transition metadata would be required"
+        )
+    raw_env = _raw_robosuite_environment(env)
+    raw_observation = raw_env._get_observations(force_update=True)
+    if "object-state" not in raw_observation:
+        raise RuntimeError("TwoArmTransport did not expose an object-state observation")
+
+    offsets, offset = {}, 0
+    for name, observable in raw_env._observables.items():
+        if not (_enabled(observable) and _active(observable)):
+            continue
+        if getattr(observable, "modality", None) != "object":
+            continue
+        if name not in raw_observation:
+            raise RuntimeError(f"Active object observable {name!r} is absent")
+        width = int(np.asarray(raw_observation[name]).size) or 1
+        offsets[name] = (offset, width)
+        offset += width
+
+    expected_width = int(np.prod(canonical_shapes["object"]))
+    actual_width = int(np.asarray(raw_observation["object-state"]).size)
+    if offset != actual_width or actual_width != expected_width:
+        raise RuntimeError(
+            "Object observation width is inconsistent: "
+            f"observable_sum={offset}, raw={actual_width}, canonical={expected_width}"
+        )
+
+    fields = {}
+    flat_object = np.asarray(raw_observation["object-state"]).reshape(-1)
+    for name in PROGRESS_OBSERVATION_FIELDS:
+        if name not in offsets:
+            raise RuntimeError(
+                f"TwoArmTransport object observation lacks {name!r}; explicit "
+                "progress transition metadata would be required"
+            )
+        index, width = offsets[name]
+        if width != 1:
+            raise RuntimeError(f"Expected scalar progress observable {name!r}, got width={width}")
+        value = float(flat_object[index])
+        if value not in (0.0, 1.0):
+            raise RuntimeError(f"Progress observable {name!r} is not boolean-valued: {value}")
+        fields[name] = {
+            "canonical_key": "object",
+            "flat_index": index,
+            "width": 1,
+            "dtype_semantics": "boolean encoded as 0.0 or 1.0",
+            "source_observable": name,
+        }
+    return {
+        "storage": "embedded_in_canonical_observation",
+        "duplicate_transition_datasets": False,
+        "object_flatten_order": "installed robosuite active object-observable order",
+        "fields": fields,
+        "analysis_only": True,
+        "affects_reward": False,
+        "affects_rollout": False,
+    }
+
+
 def rollout_episode(policy, env, initial_state, initial_observation, canonical_keys,
                     canonical_shapes, action_dim, seed, horizon, terminate_on_success,
                     observation_atol):
@@ -363,6 +453,7 @@ def collect_policy(item, initial_states_path, seeds, data_root, run_dir, device,
         action_dim = int(env.action_dimension)
         if action_dim != int(details["shape_metadata"]["ac_dim"]):
             raise RuntimeError(f"{policy_id}: checkpoint and environment action dimensions differ")
+        progress_schema = progress_observation_schema(env, canonical_keys, canonical_shapes)
         with h5py.File(initial_states_path, "r") as initial_handle, h5py.File(dataset_path, "w") as output:
             output.attrs["schema_version"] = SCHEMA_VERSION
             output.attrs["policy_id"] = policy_id
@@ -372,6 +463,7 @@ def collect_policy(item, initial_states_path, seeds, data_root, run_dir, device,
             output.attrs["canonical_observation_shapes"] = json.dumps(canonical_shapes, sort_keys=True)
             output.attrs["action_shape"] = json.dumps([action_dim])
             output.attrs["observation_representation"] = "raw_canonical_low_dim_current_frame"
+            output.attrs["progress_observation_schema"] = json.dumps(progress_schema, sort_keys=True)
             output.attrs["policy_input_representation"] = (
                 "official_checkpoint_wrapper; may include frame-stack and normalization"
             )
@@ -416,6 +508,7 @@ def collect_policy(item, initial_states_path, seeds, data_root, run_dir, device,
         "device": str(device),
         "canonical_observation_keys": canonical_keys,
         "canonical_observation_shapes": canonical_shapes,
+        "progress_observation_schema": progress_schema,
         "action_shape": [action_dim],
         "horizon": horizon,
         "terminate_on_success": terminate_on_success,

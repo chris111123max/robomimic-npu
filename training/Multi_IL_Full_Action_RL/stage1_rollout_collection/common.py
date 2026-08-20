@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 
 
-SCHEMA_VERSION = "multi_il_full_action_rl.stage1.v1"
+SCHEMA_VERSION = "multi_il_full_action_rl.stage1.v2"
 VALID_POLICY_IDS = ("bc_gmm", "bc_rnn", "bc_transformer")
+PROGRESS_OBSERVATION_FIELDS = ("payload_in_target_bin", "trash_in_trash_bin")
 
 
 def read_json(path):
@@ -190,4 +191,3 @@ def discounted_returns(rewards, gamma):
         running = float(rewards[index]) + float(gamma) * running
         result[index] = running
     return result
-

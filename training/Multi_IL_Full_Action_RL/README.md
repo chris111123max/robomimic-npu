@@ -38,6 +38,29 @@ robot1_eef_pos, robot1_eef_quat, robot1_gripper_qpos, object
 
 RNN hidden state, Transformer embeddings, and GMM parameters are not stored as critic state.
 
+### TwoArmTransport progress flags
+
+The canonical `object` vector already contains both `payload_in_target_bin` and
+`trash_in_trash_bin`. They are native TwoArmTransport object-modality observables; robosuite
+concatenates that modality into `object-state`, and `EnvRobosuite` exposes the same vector as
+canonical `object`. Therefore Stage 1 does **not** duplicate them as transition datasets.
+
+Their flat indices must not be hard-coded because the observable order differs between robosuite
+versions. At collection time, Stage 1 derives both indices from the installed environment's active
+object-observable order and writes the result to the HDF5 root attribute
+`progress_observation_schema` and each policy's `metadata.json`. A downstream analyzer can recover
+either boolean at transition `t` as:
+
+```python
+schema = json.loads(hdf5_file.attrs["progress_observation_schema"])
+index = schema["fields"]["payload_in_target_bin"]["flat_index"]
+payload_in_target_bin = bool(episode["obs/object"][t].reshape(-1)[index])
+```
+
+The same applies to `next_obs/object` and `trash_in_trash_bin`. The validator requires both mapped
+columns to contain only `0.0` or `1.0`. These flags are analysis-only: collection does not alter the
+environment reward, construct shaped reward, stop on either partial flag, or change policy rollout.
+
 ## Same-seed initial conditions
 
 Stage 1 does more than call `numpy.random.seed`:
@@ -75,6 +98,9 @@ episode_success, episode_return, episode_length
 
 Optional `mc_return` is written only when a gamma is explicitly configured. It never replaces raw
 environment reward.
+
+The HDF5 root also contains `progress_observation_schema`, which maps the two Transport progress
+booleans into `obs/object` and `next_obs/object`. No duplicate progress arrays are written.
 
 For this fixed-horizon robosuite wrapper, `terminated` is the raw environment `done`. `truncated`
 means the collector ended at its configured horizon or stopped after success while raw `done` was
