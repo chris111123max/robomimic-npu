@@ -210,6 +210,18 @@ def analyze_policy(path, expected_policy):
                 "reward_nonzero_timesteps": reward_stats["nonzero_timesteps"],
                 "final_progress": progress,
                 "failure_progress_class": progress_class if success is False else None,
+                "initial_state_vector_hash": (
+                    None if "initial_state_vector_hash" not in group.attrs
+                    else str(json_scalar(group.attrs["initial_state_vector_hash"]))
+                ),
+                "initial_state_hash": (
+                    None if "initial_state_hash" not in group.attrs
+                    else str(json_scalar(group.attrs["initial_state_hash"]))
+                ),
+                "initial_observation_hash": (
+                    None if "initial_observation_hash" not in group.attrs
+                    else str(json_scalar(group.attrs["initial_observation_hash"]))
+                ),
             })
 
         root_attributes = {
@@ -357,6 +369,83 @@ def outcome_rows(episodes, same_seed_report):
     return rows, pattern_rows
 
 
+def same_initial_state_analysis(episode_rows, expected_episodes, seed_start=10000):
+    """Compare persisted simulator-state hashes; vector hash is authoritative."""
+    by_policy = {}
+    duplicate_seeds = {}
+    for policy in POLICIES:
+        grouped = defaultdict(list)
+        for row in episode_rows[policy]:
+            if row["seed"] is not None:
+                grouped[row["seed"]].append(row)
+        duplicate_seeds[policy] = sorted(
+            seed for seed, rows in grouped.items() if len(rows) != 1
+        )
+        by_policy[policy] = {
+            seed: rows[0] for seed, rows in grouped.items() if len(rows) == 1
+        }
+
+    common_seeds = sorted(set.intersection(*(
+        set(by_policy[policy]) for policy in POLICIES
+    )))
+    expected_seeds = set(range(seed_start, seed_start + expected_episodes))
+    mismatch_details = []
+    auxiliary_mismatches = {
+        "initial_state_hash": [],
+        "initial_observation_hash": [],
+    }
+    for seed in common_seeds:
+        rows = {policy: by_policy[policy][seed] for policy in POLICIES}
+        vector_hashes = {
+            policy: rows[policy]["initial_state_vector_hash"] for policy in POLICIES
+        }
+        values = list(vector_hashes.values())
+        if any(value in (None, "") for value in values) or len(set(values)) != 1:
+            mismatch_details.append({
+                "seed": seed,
+                "hashes": vector_hashes,
+                "initial_state_hashes": {
+                    policy: rows[policy]["initial_state_hash"] for policy in POLICIES
+                },
+                "initial_observation_hashes": {
+                    policy: rows[policy]["initial_observation_hash"] for policy in POLICIES
+                },
+            })
+        for field in auxiliary_mismatches:
+            hashes = {policy: rows[policy][field] for policy in POLICIES}
+            if any(value in (None, "") for value in hashes.values()) or len(set(hashes.values())) != 1:
+                auxiliary_mismatches[field].append({"seed": seed, "hashes": hashes})
+
+    mismatched_seeds = [row["seed"] for row in mismatch_details]
+    missing_expected_seeds = {
+        policy: sorted(expected_seeds - set(by_policy[policy])) for policy in POLICIES
+    }
+    unexpected_common_seeds = sorted(set(common_seeds) - expected_seeds)
+    passed = (
+        set(common_seeds) == expected_seeds
+        and len(common_seeds) == expected_episodes
+        and not mismatched_seeds
+        and all(not seeds for seeds in duplicate_seeds.values())
+    )
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "primary_hash_field": "initial_state_vector_hash",
+        "expected_seed_start": seed_start,
+        "expected_seed_end": seed_start + expected_episodes - 1,
+        "expected_seed_count": expected_episodes,
+        "common_seed_count": len(common_seeds),
+        "common_seeds": common_seeds,
+        "matched_seed_count": len(common_seeds) - len(mismatched_seeds),
+        "mismatched_seed_count": len(mismatched_seeds),
+        "mismatched_seeds": mismatched_seeds,
+        "mismatch_hashes": mismatch_details,
+        "missing_expected_seeds": missing_expected_seeds,
+        "unexpected_common_seeds": unexpected_common_seeds,
+        "duplicate_seeds": duplicate_seeds,
+        "auxiliary_hash_mismatches": auxiliary_mismatches,
+    }
+
+
 def summary_csv_rows(summaries):
     return [
         {
@@ -419,7 +508,7 @@ def ensure_selected_manifest(args):
     return manifest
 
 
-def print_terminal_summary(summaries, same_seed, pattern_rows):
+def print_terminal_summary(summaries, same_seed, initial_state_check, pattern_rows):
     print("=" * 88)
     print("Stage 1.5 Dataset Audit")
     print("=" * 88)
@@ -455,6 +544,13 @@ def print_terminal_summary(summaries, same_seed, pattern_rows):
     for policy in POLICIES:
         row = summaries[policy]
         print(f"{DISPLAY_NAMES[policy]}: NaN={row['nan_total']} Inf={row['inf_total']}")
+    print("\nSame initial simulator state:")
+    print("Common seeds   :", initial_state_check["common_seed_count"])
+    print("Matched seeds  :", initial_state_check["matched_seed_count"])
+    print("Mismatched     :", initial_state_check["mismatched_seed_count"])
+    print("Mismatch seeds :", initial_state_check["mismatched_seeds"])
+    for mismatch in initial_state_check["mismatch_hashes"]:
+        print(f"seed={mismatch['seed']} initial_state_vector_hash={mismatch['hashes']}")
     print("=" * 88)
 
 
@@ -474,6 +570,9 @@ def main():
         episodes[policy] = rows
         schema_candidates.append(inspect_candidate(path, include_schema=True))
     same_seed = same_seed_analysis(summaries, episodes, args.expected_episodes)
+    initial_state_check = same_initial_state_analysis(
+        episodes, args.expected_episodes, seed_start=10000
+    )
     same_seed_rows, pattern_rows = outcome_rows(episodes, same_seed)
     report = {
         "generated_at": utc_timestamp(),
@@ -483,6 +582,7 @@ def main():
         "selected_family": manifest.get("selected_family"),
         "policies": summaries,
         "same_seed_check": same_seed,
+        "same_initial_state_check": initial_state_check,
         "same_seed_pattern_summary": {row["pattern"]: row["count"] for row in pattern_rows},
         "key_patterns": {
             "100_rnn_only_success": next(row["count"] for row in pattern_rows if row["pattern"] == "100"),
@@ -492,6 +592,7 @@ def main():
         "stage2_started": False,
     }
     atomic_json(output_dir / "stage1_5_dataset_report.json", report)
+    atomic_json(output_dir / "stage1_5_initial_state_check.json", initial_state_check)
     write_csv(
         output_dir / "stage1_5_policy_summary.csv",
         list(summary_csv_rows(summaries)[0].keys()),
@@ -514,8 +615,9 @@ def main():
     (output_dir / "stage1_5_schema_report.txt").write_text(
         format_schema_text(schema_candidates), encoding="utf-8"
     )
-    print_terminal_summary(summaries, same_seed, pattern_rows)
+    print_terminal_summary(summaries, same_seed, initial_state_check, pattern_rows)
     print("Report directory:", output_dir.resolve())
+    print(f"SAME INITIAL STATE VECTOR CHECK: {initial_state_check['status']}")
 
 
 if __name__ == "__main__":

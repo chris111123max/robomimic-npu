@@ -50,6 +50,7 @@ Only `training/Multi_IL_Full_Action_RL/analysis` is written:
 stage1_5_dataset_inventory.json
 stage1_5_selected_datasets.json
 stage1_5_dataset_report.json
+stage1_5_initial_state_check.json
 stage1_5_policy_summary.csv
 same_seed_outcomes.csv
 same_seed_pattern_summary.csv
@@ -65,3 +66,9 @@ TwoArmTransport progress flags are used only when the real dataset provides name
 explicit `progress_observation_schema` mapping. No hard-coded `object` indices are assumed. Missing
 seed, success, next-state, progress, or other fields are reported as `missing_field`; they are never
 fabricated from expected behavior.
+
+The audit also compares `initial_state_vector_hash` for every common seed in `10000..10099` across
+RNN, Transformer, and GMM. This simulator-state-vector hash is the authoritative same-initial-state
+criterion. `initial_state_hash` and `initial_observation_hash` are auxiliary diagnostics only. PASS
+requires exactly those 100 common seeds, no duplicate seeds, and equality of all three authoritative
+hashes for every seed.
