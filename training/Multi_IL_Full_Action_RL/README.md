@@ -1,6 +1,6 @@
 # Multi-IL + Full-Action RL
 
-**STATUS: Stage 1 complete; Stage 1.5 dataset audit implemented; Stage 2 not started**
+**STATUS: Stage 1 and 1.5 complete; Stage 2.0 target-policy sanity check implemented; Critic training not started**
 
 This is a separate long-lived research project. It does not reuse or overwrite `training/IL+RL`,
 and it never modifies the three Pure IL checkpoints.
@@ -19,8 +19,14 @@ Stage 1.5 is a strictly read-only bridge between collection and later training. 
 discovers runtime artifacts from `training_runs`, validates candidates from their contents, selects
 the formal three-policy 100-seed family only when the choice is unambiguous, and streams an audit of
 schema, seeds, outcomes, progress flags, sparse rewards, and NaN/Inf values. It performs no rollout,
-training, reward modification, transition-budget choice, or Stage 2 work. See
+training, reward modification, transition-budget choice, or critic preparation. See
 `stage1_5_dataset_audit/README.md` for commands and output definitions.
+
+Stage 2.0 provides only a five-seed frozen BC-RNN target-policy sanity check. It reuses the official
+checkpoint `RolloutPolicy`, freezes every network parameter, replays stored RNN histories, and checks
+numerical behavior on Transformer and GMM histories. It creates no replay buffer, critic, actor, SAC
+agent, rollout, or model update. Run `stage2_critic_pretraining/validate_frozen_rnn_target.py`; its
+only result is written under `analysis/stage2`.
 
 ## Stage 1 implementation
 
