@@ -558,7 +558,7 @@ def main():
         for item in inspected:
             episodes, metadata = collect_policy(
                 item, initial_states_path, seeds, data_root, run_dir, device,
-                canonical_keys, canonical_shapes, action_dim, horizon,
+                canonical_keys, canonical_shapes, horizon,
                 terminate_on_success, observation_atol, mc_gamma)
             policy_id = item[0]["policy_id"]
             policy_episodes[policy_id] = episodes
