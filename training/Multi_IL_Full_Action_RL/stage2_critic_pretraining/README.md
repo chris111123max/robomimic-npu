@@ -37,3 +37,25 @@ python -u training/Multi_IL_Full_Action_RL/stage2_critic_pretraining/train_stage
 The default configuration is 50,000 updates per trained critic, batch size 256, validation every
 1,000 updates, gamma 0.99, and tau 0.005. Formal artifacts are stored only below
 `training_runs/Multi_IL_Full_Action_RL/stage2_critic_pretraining/<timestamp>`.
+
+## Stage 2.1 single-variable correction
+
+Stage 2.1 keeps the v1 data, seed split, initialization, networks, samplers, optimizer, target
+policy, update budget, and evaluation unchanged. Its only algorithmic change is:
+
+```text
+bootstrap_mask = NOT (terminated OR truncated)
+```
+
+It reads the completed v1 RNN target cache in place and never copies or modifies it. Smoke test:
+
+```bash
+python -u training/Multi_IL_Full_Action_RL/stage2_critic_pretraining/train_stage2_critics.py \
+  --config training/Multi_IL_Full_Action_RL/stage2_critic_pretraining/stage2_1_config.json \
+  --smoke-test --device npu:0
+```
+
+The smoke run is written to
+`training_runs/Multi_IL_Full_Action_RL/stage2_1_critic_pretraining/smoke_test_<timestamp>` and stops
+after 20 updates per trained critic. Formal Stage 2.1 uses the same command without `--smoke-test`.
+The existing Stage 2 v1 run and `analysis/stage2/latest_stage2_run.json` are never overwritten.

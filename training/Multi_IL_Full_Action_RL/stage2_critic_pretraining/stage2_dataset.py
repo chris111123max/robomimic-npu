@@ -17,6 +17,18 @@ from validate_frozen_rnn_target import ObservationHistory, decode, episode_looku
 POLICIES = ("bc_rnn", "bc_transformer", "bc_gmm")
 
 
+def bootstrap_mask_from_flags(terminated, truncated, terminal_mask_mode):
+    terminated = np.asarray(terminated, dtype=np.bool_)
+    truncated = np.asarray(truncated, dtype=np.bool_)
+    if terminated.shape != truncated.shape:
+        raise ValueError("terminated and truncated shapes differ")
+    if terminal_mask_mode == "terminated_or_truncated":
+        return ~(terminated | truncated)
+    if terminal_mask_mode == "terminated_only":
+        return ~terminated
+    raise ValueError(f"Unsupported terminal_mask_mode={terminal_mask_mode!r}")
+
+
 def canonical_keys(handle):
     value = decode(handle.attrs.get("canonical_observation_keys"))
     if value is None:
@@ -160,15 +172,23 @@ class EpisodeRecord:
 class Stage2PolicyDataset:
     """In-memory episode representation; source HDF5 remains read-only."""
 
-    def __init__(self, source, dataset_path, seeds, cache_root):
+    def __init__(self, source, dataset_path, seeds, cache_root,
+                 terminal_mask_mode="terminated_only"):
+        if terminal_mask_mode not in {"terminated_only", "terminated_or_truncated"}:
+            raise ValueError(f"Unsupported terminal_mask_mode={terminal_mask_mode!r}")
         self.source = source
         self.path = str(Path(dataset_path).resolve())
         self.seeds = list(seeds)
+        self.terminal_mask_mode = terminal_mask_mode
         self.episodes = []
         self.reward_values = set()
         self.terminated_count = 0
         self.truncated_count = 0
         self.truncated_only_count = 0
+        self.terminated_or_truncated_count = 0
+        self.bootstrap_count = 0
+        self.non_bootstrap_count = 0
+        self.truncated_bootstrap_violation_count = 0
         with h5py.File(self.path, "r") as handle:
             content_policy = str(decode(handle.attrs.get("policy_id", "")))
             if content_policy != source:
@@ -206,6 +226,16 @@ class Stage2PolicyDataset:
                 self.terminated_count += int(terminated.sum())
                 self.truncated_count += int(truncated.sum())
                 self.truncated_only_count += int(np.count_nonzero(truncated & ~terminated))
+                bootstrap_mask = bootstrap_mask_from_flags(
+                    terminated, truncated, terminal_mask_mode
+                )
+                terminated_or_truncated = terminated | truncated
+                self.terminated_or_truncated_count += int(terminated_or_truncated.sum())
+                self.bootstrap_count += int(bootstrap_mask.sum())
+                self.non_bootstrap_count += int((~bootstrap_mask).sum())
+                self.truncated_bootstrap_violation_count += int(
+                    np.count_nonzero(truncated & bootstrap_mask)
+                )
                 self.episodes.append(EpisodeRecord(
                     source=source,
                     seed=seed,
@@ -215,7 +245,7 @@ class Stage2PolicyDataset:
                     reward=reward,
                     next_state=next_state,
                     next_target_action=target_actions[1:],
-                    bootstrap_mask=(~terminated).astype(np.float32).reshape(-1, 1),
+                    bootstrap_mask=bootstrap_mask.astype(np.float32).reshape(-1, 1),
                     terminated=terminated,
                     truncated=truncated,
                 ))

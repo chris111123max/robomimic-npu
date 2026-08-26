@@ -1,6 +1,6 @@
 # Multi-IL + Full-Action RL
 
-**STATUS: Stage 1 and 1.5 complete; Stage 2 critic pretraining implemented; Stage 3/4 not started**
+**STATUS: Stage 1/1.5 complete; Stage 2 v1 and Stage 2.1 critic experiments implemented; Stage 3/4 not started**
 
 This is a separate long-lived research project. It does not reuse or overwrite `training/IL+RL`,
 and it never modifies the three Pure IL checkpoints.
@@ -33,6 +33,10 @@ against RNN-only and policy/episode-balanced Multi-IL pretraining. Every Bellman
 frozen BC-RNN next action, raw Stage 1 reward, and `bootstrap_mask = NOT terminated`; truncated-only
 transitions continue to bootstrap. There is no actor training, entropy target, shaped reward, ranking
 loss, or Stage 3/4 execution. See `stage2_critic_pretraining/README.md`.
+
+Stage 2.1 is a single-variable correction experiment. It preserves Stage 2 v1 and reuses its frozen
+RNN action cache, while treating both `terminated` and `truncated` episode boundaries as
+non-bootstrapping transitions. All preceding transitions retain normal TD backup.
 
 ## Stage 1 implementation
 

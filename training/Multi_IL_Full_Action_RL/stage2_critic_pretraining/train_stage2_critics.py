@@ -9,8 +9,6 @@ import csv
 import json
 import os
 import random
-import shutil
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,6 +33,7 @@ from stage2_sampler import EpisodeBalancedSampler, MultiPolicyBalancedSampler  #
 from validate_frozen_rnn_target import (  # noqa: E402
     checkpoint_from_rnn_dataset,
     load_frozen_policy,
+    select_device,
 )
 
 
@@ -50,7 +49,7 @@ def parse_args():
     )
     parser.add_argument("--config", default=str(SCRIPT_DIR / "stage2_config.json"))
     parser.add_argument("--seed-split", default=str(SCRIPT_DIR / "stage2_seed_split.json"))
-    parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
+    parser.add_argument("--output-root")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--max-updates", type=int)
     parser.add_argument("--batch-size", type=int)
@@ -316,7 +315,8 @@ def train_variant(name, sampler, validation_data, base_state, config, device, ou
                 f"update {update}/{config['max_updates']} | "
                 f"loss {training_metrics['critic_loss']:.6f} | "
                 f"val_mse {validation['td_mse']:.6f} | "
-                f"Qmean {validation['predicted_q_mean']:.6f}",
+                f"q_range [{validation['predicted_q_min']:.6f}, "
+                f"{validation['predicted_q_max']:.6f}]",
                 flush=True,
             )
             critic.train()
@@ -352,8 +352,43 @@ def dataset_statistics(train_data, validation_data):
             "terminated_count": sum(item.terminated_count for item in datasets),
             "truncated_count": sum(item.truncated_count for item in datasets),
             "truncated_only_count": sum(item.truncated_only_count for item in datasets),
-            "bootstrapped_truncated_count": sum(item.truncated_only_count for item in datasets),
+            "terminated_or_truncated_count": sum(
+                item.terminated_or_truncated_count for item in datasets
+            ),
+            "bootstrap_count": sum(item.bootstrap_count for item in datasets),
+            "non_bootstrap_count": sum(item.non_bootstrap_count for item in datasets),
+            "truncated_bootstrap_violation_count": sum(
+                item.truncated_bootstrap_violation_count for item in datasets
+            ),
+            "bootstrapped_truncated_count": sum(
+                item.truncated_bootstrap_violation_count for item in datasets
+            ),
         }
+    return result
+
+
+def terminal_mask_statistics(train_data, validation_data, terminal_mask_mode):
+    datasets = [*train_data.values(), *validation_data.values()]
+    result = {
+        "terminal_mask_mode": terminal_mask_mode,
+        "total_transitions": sum(item.transition_count for item in datasets),
+        "terminated_count": sum(item.terminated_count for item in datasets),
+        "truncated_count": sum(item.truncated_count for item in datasets),
+        "terminated_or_truncated_count": sum(
+            item.terminated_or_truncated_count for item in datasets
+        ),
+        "bootstrap_count": sum(item.bootstrap_count for item in datasets),
+        "non_bootstrap_count": sum(item.non_bootstrap_count for item in datasets),
+        "truncated_bootstrap_violations": sum(
+            item.truncated_bootstrap_violation_count for item in datasets
+        ),
+    }
+    if terminal_mask_mode == "terminated_or_truncated":
+        result["status"] = (
+            "PASS" if result["truncated_bootstrap_violations"] == 0 else "FAIL"
+        )
+    else:
+        result["status"] = "NOT_APPLICABLE_STAGE2_V1_RULE"
     return result
 
 
@@ -363,22 +398,70 @@ def compact_summary(evaluation):
             "best_update", "best_val_td_mse", "td_mse", "td_mae",
             "pairwise_ranking_accuracy", "success_trajectory_q_mean",
             "failure_trajectory_q_mean", "q_by_trajectory_quartile",
+            "predicted_q_min", "predicted_q_max",
         )
     }
+
+
+def stage2_v1_comparison(v1_run_dir, rnn_evaluation, multi_evaluation):
+    v1_run_dir = Path(v1_run_dir).resolve()
+    summary_path = v1_run_dir / "stage2_summary.json"
+    if not summary_path.is_file():
+        raise FileNotFoundError(summary_path)
+    v1_summary = read_json(summary_path)
+    result = {"stage2_v1_run_dir": str(v1_run_dir), "stage2_v1_summary": str(summary_path)}
+    for label, directory, current in (
+        ("rnn_only", "rnn_only_critic", rnn_evaluation),
+        ("multi_il", "multi_il_critic", multi_evaluation),
+    ):
+        v1_evaluation_path = v1_run_dir / directory / "evaluation.json"
+        v1_evaluation = read_json(v1_evaluation_path)
+        result[label] = {
+            "v1_final_td_mse": v1_evaluation.get("td_mse"),
+            "v2_final_td_mse": current.get("td_mse"),
+            "v1_final_q_min": v1_evaluation.get("predicted_q_min"),
+            "v2_final_q_min": current.get("predicted_q_min"),
+            "v1_final_q_max": v1_evaluation.get("predicted_q_max"),
+            "v2_final_q_max": current.get("predicted_q_max"),
+            "v1_pairwise_ranking_accuracy": v1_evaluation.get("pairwise_ranking_accuracy"),
+            "v2_pairwise_ranking_accuracy": current.get("pairwise_ranking_accuracy"),
+        }
+    result["stage2_v1_summary_loaded"] = bool(v1_summary)
+    return result
 
 
 def main():
     args = parse_args()
     config, _, dataset_paths, train_seeds, validation_seeds, training_runs_root = load_inputs(args)
-    output_root = Path("/tmp/multi_il_full_action_rl_stage2_smoke") if args.smoke_test else Path(args.output_root)
-    run_id = args.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_name = config.get("experiment_name", "stage2")
+    terminal_mask_mode = config.get("terminal_mask_mode", "terminated_only")
+    terminal_rule = config.get("terminal_rule", terminal_mask_mode)
+    configured_output_root = Path(
+        args.output_root or config.get("output_root", str(DEFAULT_OUTPUT_ROOT))
+    )
+    if args.smoke_test and not config.get("smoke_output_in_output_root", False):
+        output_root = Path("/tmp/multi_il_full_action_rl_stage2_smoke")
+    else:
+        output_root = configured_output_root
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    default_run_id = f"smoke_test_{timestamp}" if args.smoke_test else timestamp
+    run_id = args.run_id or default_run_id
     run_dir = output_root / run_id
     if run_dir.exists():
         raise FileExistsError(run_dir)
     run_dir.mkdir(parents=True)
-    latest_path = None if args.smoke_test else PROJECT_ROOT / "analysis/stage2/latest_stage2_run.json"
+    latest_filename = config.get("latest_run_filename")
+    if latest_filename:
+        latest_path = PROJECT_ROOT / "analysis/stage2" / latest_filename
+    else:
+        latest_path = None if args.smoke_test else PROJECT_ROOT / "analysis/stage2/latest_stage2_run.json"
     if latest_path is not None:
-        atomic_json(latest_path, {"run_dir": str(run_dir), "created_at": now(), "status": "running"})
+        atomic_json(latest_path, {
+            "run_dir": str(run_dir),
+            "created_at": now(),
+            "terminal_rule": terminal_rule,
+            "status": "smoke_running" if args.smoke_test else "running",
+        })
     try:
         effective_split = {
             "train_seeds": train_seeds,
@@ -390,6 +473,8 @@ def main():
         }
         run_config = {
             **config,
+            "experiment_name": experiment_name,
+            "terminal_mask_mode": terminal_mask_mode,
             "manifest": str(Path(args.manifest).resolve()),
             "datasets": dataset_paths,
             "smoke_test": bool(args.smoke_test),
@@ -400,34 +485,69 @@ def main():
             dataset_paths["bc_rnn"], training_runs_root
         )
         run_config["rnn_checkpoint"] = str(checkpoint)
-        atomic_json(run_dir / "config.json", run_config)
-        policy, _, _, device, frozen_parameters, frame_stack, _ = load_frozen_policy(
-            checkpoint, args.device
-        )
         all_seeds = train_seeds + validation_seeds
-        cache_summary = cache_rnn_targets(
-            policy, dataset_paths, all_seeds, run_dir / "cached_rnn_targets", frame_stack
-        )
-        atomic_json(run_dir / "cached_rnn_targets/manifest.json", {
-            "target_policy": "frozen_bc_rnn",
-            "checkpoint": str(checkpoint),
-            "frame_stack": frame_stack,
-            "seeds": all_seeds,
-            "sources": cache_summary,
-            "stage1_data_modified": False,
-        })
-        del policy
-        if device.type == "npu" and hasattr(torch.npu, "empty_cache"):
-            torch.npu.empty_cache()
+        if config.get("reuse_cached_rnn_targets", False):
+            cache_root = Path(config["rnn_target_cache_source"]).resolve()
+            if not cache_root.is_dir():
+                raise NotADirectoryError(cache_root)
+            cache_manifest_path = cache_root / "manifest.json"
+            cache_manifest = read_json(cache_manifest_path)
+            if Path(cache_manifest.get("checkpoint", "")).resolve() != checkpoint:
+                raise RuntimeError("Reused RNN target cache checkpoint does not match Stage 1 metadata")
+            cached_seeds = {int(seed) for seed in cache_manifest.get("seeds", [])}
+            if not set(all_seeds).issubset(cached_seeds):
+                raise RuntimeError(
+                    f"Reused RNN target cache is missing seeds: "
+                    f"{sorted(set(all_seeds) - cached_seeds)}"
+                )
+            device = select_device(args.device)
+            frozen_parameters = None
+            frame_stack = int(cache_manifest.get("frame_stack", 1))
+            cache_summary = {
+                policy_id: {
+                    "episodes": len(all_seeds),
+                    "reused": len(all_seeds),
+                    "created": 0,
+                } for policy_id in POLICIES
+            }
+            run_config.update({
+                "reused_rnn_target_cache": True,
+                "rnn_target_cache_source": str(cache_root),
+                "rnn_target_cache_source_manifest": str(cache_manifest_path),
+            })
+        else:
+            cache_root = run_dir / "cached_rnn_targets"
+            policy, _, _, device, frozen_parameters, frame_stack, _ = load_frozen_policy(
+                checkpoint, args.device
+            )
+            cache_summary = cache_rnn_targets(
+                policy, dataset_paths, all_seeds, cache_root, frame_stack
+            )
+            atomic_json(cache_root / "manifest.json", {
+                "target_policy": "frozen_bc_rnn",
+                "checkpoint": str(checkpoint),
+                "frame_stack": frame_stack,
+                "seeds": all_seeds,
+                "sources": cache_summary,
+                "stage1_data_modified": False,
+            })
+            del policy
+            if device.type == "npu" and hasattr(torch.npu, "empty_cache"):
+                torch.npu.empty_cache()
+            run_config.update({
+                "reused_rnn_target_cache": False,
+                "rnn_target_cache_source": str(cache_root),
+            })
+        atomic_json(run_dir / "config.json", run_config)
 
         train_data = {
             policy_id: Stage2PolicyDataset(
-                policy_id, path, train_seeds, run_dir / "cached_rnn_targets"
+                policy_id, path, train_seeds, cache_root, terminal_mask_mode
             ) for policy_id, path in dataset_paths.items()
         }
         validation_data = {
             policy_id: Stage2PolicyDataset(
-                policy_id, path, validation_seeds, run_dir / "cached_rnn_targets"
+                policy_id, path, validation_seeds, cache_root, terminal_mask_mode
             ) for policy_id, path in dataset_paths.items()
         }
         dimensions = {
@@ -440,10 +560,25 @@ def main():
             raise RuntimeError("Formal config must use state_dim=59 and action_dim=14")
         stats = dataset_statistics(train_data, validation_data)
         atomic_json(run_dir / "dataset_statistics.json", stats)
+        terminal_stats = terminal_mask_statistics(
+            train_data, validation_data, terminal_mask_mode
+        )
+        atomic_json(run_dir / "terminal_mask_statistics.json", terminal_stats)
+        if (
+            terminal_mask_mode == "terminated_or_truncated"
+            and terminal_stats["truncated_bootstrap_violations"] != 0
+        ):
+            raise RuntimeError(
+                "Stage 2.1 terminal mask sanity failed: "
+                f"truncated_bootstrap_violations="
+                f"{terminal_stats['truncated_bootstrap_violations']}"
+            )
 
         print("=" * 66)
-        print("Stage 2 SAC Critic Pretraining")
+        print("Stage 2.1 Critic Pretraining" if experiment_name == "stage2_1" else "Stage 2 SAC Critic Pretraining")
         print("=" * 66)
+        if experiment_name == "stage2_1":
+            print("Change from Stage 2: truncated transitions no longer bootstrap")
         print("Device:", device)
         print("Selected datasets:")
         for policy_id in POLICIES:
@@ -462,8 +597,19 @@ def main():
         })
         print("Terminated count:", sum(row["terminated_count"] for row in stats.values()))
         print("Truncated count:", sum(row["truncated_count"] for row in stats.values()))
-        print("All RNN parameters frozen:", frozen_parameters > 0)
+        print("Frozen RNN cache:", "REUSED" if run_config["reused_rnn_target_cache"] else "CREATED")
+        print("Cache source:", cache_root)
+        if frozen_parameters is not None:
+            print("All RNN parameters frozen:", frozen_parameters > 0)
         print("RNN target cache:", cache_summary)
+        print("Terminal mask:")
+        print("  terminated -> 0")
+        print("  truncated ->", 0 if terminal_mask_mode == "terminated_or_truncated" else 1)
+        print("  other -> 1")
+        print("Terminal mask sanity:")
+        print("  terminated transitions:", terminal_stats["terminated_count"])
+        print("  truncated transitions:", terminal_stats["truncated_count"])
+        print("  truncated bootstrap violations:", terminal_stats["truncated_bootstrap_violations"])
 
         seed_all(int(config["random_seed"]))
         base_critic, base_target = make_critic_pair(59, 14, config["hidden_dims"], device)
@@ -504,7 +650,7 @@ def main():
             config, device, run_dir / "multi_il_critic",
         )
 
-        summary = {
+        stage_results = {
             "random_critic": compact_summary(random_evaluation),
             "rnn_only_critic": compact_summary(rnn_evaluation),
             "multi_il_critic": compact_summary(multi_evaluation),
@@ -521,18 +667,45 @@ def main():
                     ),
                 }
             },
-            "run_dir": str(run_dir),
-            "completed_at": now(),
-            "stage3_started": False,
-            "stage4_started": False,
         }
-        atomic_json(run_dir / "stage2_summary.json", summary)
+        if experiment_name == "stage2_1":
+            comparison_to_v1 = stage2_v1_comparison(
+                config["stage2_v1_run_dir"], rnn_evaluation, multi_evaluation
+            )
+            summary = {
+                "stage": "stage2_1_critic_pretraining",
+                "terminal_mask_mode": terminal_mask_mode,
+                "reused_rnn_target_cache": run_config["reused_rnn_target_cache"],
+                "rnn_target_cache_source": str(cache_root),
+                "terminal_mask_statistics": terminal_stats,
+                "stage2_1": stage_results,
+                "comparison_to_stage2_v1": comparison_to_v1,
+                "run_dir": str(run_dir),
+                "smoke_test": bool(args.smoke_test),
+                "completed_at": now(),
+                "stage3_started": False,
+                "stage4_started": False,
+            }
+        else:
+            summary = {
+                **stage_results,
+                "run_dir": str(run_dir),
+                "completed_at": now(),
+                "stage3_started": False,
+                "stage4_started": False,
+            }
+            comparison_to_v1 = None
+        summary_filename = config.get("summary_filename", "stage2_summary.json")
+        atomic_json(run_dir / summary_filename, summary)
         if latest_path is not None:
             atomic_json(latest_path, {
-                "run_dir": str(run_dir), "created_at": now(), "status": "complete"
+                "run_dir": str(run_dir),
+                "created_at": now(),
+                "terminal_rule": terminal_rule,
+                "status": "smoke_complete" if args.smoke_test else "complete",
             })
         print("\n" + "-" * 66)
-        print("Stage 2 Summary")
+        print("Stage 2.1 Summary" if experiment_name == "stage2_1" else "Stage 2 Summary")
         print("-" * 66)
         for label, evaluation in (
             ("Random", random_evaluation), ("RNN-only", rnn_evaluation), ("Multi", multi_evaluation)
@@ -543,12 +716,27 @@ def main():
                 f"success_q={evaluation['success_trajectory_q_mean']} "
                 f"failure_q={evaluation['failure_trajectory_q_mean']}"
             )
+        if comparison_to_v1 is not None:
+            print("Comparison to Stage 2 v1:")
+            for label in ("rnn_only", "multi_il"):
+                row = comparison_to_v1[label]
+                print(
+                    f"  {label}: td_mse {row['v1_final_td_mse']} -> "
+                    f"{row['v2_final_td_mse']}, q_range "
+                    f"[{row['v1_final_q_min']}, {row['v1_final_q_max']}] -> "
+                    f"[{row['v2_final_q_min']}, {row['v2_final_q_max']}], "
+                    f"ranking {row['v1_pairwise_ranking_accuracy']} -> "
+                    f"{row['v2_pairwise_ranking_accuracy']}"
+                )
         print("Run directory:", run_dir)
         print("=" * 66)
     except BaseException as exception:
         if latest_path is not None:
             atomic_json(latest_path, {
-                "run_dir": str(run_dir), "created_at": now(), "status": "failed",
+                "run_dir": str(run_dir),
+                "created_at": now(),
+                "terminal_rule": terminal_rule,
+                "status": "smoke_failed" if args.smoke_test else "failed",
                 "error": f"{type(exception).__name__}: {exception}",
             })
         raise
