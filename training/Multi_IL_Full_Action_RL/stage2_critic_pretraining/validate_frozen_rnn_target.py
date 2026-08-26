@@ -132,11 +132,28 @@ def checkpoint_from_rnn_dataset(path, training_runs_root):
 
 def select_device(name):
     import torch
+    wants_npu = name == "auto" or str(name).split(":", 1)[0] == "npu"
+    if wants_npu:
+        try:
+            import torch_npu  # noqa: F401 - registers torch.npu / the "npu" device type
+        except ImportError as exception:
+            if name != "auto":
+                raise RuntimeError(
+                    f"Requested device {name!r}, but torch_npu is not importable"
+                ) from exception
     if name != "auto":
-        return torch.device(name)
+        device = torch.device(name)
+        if device.type == "npu":
+            npu = getattr(torch, "npu", None)
+            if npu is None or not npu.is_available():
+                raise RuntimeError(f"Requested device {name!r}, but Ascend NPU is unavailable")
+            npu.set_device(device)
+        return device
     npu = getattr(torch, "npu", None)
     if npu is not None and npu.is_available():
-        return torch.device("npu:0")
+        device = torch.device("npu:0")
+        npu.set_device(device)
+        return device
     if torch.cuda.is_available():
         return torch.device("cuda:0")
     return torch.device("cpu")
