@@ -1,0 +1,54 @@
+{
+  "stage": "stage3_actor_initialization",
+  "output_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_actor_initialization",
+  "stage1_5_manifest": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/analysis/stage1_5_selected_datasets.json",
+  "seed_split": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage2_critic_pretraining/stage2_seed_split.json",
+  "teacher_type": "BC-RNN-LSTM",
+  "teacher_checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_rnn_official_ph_low_dim/two_arm_transport_bc_rnn_official_ph_low_dim/20260811151701/models/model_epoch_1000_low_dim_v15_success_0.9.pth",
+  "teacher_strict_100_seed_success_rate": 0.77,
+  "student_type": "MLP-SAC-Actor",
+  "architecture": {
+    "state_dim": 59,
+    "action_dim": 14,
+    "hidden_dims": [256, 256]
+  },
+  "batch_size": 256,
+  "epochs": 100,
+  "learning_rate": 0.0003,
+  "weight_decay": 0.0,
+  "random_seed": 20260826,
+  "candidate_epochs": [10, 25, 50, 75, 100],
+  "evaluation_horizon": 700,
+  "terminate_on_success": true,
+  "distribution": {
+    "initial_log_std": -3.0,
+    "log_std_min": -20.0,
+    "log_std_max": 2.0,
+    "log_std_mode": "state_dependent_head_initialized_constant",
+    "freeze_log_std_during_distillation": true
+  },
+  "train_seeds": [
+    10000, 10001, 10002, 10003, 10004, 10005, 10006, 10007, 10008, 10009,
+    10010, 10011, 10012, 10013, 10014, 10015, 10016, 10017, 10018, 10019,
+    10020, 10021, 10022, 10023, 10024, 10025, 10026, 10027, 10028, 10029,
+    10030, 10031, 10032, 10033, 10034, 10035, 10036, 10037, 10038, 10039,
+    10040, 10041, 10042, 10043, 10044, 10045, 10046, 10047, 10048, 10049,
+    10050, 10051, 10052, 10053, 10054, 10055, 10056, 10057, 10058, 10059,
+    10060, 10061, 10062, 10063, 10064, 10065, 10066, 10067, 10068, 10069,
+    10070, 10071, 10072, 10073, 10074, 10075, 10076, 10077, 10078, 10079
+  ],
+  "validation_seeds": [
+    10080, 10081, 10082, 10083, 10084, 10085, 10086, 10087, 10088, 10089,
+    10090, 10091, 10092, 10093, 10094, 10095, 10096, 10097, 10098, 10099
+  ],
+  "distillation_loss": "MSE(post_tanh_deterministic_action, stored_bc_rnn_env_action)",
+  "action_convention": {
+    "teacher_target": "Stage 1 action exactly passed to env.step",
+    "student_distribution": "squashed Gaussian",
+    "stochastic_action": "tanh(Normal(mu, exp(log_std)))",
+    "deterministic_action": "tanh(mu)",
+    "environment_action_range": [-1.0, 1.0],
+    "loss_space": "post-tanh environment action space",
+    "extra_action_scaling": false
+  }
+}

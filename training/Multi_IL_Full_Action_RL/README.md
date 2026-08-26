@@ -1,6 +1,6 @@
 # Multi-IL + Full-Action RL
 
-**STATUS: Stage 1/1.5 complete; Stage 2 v1 and Stage 2.1 critic experiments implemented; Stage 3/4 not started**
+**STATUS: Stage 1/1.5 complete; Stage 2 v1/2.1 complete; Stage 3 actor initialization implemented; Stage 4 not started**
 
 This is a separate long-lived research project. It does not reuse or overwrite `training/IL+RL`,
 and it never modifies the three Pure IL checkpoints.
@@ -12,8 +12,8 @@ and it never modifies the three Pure IL checkpoints.
 3. **Stage 3:** initialize a SAC-compatible actor from the strongest IL policy.
 4. **Stage 4:** non-residual full-action online SAC.
 
-The final execution rule is `a_exec = a_SAC`, not `a_IL + delta_a`. Stage 2, Stage 3, and Stage 4
-are intentionally placeholders; this implementation does not train a critic, actor, or SAC agent.
+The final execution rule is `a_exec = a_SAC`, not `a_IL + delta_a`. Stage 3 trains only the
+standalone SAC-compatible actor initialization; Stage 4 online SAC remains unimplemented.
 
 Stage 1.5 is a strictly read-only bridge between collection and later training. It recursively
 discovers runtime artifacts from `training_runs`, validates candidates from their contents, selects
@@ -37,6 +37,12 @@ loss, or Stage 3/4 execution. See `stage2_critic_pretraining/README.md`.
 Stage 2.1 is a single-variable correction experiment. It preserves Stage 2 v1 and reuses its frozen
 RNN action cache, while treating both `terminated` and `truncated` episode boundaries as
 non-bootstrapping transitions. All preceding transitions retain normal TD backup.
+
+Stage 3 reads only the selected BC-RNN Stage 1 transitions and distills stored post-tanh environment
+actions into a `59 -> 256 -> 256 -> (mu, log_std)` squashed-Gaussian actor. Its only optimization
+objective is deterministic action MSE. It does not load a critic or start online RL. See
+`stage3_actor_initialization/README.md` for the smoke test, formal training, and separate candidate
+rollout-evaluation commands.
 
 ## Stage 1 implementation
 
