@@ -3,7 +3,6 @@
 
 import argparse
 import copy
-import json
 import random
 import sys
 from pathlib import Path
@@ -20,7 +19,8 @@ for path in (THIS_DIR, STAGE1_DIR):
         sys.path.insert(0, str(path))
 
 from actor_network import load_actor_checkpoint, stochastic_action_and_log_prob  # noqa: E402
-from common import extract_canonical_observation  # noqa: E402
+from common import atomic_json, extract_canonical_observation  # noqa: E402
+from collect_multi_il_rollouts import progress_observation_schema  # noqa: E402
 import robomimic.utils.file_utils as FileUtils  # noqa: E402
 import robomimic.utils.obs_utils as ObsUtils  # noqa: E402
 
@@ -97,8 +97,155 @@ def close_env(env):
         close()
 
 
+def extract_transport_progress(canonical_observation, progress_schema):
+    """Read Stage 1-mapped Transport flags without assuming object-vector indices."""
+    result = {}
+    for name in ("trash_in_trash_bin", "payload_in_target_bin"):
+        descriptor = progress_schema["fields"].get(name)
+        if descriptor is None:
+            raise RuntimeError(f"Stage 1 progress schema is missing {name!r}")
+        key = descriptor["canonical_key"]
+        index = int(descriptor["flat_index"])
+        if key not in canonical_observation:
+            raise RuntimeError(f"Progress source key {key!r} is absent from canonical observation")
+        values = np.asarray(canonical_observation[key]).reshape(-1)
+        if index < 0 or index >= values.size:
+            raise RuntimeError(f"Progress index is out of range: {name} index={index}, width={values.size}")
+        value = float(values[index])
+        if value not in (0.0, 1.0):
+            raise RuntimeError(f"Progress observable is not boolean-valued: {name}={value}")
+        result[name] = bool(value)
+    return result
+
+
+def partial_progress_score(success, ever_trash, ever_payload):
+    if success:
+        return 3
+    if ever_trash and ever_payload:
+        return 2
+    if ever_trash or ever_payload:
+        return 1
+    return 0
+
+
+def build_report(args, checkpoint_path, device, source_dataset, initial_states_path,
+                 horizon, terminate_on_success, progress_schema, results):
+    completed = len(results)
+    successes = sum(int(row["success"]) for row in results)
+
+    def count(field):
+        return sum(int(row[field]) for row in results)
+
+    trash_ever = count("ever_trash_in_bin")
+    trash_final = count("final_trash_in_bin")
+    payload_ever = count("ever_payload_in_bin")
+    payload_final = count("final_payload_in_bin")
+    both_ever = sum(int(row["ever_trash_in_bin"] and row["ever_payload_in_bin"]) for row in results)
+    both_final = sum(int(row["final_trash_in_bin"] and row["final_payload_in_bin"]) for row in results)
+
+    def completion(count_value):
+        return {
+            "count": count_value,
+            "rate": count_value / completed if completed else None,
+        }
+
+    failures = [row for row in results if not row["success"]]
+    failure_progress = {
+        "none": sum(int(not row["ever_trash_in_bin"] and not row["ever_payload_in_bin"]) for row in failures),
+        "trash_only_ever": sum(int(row["ever_trash_in_bin"] and not row["ever_payload_in_bin"]) for row in failures),
+        "payload_only_ever": sum(int(not row["ever_trash_in_bin"] and row["ever_payload_in_bin"]) for row in failures),
+        "both_ever_but_failed": sum(int(row["ever_trash_in_bin"] and row["ever_payload_in_bin"]) for row in failures),
+    }
+    histogram = {
+        str(score): sum(int(row["partial_progress_score"] == score) for row in results)
+        for score in range(4)
+    }
+    return {
+        "stage": "stage3_actor_initialization_candidate_evaluation",
+        "checkpoint": str(checkpoint_path),
+        "device": str(device),
+        "deterministic": args.deterministic,
+        "seed_start": args.seed_start,
+        "num_seeds": args.num_seeds,
+        "requested_episodes": args.num_seeds,
+        "completed_episodes": completed,
+        "completed_seeds": [int(row["initial_seed"]) for row in results],
+        "evaluation_complete": completed == args.num_seeds,
+        "successes": successes,
+        "success_rate": successes / completed if completed else None,
+        "mean_episode_return": float(np.mean([row["episode_return"] for row in results])) if completed else None,
+        "mean_episode_length": float(np.mean([row["episode_length"] for row in results])) if completed else None,
+        "subtask_completion": {
+            "trash": {
+                "ever_completed_count": trash_ever,
+                "ever_completed_rate": completion(trash_ever)["rate"],
+                "completed_at_end_count": trash_final,
+                "completed_at_end_rate": completion(trash_final)["rate"],
+            },
+            "payload": {
+                "ever_completed_count": payload_ever,
+                "ever_completed_rate": completion(payload_ever)["rate"],
+                "completed_at_end_count": payload_final,
+                "completed_at_end_rate": completion(payload_final)["rate"],
+            },
+            "both": {
+                "ever_completed_count": both_ever,
+                "ever_completed_rate": completion(both_ever)["rate"],
+                "completed_at_end_count": both_final,
+                "completed_at_end_rate": completion(both_final)["rate"],
+            },
+        },
+        "failure_progress": failure_progress,
+        "progress_histogram": histogram,
+        "mean_partial_progress_score": (
+            float(np.mean([row["partial_progress_score"] for row in results])) if completed else None
+        ),
+        "horizon": horizon,
+        "terminate_on_success": terminate_on_success,
+        "source_dataset": str(source_dataset),
+        "initial_states": str(initial_states_path),
+        "progress_source": "Stage 1 progress_observation_schema derived from active robosuite object observables",
+        "progress_observation_schema": progress_schema,
+        "episodes": results,
+    }
+
+
+def print_final_summary(report, output):
+    completed = report["completed_episodes"]
+    requested = report["requested_episodes"]
+    subtasks = report["subtask_completion"]
+    histogram = report["progress_histogram"]
+    failures = report["failure_progress"]
+    print("=" * 80)
+    print("Stage 3 Actor Evaluation Summary")
+    print("=" * 80)
+    print(f"Completed: {completed} / {requested}")
+    print(f"Success: {report['successes']} / {completed} = {report['success_rate']:.4f}")
+    print("Subtask completion:")
+    print(f"Trash ever completed: {subtasks['trash']['ever_completed_count']} / {completed}")
+    print(f"Trash completed at end: {subtasks['trash']['completed_at_end_count']} / {completed}")
+    print(f"Payload ever completed: {subtasks['payload']['ever_completed_count']} / {completed}")
+    print(f"Payload completed at end: {subtasks['payload']['completed_at_end_count']} / {completed}")
+    print(f"Both ever completed: {subtasks['both']['ever_completed_count']} / {completed}")
+    print(f"Both completed at end: {subtasks['both']['completed_at_end_count']} / {completed}")
+    print("Partial progress:")
+    for score in range(4):
+        print(f"  score {score}: {histogram[str(score)]}")
+    print("Failure progress:")
+    print(f"  none: {failures['none']}")
+    print(f"  trash only ever: {failures['trash_only_ever']}")
+    print(f"  payload only ever: {failures['payload_only_ever']}")
+    print(f"  both ever but failed: {failures['both_ever_but_failed']}")
+    print(f"Mean progress score: {report['mean_partial_progress_score']:.6f}")
+    print(f"Success rate: {report['success_rate']:.6f}")
+    print(f"Evaluation JSON: {output}")
+    print("=" * 80)
+
+
 def main():
     args = parse_args()
+    if args.num_seeds <= 0:
+        raise ValueError("--num-seeds must be positive")
     device = select_device(args.device)
     checkpoint_path = Path(args.checkpoint).resolve()
     actor, payload = load_actor_checkpoint(checkpoint_path, device=device)
@@ -119,7 +266,13 @@ def main():
     env, _ = FileUtils.env_from_checkpoint(ckpt_dict=checkpoint_dict, render=False, render_offscreen=False, verbose=False)
     horizon = int(payload.get("evaluation_horizon", 700))
     terminate_on_success = bool(payload.get("terminate_on_success", True))
+    progress_schema = progress_observation_schema(env, observation_keys, observation_shapes)
+    output = Path(args.output) if args.output else checkpoint_path.parents[1] / f"evaluation_{checkpoint_path.stem}.json"
     results = []
+    atomic_json(output, build_report(
+        args, checkpoint_path, device, source_dataset, initial_states_path,
+        horizon, terminate_on_success, progress_schema, results,
+    ))
     print("=" * 80)
     print("Stage 3 actor environment evaluation")
     print(f"Checkpoint: {checkpoint_path}")
@@ -136,6 +289,10 @@ def main():
             raw_done = False
             success = env_success(env)
             steps = 0
+            ever_trash = False
+            ever_payload = False
+            final_trash = False
+            final_payload = False
             for step in range(horizon):
                 canonical = extract_canonical_observation(observation, observation_keys, observation_shapes)
                 flat = np.concatenate([canonical[key].reshape(-1) for key in observation_keys]).astype(np.float32)
@@ -151,36 +308,63 @@ def main():
                 observation, reward, raw_done, _ = env.step(action_np)
                 episode_return += float(reward)
                 steps = step + 1
+                next_canonical = extract_canonical_observation(
+                    observation, observation_keys, observation_shapes
+                )
+                progress = extract_transport_progress(next_canonical, progress_schema)
+                final_trash = progress["trash_in_trash_bin"]
+                final_payload = progress["payload_in_target_bin"]
+                ever_trash = ever_trash or final_trash
+                ever_payload = ever_payload or final_payload
                 success = env_success(env)
                 if raw_done or (terminate_on_success and success):
                     break
             truncated = bool(not raw_done and (success or steps >= horizon))
-            row = {"initial_seed": seed, "success": int(success), "episode_return": episode_return,
-                   "episode_length": steps, "terminated": bool(raw_done), "truncated": truncated}
+            score = partial_progress_score(success, ever_trash, ever_payload)
+            row = {
+                "initial_seed": seed,
+                "success": int(success),
+                "episode_return": episode_return,
+                "episode_length": steps,
+                "terminated": bool(raw_done),
+                "truncated": truncated,
+                "subtasks": {
+                    "trash": {
+                        "ever_completed": bool(ever_trash),
+                        "completed_at_end": bool(final_trash),
+                    },
+                    "payload": {
+                        "ever_completed": bool(ever_payload),
+                        "completed_at_end": bool(final_payload),
+                    },
+                },
+                "ever_trash_in_bin": bool(ever_trash),
+                "ever_payload_in_bin": bool(ever_payload),
+                "final_trash_in_bin": bool(final_trash),
+                "final_payload_in_bin": bool(final_payload),
+                "partial_progress_score": score,
+            }
             results.append(row)
-            print(f"[{position:03d}/{len(seeds):03d}] seed={seed} success={int(success)} return={episode_return:.3f} length={steps}")
+            current_report = build_report(
+                args, checkpoint_path, device, source_dataset, initial_states_path,
+                horizon, terminate_on_success, progress_schema, results,
+            )
+            atomic_json(output, current_report)
+            print(
+                f"[{position:03d}/{len(seeds):03d}] seed={seed} success={int(success)} "
+                f"progress={score} trash_ever={int(ever_trash)} payload_ever={int(ever_payload)} "
+                f"trash_final={int(final_trash)} payload_final={int(final_payload)} "
+                f"return={episode_return:.3f} length={steps}"
+            )
     finally:
         close_env(env)
 
-    successes = sum(row["success"] for row in results)
-    report = {
-        "stage": "stage3_actor_initialization_candidate_evaluation", "checkpoint": str(checkpoint_path),
-        "device": str(device), "deterministic": args.deterministic, "seed_start": args.seed_start,
-        "num_seeds": args.num_seeds, "successes": successes,
-        "success_rate": successes / len(results) if results else None,
-        "mean_episode_return": float(np.mean([row["episode_return"] for row in results])) if results else None,
-        "mean_episode_length": float(np.mean([row["episode_length"] for row in results])) if results else None,
-        "horizon": horizon, "terminate_on_success": terminate_on_success,
-        "source_dataset": str(source_dataset), "initial_states": str(initial_states_path), "episodes": results,
-    }
-    output = Path(args.output) if args.output else checkpoint_path.parents[1] / f"evaluation_{checkpoint_path.stem}.json"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w", encoding="utf-8") as stream:
-        json.dump(report, stream, indent=2, ensure_ascii=False)
-    print("=" * 80)
-    print(f"Success: {successes}/{len(results)} = {report['success_rate']:.4f}")
-    print(f"Report: {output}")
-    print("=" * 80)
+    report = build_report(
+        args, checkpoint_path, device, source_dataset, initial_states_path,
+        horizon, terminate_on_success, progress_schema, results,
+    )
+    atomic_json(output, report)
+    print_final_summary(report, output)
 
 
 if __name__ == "__main__":
