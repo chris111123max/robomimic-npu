@@ -12,8 +12,11 @@ The state vector is flattened in the exact `canonical_observation_keys` order
 stored at the HDF5 root; Python dictionary iteration order is never used.
 
 The target is the 14-D action actually executed by Stage 1. Those values are
-already post-tanh environment actions in `[-1, 1]`. The deterministic actor
-output is `tanh(mu)`, so training applies neither another tanh nor action scaling.
+already post-tanh environment actions with nominal bounds `[-1, 1]`. The Stage 1
+checkpoint path can retain sub-`1e-3` floating-point overshoot at a bound; Stage 3
+records that overshoot and preserves the target verbatim instead of clipping it.
+The deterministic actor output is `tanh(mu)`, so training applies neither another
+tanh nor action scaling.
 
 ## Actor API
 

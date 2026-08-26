@@ -19,6 +19,12 @@ EXPECTED_KEYS = {
     "robot1_gripper_qpos": (2,),
 }
 
+# Stage 1 deliberately stored the exact float action passed to env.step. The
+# checkpoint / normalization path can produce sub-1e-3 float overshoot around
+# the nominal robosuite bounds. Preserve those supervision targets verbatim;
+# this tolerance is validation-only and must never be used to clip the data.
+STORED_ACTION_BOUND_TOLERANCE = 1e-3
+
 
 def decode(value):
     if isinstance(value, bytes):
@@ -113,10 +119,14 @@ class Stage3TransitionDataset:
                 action_max = max(action_max, float(action.max()))
         self.states = np.concatenate(states, axis=0).astype(np.float32, copy=False)
         self.actions = np.concatenate(actions, axis=0).astype(np.float32, copy=False)
-        if action_min < -1.0001 or action_max > 1.0001:
+        if (action_min < -1.0 - STORED_ACTION_BOUND_TOLERANCE or
+                action_max > 1.0 + STORED_ACTION_BOUND_TOLERANCE):
             raise RuntimeError(
-                f"Stored env action is outside expected [-1, 1]: min={action_min}, max={action_max}"
+                "Stored env action exceeds the allowed numerical tolerance around [-1, 1]: "
+                f"min={action_min}, max={action_max}, tolerance={STORED_ACTION_BOUND_TOLERANCE}"
             )
+        below_bound = self.actions < -1.0
+        above_bound = self.actions > 1.0
         self.statistics = {
             "seeds": self.seeds,
             "episode_count": len(self.seeds),
@@ -126,6 +136,13 @@ class Stage3TransitionDataset:
             "action_shape": [14],
             "action_min": action_min,
             "action_max": action_max,
+            "nominal_action_bounds": [-1.0, 1.0],
+            "bound_validation_tolerance": STORED_ACTION_BOUND_TOLERANCE,
+            "values_below_nominal_bound": int(below_bound.sum()),
+            "values_above_nominal_bound": int(above_bound.sum()),
+            "maximum_lower_bound_overshoot": max(0.0, -1.0 - action_min),
+            "maximum_upper_bound_overshoot": max(0.0, action_max - 1.0),
+            "targets_clipped_or_rescaled": False,
             "canonical_keys_in_flatten_order": self.metadata["canonical_keys"],
         }
 
