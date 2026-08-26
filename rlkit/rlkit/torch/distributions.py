@@ -1,6 +1,5 @@
 import torch
 from torch.distributions import Distribution, Normal
-import rlkit.torch.pytorch_util as ptu
 
 
 class TanhNormal(Distribution):
@@ -61,15 +60,11 @@ class TanhNormal(Distribution):
         """
         Sampling in the reparameterization case.
         """
-        z = (
-            self.normal_mean +
-            self.normal_std *
-            Normal(
-                ptu.zeros(self.normal_mean.size()),
-                ptu.ones(self.normal_std.size())
-            ).sample()
-        )
-        z.requires_grad_()
+        # Keep the reparameterization noise on the same device and with the
+        # same dtype as the policy output. The legacy ptu.zeros / ptu.ones
+        # path depends on RLKit's global CUDA flag and therefore creates CPU
+        # tensors when the policy lives on an Ascend NPU.
+        z = self.normal_mean + self.normal_std * torch.randn_like(self.normal_mean)
 
         if return_pretanh_value:
             return torch.tanh(z), z
