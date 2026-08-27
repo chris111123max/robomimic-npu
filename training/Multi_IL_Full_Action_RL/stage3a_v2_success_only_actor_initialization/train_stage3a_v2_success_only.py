@@ -36,6 +36,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(THIS_DIR / "stage3a_v2_success_only_config.json"))
     parser.add_argument("--device", default="npu:0")
+    parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--smoke-test", action="store_true")
@@ -180,6 +181,12 @@ def main():
     if args.output_root:
         config["output_root"] = args.output_root
     config["device"] = args.device
+    if args.epochs is not None:
+        if args.epochs <= 0:
+            raise ValueError("--epochs must be positive")
+        config["epochs"] = int(args.epochs)
+        if int(args.epochs) not in config["candidate_epochs"]:
+            config["candidate_epochs"] = [*config["candidate_epochs"], int(args.epochs)]
     if args.smoke_test:
         config["epochs"] = 2
         config["candidate_epochs"] = [1, 2]
