@@ -8,7 +8,6 @@ import copy
 import csv
 import json
 import math
-import sys
 from pathlib import Path
 
 import h5py
@@ -17,10 +16,6 @@ import torch
 
 
 THIS_DIR = Path(__file__).resolve().parent
-V2_DIR = THIS_DIR.parent / "stage3a_v2_success_only_actor_initialization"
-for path in (THIS_DIR, V2_DIR):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
 
 from actor_network import load_actor_checkpoint, stochastic_action_and_log_prob  # noqa: E402
 from stage3b_common import (  # noqa: E402
@@ -31,7 +26,10 @@ from stage3b_common import (  # noqa: E402
     select_device,
     validate_frozen_log_std,
 )
-from success_only_dataset import SuccessOnlyTransitionDataset, inspect_dataset  # noqa: E402
+from stage3b_success_dataset import (  # noqa: E402
+    Stage3BSuccessTransitionDataset,
+    inspect_dataset,
+)
 
 
 def parse_args():
@@ -164,10 +162,10 @@ def main():
     dataset_info = inspect_dataset(config["stage1_rnn_dataset"])
     if Path(dataset_info["checkpoint"]).resolve() != Path(config["teacher_checkpoint"]).resolve():
         raise RuntimeError("Base expert dataset teacher checkpoint mismatch")
-    expert = SuccessOnlyTransitionDataset(
+    expert = Stage3BSuccessTransitionDataset(
         config["stage1_rnn_dataset"], range(train_start, train_end + 1)
     )
-    validation = SuccessOnlyTransitionDataset(
+    validation = Stage3BSuccessTransitionDataset(
         config["stage1_rnn_dataset"], range(heldout_start, heldout_end + 1)
     )
     corrective = load_corrective(args.corrective_dataset, train_start, train_end)
