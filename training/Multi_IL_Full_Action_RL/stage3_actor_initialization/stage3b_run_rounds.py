@@ -22,7 +22,9 @@ THIS_DIR = Path(__file__).resolve().parent
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=str(THIS_DIR / "stage3b_config.json"))
-    parser.add_argument("--stage", choices=("smoke", "run-all", "select"), required=True)
+    parser.add_argument(
+        "--stage", choices=("smoke", "bootstrap", "run-all", "select"), required=True
+    )
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--device", default="npu:0")
     return parser.parse_args()
@@ -112,16 +114,19 @@ def select_actor(config, run_dir, candidates):
 
 
 def round_candidates(config, run_dir):
-    initial_payload = torch.load(config["initial_actor_checkpoint"], map_location="cpu")
+    initial_checkpoint = run_dir / "checkpoints" / "round0_best.pth"
+    if not initial_checkpoint.is_file():
+        raise RuntimeError(f"Stage 3B Round-0 checkpoint is missing: {initial_checkpoint}")
+    initial_payload = torch.load(initial_checkpoint, map_location="cpu")
     initial_val_mse = initial_payload.get("best_val_mse")
     if initial_val_mse is None:
         validation = initial_payload.get("validation", {})
         initial_val_mse = validation.get("action_mse", validation.get("val_mse"))
     if initial_val_mse is None:
-        raise RuntimeError("Initial Stage3A-v2 checkpoint has no validation MSE")
+        raise RuntimeError("Stage 3B Round-0 checkpoint has no validation MSE")
     candidates = [(
         0,
-        Path(config["initial_actor_checkpoint"]),
+        initial_checkpoint,
         run_dir / "evaluations" / "round0_heldout20.json",
         float(initial_val_mse),
     )]
@@ -139,7 +144,12 @@ def round_candidates(config, run_dir):
 def run_smoke(config_path, config, run_dir, device):
     collector = THIS_DIR / "stage3b_collect_dagger.py"
     trainer = THIS_DIR / "stage3b_train_dagger.py"
-    initial = config["initial_actor_checkpoint"]
+    run([
+        sys.executable, "-u", THIS_DIR / "stage3b_train_round0.py",
+        "--config", config_path, "--run-dir", run_dir,
+        "--epochs", 2, "--device", device,
+    ])
+    initial = run_dir / "checkpoints" / "round0_best.pth"
     run([
         sys.executable, "-u", collector, "--config", config_path,
         "--run-dir", run_dir, "--student-checkpoint", initial,
@@ -168,13 +178,29 @@ def run_smoke(config_path, config, run_dir, device):
     print(f"Stage 3B smoke test: PASS | {run_dir}")
 
 
+def run_bootstrap(config_path, config, run_dir, device):
+    run([
+        sys.executable, "-u", THIS_DIR / "stage3b_train_round0.py",
+        "--config", config_path, "--run-dir", run_dir, "--device", device,
+    ], run_dir / "logs" / "round0_training.log")
+    round0 = run_dir / "checkpoints" / "round0_best.pth"
+    run([
+        sys.executable, "-u", THIS_DIR / "stage3b_collect_dagger.py",
+        "--config", config_path, "--run-dir", run_dir,
+        "--student-checkpoint", round0, "--mode", "teacher-sanity", "--device", device,
+    ], run_dir / "logs" / "teacher_sanity.log")
+    print(f"Stage 3B fresh Round 0 and teacher sanity complete | {run_dir}")
+
+
 def run_all(config_path, config, run_dir, device):
     sanity = run_dir / "teacher_sanity.json"
     if not sanity.is_file() or read_json(sanity).get("status") != "PASS":
         raise RuntimeError("Run teacher sanity first; full DAgger is blocked")
     evaluations = run_dir / "evaluations"
     evaluations.mkdir(exist_ok=True)
-    initial = Path(config["initial_actor_checkpoint"])
+    initial = run_dir / "checkpoints" / "round0_best.pth"
+    if not initial.is_file():
+        raise RuntimeError("Train Stage 3B Round 0 before run-all")
     run(evaluator_command(
         initial, config["heldout_seeds"][0], 20,
         evaluations / "round0_heldout20.json", device,
@@ -217,7 +243,11 @@ def run_all(config_path, config, run_dir, device):
     final_metrics = evaluation_metrics(final100)
     summary = {
         "experiment": {"stage": config["stage"], "name": config["name"], "goal": config["goal"]},
-        "initial_actor": {"source": "Stage3A-v2", "checkpoint": config["initial_actor_checkpoint"]},
+        "initial_actor": {
+            "source": "Stage3B fresh random success-only BC-RNN distillation",
+            "checkpoint": str(run_dir / "checkpoints" / "round0_best.pth"),
+            "historical_actor_checkpoint_loaded": False,
+        },
         "teacher": {"type": "BC-RNN LSTM", "checkpoint": config["teacher_checkpoint"], "frozen": True},
         "actor": {"state_dim": 59, "action_dim": 14, "hidden_dims": [256, 256], "log_std": -3.0},
         "dagger": {
@@ -248,6 +278,8 @@ def main():
     atomic_json(run_dir / "config.json", config)
     if args.stage == "smoke":
         run_smoke(config_path, config, run_dir, args.device)
+    elif args.stage == "bootstrap":
+        run_bootstrap(config_path, config, run_dir, args.device)
     elif args.stage == "run-all":
         run_all(config_path, config, run_dir, args.device)
     else:

@@ -190,8 +190,8 @@ def main():
     }:
         raise RuntimeError("Stage 3B actor architecture changed")
     if args.round_id == 1:
-        if Path(args.input_checkpoint).resolve() != Path(config["initial_actor_checkpoint"]).resolve():
-            raise RuntimeError("Round 1 training must initialize from the configured Stage3A-v2 Actor")
+        if int(source_payload.get("round_id", -1)) != 0:
+            raise RuntimeError("Round 1 training must initialize from the Stage 3B Round-0 Actor")
     elif int(source_payload.get("round_id", -1)) != args.round_id - 1:
         raise RuntimeError(
             f"Round {args.round_id} training must continue from Round {args.round_id - 1} Actor"

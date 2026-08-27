@@ -251,8 +251,8 @@ def run_collection(args, config, run_dir):
         )
     resources = prepare_rollout(config, args.student_checkpoint, seeds, args.device)
     if args.round_id == 1:
-        if Path(args.student_checkpoint).resolve() != Path(config["initial_actor_checkpoint"]).resolve():
-            raise RuntimeError("Round 1 collection must start from the configured Stage3A-v2 Actor")
+        if int(resources["student_payload"].get("round_id", -1)) != 0:
+            raise RuntimeError("Round 1 collection must start from the Stage 3B Round-0 Actor")
     elif int(resources["student_payload"].get("round_id", -1)) != args.round_id - 1:
         raise RuntimeError(
             f"Round {args.round_id} collection must use Round {args.round_id - 1} Actor"
