@@ -22,6 +22,9 @@ The Student `log_std` head stays exactly zero-weight / `-3` bias and frozen.
 - DAgger minibatches are 50% original successful expert data and 50% aggregated
   corrective data.
 - Round betas are `0.7`, `0.4`, and `0.1`.
+- Formal DAgger collection uses 16 independent worker processes by default;
+  each worker writes a private HDF5 shard and the parent validates and merges
+  all shards. Smoke collection intentionally uses one worker.
 
 ## Smoke test
 

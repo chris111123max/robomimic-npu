@@ -122,17 +122,38 @@ def sample_balanced(expert, corrective, batch_size, expert_fraction, rng):
     return states[permutation], actions[permutation]
 
 
+def cpu_checkpoint_copy(value):
+    """Clone nested checkpoint tensors onto CPU without torch_npu deepcopy."""
+    if torch.is_tensor(value):
+        return value.detach().cpu().clone()
+    if isinstance(value, dict):
+        return {key: cpu_checkpoint_copy(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [cpu_checkpoint_copy(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(cpu_checkpoint_copy(item) for item in value)
+    return copy.deepcopy(value)
+
+
 def save_checkpoint(path, actor, optimizer, source_payload, config, round_id, epoch,
                     validation, total_updates, corrective):
-    payload = copy.deepcopy(source_payload)
+    # Do not deepcopy tensor-bearing state loaded from an NPU checkpoint. Some
+    # torch_npu versions restore optimizer bookkeeping with a Byte Storage that
+    # cannot be deep-copied. Both tensor-bearing fields are replaced below with
+    # the current Round state, so only immutable / CPU metadata is inherited.
+    payload = {
+        key: copy.deepcopy(value)
+        for key, value in source_payload.items()
+        if key not in ("actor_state_dict", "optimizer_state_dict")
+    }
     payload.update({
         "format_version": "multi_il_full_action_rl.stage3.actor.v1",
         "stage": "stage3b_dagger_actor_distillation",
         "experiment_id": config["experiment_id"],
         "round_id": round_id,
         "epoch": epoch,
-        "actor_state_dict": copy.deepcopy(actor.state_dict()),
-        "optimizer_state_dict": copy.deepcopy(optimizer.state_dict()),
+        "actor_state_dict": cpu_checkpoint_copy(actor.state_dict()),
+        "optimizer_state_dict": cpu_checkpoint_copy(optimizer.state_dict()),
         "validation": copy.deepcopy(validation),
         "best_val_mse": validation["val_mse"],
         "total_gradient_updates": total_updates,

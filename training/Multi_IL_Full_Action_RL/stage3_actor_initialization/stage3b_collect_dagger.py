@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import h5py
@@ -38,6 +40,9 @@ def parse_args():
     parser.add_argument("--num-seeds", type=int, default=None)
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--output", default=None)
+    parser.add_argument("--summary-output", default=None)
+    parser.add_argument("--num-workers", type=int, default=None)
+    parser.add_argument("--worker-id", type=int, default=None)
     return parser.parse_args()
 
 
@@ -295,7 +300,11 @@ def run_collection(args, config, run_dir):
         },
         "dataset": str(output), "episode_results": summaries,
     }
-    atomic_json(run_dir / f"round_{args.round_id}" / "collection_summary.json", report)
+    summary_output = (
+        Path(args.summary_output) if args.summary_output
+        else run_dir / f"round_{args.round_id}" / "collection_summary.json"
+    )
+    atomic_json(summary_output, report)
     with h5py.File(output, "r") as handle:
         reloaded = sum(int(group["state_59d"].shape[0]) for group in handle["episodes"].values())
     if reloaded != report["corrective_transitions"]:
@@ -303,6 +312,134 @@ def run_collection(args, config, run_dir):
     print(
         f"Round {args.round_id} collection complete | episodes={len(episodes)} "
         f"transitions={reloaded} dataset={output}"
+    )
+
+
+def merge_worker_datasets(shards, output):
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        raise RuntimeError(f"Refusing to overwrite existing corrective dataset: {output}")
+    episode_index = 0
+    with h5py.File(output, "w") as destination:
+        destination_root = destination.create_group("episodes")
+        for shard_index, shard in enumerate(shards):
+            with h5py.File(shard, "r") as source:
+                if shard_index == 0:
+                    for name, value in source.attrs.items():
+                        destination.attrs[name] = value
+                    destination.attrs["parallel_worker_count"] = len(shards)
+                for source_group in source["episodes"].values():
+                    source.copy(
+                        source_group,
+                        destination_root,
+                        name=f"episode_{episode_index:06d}",
+                    )
+                    episode_index += 1
+    return episode_index
+
+
+def run_parallel_collection(args, config, run_dir, num_workers):
+    train_start, train_end = config["train_seeds"]
+    seed_start = train_start if args.seed_start is None else args.seed_start
+    num_seeds = train_end - train_start + 1 if args.num_seeds is None else args.num_seeds
+    seeds = list(range(seed_start, seed_start + num_seeds))
+    if any(seed < train_start or seed > train_end for seed in seeds):
+        raise RuntimeError("Parallel DAgger collection may only use train seeds 10000..10079")
+    if num_workers > len(seeds):
+        num_workers = len(seeds)
+    partitions = [part.tolist() for part in np.array_split(np.asarray(seeds), num_workers) if len(part)]
+    worker_root = run_dir / "datasets" / "workers" / f"round_{args.round_id}"
+    summary_root = run_dir / f"round_{args.round_id}" / "workers"
+    log_root = run_dir / "logs"
+    for path in (worker_root, summary_root, log_root):
+        path.mkdir(parents=True, exist_ok=True)
+
+    processes = []
+    for worker_id, worker_seeds in enumerate(partitions):
+        shard = worker_root / f"worker_{worker_id:02d}.hdf5"
+        summary = summary_root / f"worker_{worker_id:02d}_summary.json"
+        log_path = log_root / f"round{args.round_id}_collection_worker_{worker_id:02d}.log"
+        command = [
+            sys.executable, "-u", Path(__file__).resolve(),
+            "--config", args.config, "--run-dir", run_dir,
+            "--student-checkpoint", args.student_checkpoint,
+            "--mode", "collect", "--round-id", args.round_id,
+            "--beta", args.beta, "--seed-start", worker_seeds[0],
+            "--num-seeds", len(worker_seeds), "--device", args.device,
+            "--output", shard, "--summary-output", summary,
+            "--num-workers", 1, "--worker-id", worker_id,
+        ]
+        stream = log_path.open("w", encoding="utf-8")
+        process = subprocess.Popen(
+            [str(item) for item in command], stdout=stream,
+            stderr=subprocess.STDOUT, text=True,
+        )
+        processes.append((worker_id, worker_seeds, shard, summary, log_path, stream, process))
+        print(
+            f"[parallel collection] worker={worker_id:02d} pid={process.pid} "
+            f"seeds={worker_seeds[0]}..{worker_seeds[-1]} log={log_path}"
+        )
+
+    failures = []
+    for worker_id, worker_seeds, shard, summary, log_path, stream, process in processes:
+        return_code = process.wait()
+        stream.close()
+        if return_code:
+            failures.append({
+                "worker_id": worker_id, "return_code": return_code,
+                "seeds": worker_seeds, "log": str(log_path),
+            })
+        else:
+            print(f"[parallel collection] worker={worker_id:02d} complete")
+    if failures:
+        raise RuntimeError(f"Parallel DAgger collection worker failures: {failures}")
+
+    output = (
+        Path(args.output) if args.output
+        else run_dir / "datasets" / f"round{args.round_id}_corrective.hdf5"
+    )
+    shard_paths = [item[2] for item in processes]
+    episode_count = merge_worker_datasets(shard_paths, output)
+    worker_reports = [read_json(item[3]) for item in processes]
+    episode_results = sorted(
+        [row for report in worker_reports for row in report["episode_results"]],
+        key=lambda row: row["seed"],
+    )
+    observed_seeds = [int(row["seed"]) for row in episode_results]
+    if observed_seeds != seeds or episode_count != len(seeds):
+        raise RuntimeError(
+            f"Parallel aggregate seed mismatch: expected={seeds}, observed={observed_seeds}"
+        )
+    transition_count = sum(int(row["episode_length"]) for row in episode_results)
+    report = {
+        "round_id": args.round_id, "beta": args.beta,
+        "parallel_workers": len(partitions), "episodes": episode_count,
+        "seeds": seeds,
+        "success_count": sum(int(row["success"]) for row in episode_results),
+        "success_rate": float(np.mean([row["success"] for row in episode_results])),
+        "trash_ever_rate": float(np.mean([row["trash_ever"] for row in episode_results])),
+        "payload_ever_rate": float(np.mean([row["payload_ever"] for row in episode_results])),
+        "mean_progress_score": float(np.mean([row["progress_score"] for row in episode_results])),
+        "corrective_transitions": transition_count,
+        "target_is_teacher_action": True, "heldout_seeds_used": False,
+        "dataset_shapes": {
+            "state_59d": [transition_count, 59],
+            "teacher_action_14d": [transition_count, 14],
+            "student_action_14d": [transition_count, 14],
+            "executed_action_14d": [transition_count, 14],
+        },
+        "dataset": str(output), "worker_shards": [str(path) for path in shard_paths],
+        "episode_results": episode_results,
+    }
+    atomic_json(run_dir / f"round_{args.round_id}" / "collection_summary.json", report)
+    with h5py.File(output, "r") as handle:
+        reloaded = sum(int(group["state_59d"].shape[0]) for group in handle["episodes"].values())
+    if reloaded != transition_count:
+        raise RuntimeError("Parallel corrective dataset reload transition count mismatch")
+    print(
+        f"Parallel Round {args.round_id} collection complete | workers={len(partitions)} "
+        f"episodes={episode_count} transitions={transition_count} dataset={output}"
     )
 
 
@@ -319,7 +456,15 @@ def main():
     if args.mode == "teacher-sanity":
         run_teacher_sanity(args, config, run_dir)
     else:
-        run_collection(args, config, run_dir)
+        num_workers = int(
+            args.num_workers if args.num_workers is not None else config.get("collection_workers", 1)
+        )
+        if num_workers <= 0:
+            raise ValueError("--num-workers must be positive")
+        if num_workers == 1:
+            run_collection(args, config, run_dir)
+        else:
+            run_parallel_collection(args, config, run_dir, num_workers)
 
 
 if __name__ == "__main__":

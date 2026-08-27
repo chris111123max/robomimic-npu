@@ -161,7 +161,7 @@ def run_smoke(config_path, config, run_dir, device):
         "--run-dir", run_dir, "--student-checkpoint", initial,
         "--mode", "collect", "--round-id", 1, "--beta", config["rounds"][0]["beta"],
         "--seed-start", config["train_seeds"][0], "--num-seeds", 2,
-        "--device", device, "--output", smoke_dataset,
+        "--device", device, "--output", smoke_dataset, "--num-workers", 1,
     ])
     run([
         sys.executable, "-u", trainer, "--config", config_path,
