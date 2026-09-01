@@ -1,0 +1,79 @@
+{
+  "audit": "Recurrent SAC Framework Selection & Compatibility Audit",
+  "decision": "NO SUITABLE EXISTING RECURRENT SAC FOUND",
+  "recommended_framework": null,
+  "recommended_version": null,
+  "reason": "No audited framework simultaneously provides mature continuous recurrent SAC sequence learning, burn-in, recurrent actor plus independent feed-forward critic, strict Stage2 TwinCritic reuse, and practical Ascend NPU support without implementing prohibited recurrent SAC machinery.",
+  "candidates": {
+    "tianshou_2.0.1": {
+      "continuous_sac": true,
+      "recurrent_actor": true,
+      "collector_hidden_state": true,
+      "sequence_replay": "stack_num observation stacking; not a verified complete recurrent SAC sequence learner",
+      "burn_in": false,
+      "recurrent_off_policy_sac_end_to_end": false,
+      "recurrent_actor_feedforward_critic": "module API permits separation, but correct sequence-training path is missing",
+      "custom_actor": true,
+      "custom_critic": true,
+      "npu_compatibility": "B for ordinary tensor modules, but algorithmic gap remains",
+      "verdict": "REJECT"
+    },
+    "rllib_2.58.0": {
+      "continuous_sac": true,
+      "recurrent_actor": true,
+      "sequence_replay": true,
+      "burn_in": true,
+      "recurrent_off_policy_infrastructure": true,
+      "recurrent_actor_feedforward_critic": "requires substantial custom SAC RLModule/model validation",
+      "custom_actor": true,
+      "custom_critic": true,
+      "npu_compatibility": "C major incompatibility",
+      "stage2_critic_reuse": "difficult; custom API and target-update bridge required",
+      "verdict": "REJECT"
+    },
+    "stable_baselines3_contrib": {
+      "continuous_sac": "SB3 core only",
+      "recurrent_actor": "RecurrentPPO only",
+      "recurrent_sac": false,
+      "sequence_replay": false,
+      "burn_in": false,
+      "verdict": "REJECT"
+    },
+    "cleanrl": {
+      "continuous_sac": true,
+      "recurrent_sac": false,
+      "sequence_replay": false,
+      "burn_in": false,
+      "modular_framework": false,
+      "verdict": "REJECT"
+    }
+  },
+  "bc_rnn_transfer": {
+    "lstm_direct_tensor_transfer": true,
+    "source": "torch.nn.LSTM(59, 400, num_layers=2, batch_first=True)",
+    "hidden_state": "(h,c), each [2,B,400]",
+    "observation_adapter_required": true,
+    "actor_input_order": ["object", "robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos", "robot1_eef_pos", "robot1_eef_quat", "robot1_gripper_qpos"],
+    "new_heads": ["Linear(400,14) mu", "Linear(400,14) log_std"]
+  },
+  "stage2_critic": {
+    "modification_required": false,
+    "architecture": "TwinCritic; each Q is 73->256->256->1",
+    "strict_checkpoint_reuse_required": true,
+    "adapter": "Expose q1(s,a) and q2(s,a) without changing the TwinCritic state_dict"
+  },
+  "dependencies_installed": false,
+  "environment_modified": false,
+  "custom_recurrent_sac_implemented": false,
+  "training_started": false,
+  "stage4_started": false,
+  "sources": [
+    "https://github.com/thu-ml/tianshou",
+    "https://github.com/thu-ml/tianshou/blob/master/tianshou/algorithm/modelfree/sac.py",
+    "https://github.com/thu-ml/tianshou/discussions/698",
+    "https://docs.ray.io/en/latest/rllib/rllib-algorithms.html#soft-actor-critic-sac",
+    "https://docs.ray.io/en/latest/rllib/package_ref/doc/ray.rllib.utils.replay_buffers.multi_agent_replay_buffer.MultiAgentReplayBuffer.__init__.html",
+    "https://stable-baselines3.readthedocs.io/en/v2.3.0/guide/sb3_contrib.html",
+    "https://github.com/vwxyzjn/cleanrl/blob/master/docs/rl-algorithms/overview.md"
+  ]
+}
