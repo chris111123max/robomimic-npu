@@ -22,4 +22,14 @@ NPU_ID=0 bash training/Multi_IL_Full_Action_RL/stage3_r_bc_rnn_to_rsac/run.sh sm
 ```
 
 Formal run executes preflight, all 300 epochs, then screens unique candidates
-serially. Each candidate uses 16 independent environment workers.
+serially. Each candidate uses 8 independent environment workers.
+
+Resume only the candidate screening in an existing completed-training run:
+
+```bash
+NPU_ID=0 bash training/Multi_IL_Full_Action_RL/stage3_r_bc_rnn_to_rsac/run.sh resume /absolute/path/to/run
+```
+
+Completed candidate reports are reused. An interrupted candidate's partial
+worker outputs are discarded and that candidate is evaluated again with 8
+workers; the 300 training epochs are not repeated.

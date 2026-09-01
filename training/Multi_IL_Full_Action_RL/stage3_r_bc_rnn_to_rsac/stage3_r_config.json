@@ -19,7 +19,7 @@
   "component_max_mean_l2_distance": 0.01,
   "component_max_p99_l2_distance": 0.01,
   "lstm_transfer_max_abs_tolerance": 0.000001,
-  "num_evaluation_workers": 16,
+  "num_evaluation_workers": 8,
   "evaluation_horizon": 700,
   "terminate_on_success": true,
   "random_seed": 20260901
