@@ -10,7 +10,7 @@ retained for later use, but the default launcher does not preflight or start it.
 Each active group uses eight independent `forkserver` robosuite workers for
 online collection. The two-group launch therefore runs 16 CPU simulation
 processes in total, while neural-network inference and updates remain isolated
-on `npu:1` and `npu:2`. Steps are counted per worker transition, so each group
+on `npu:0` and `npu:1`. Steps are counted per worker transition, so each group
 still collects exactly 1,000,000 formal environment transitions.
 
 The online objective calls the vendored pomdp-baselines SAC loss and recurrent
@@ -38,8 +38,8 @@ cd /data/home/3220251075/lerobot_workspace/robomimic
 bash training/Multi_IL_Full_Action_RL/stage4_rsac_online_finetuning/run_stage4_two_groups.sh smoke
 ```
 
-The launcher first runs strict preflight checks on NPU 1 and NPU 2, then starts
-the RNN-only and Multi-IL smoke jobs in the background. NPU 0 is unused.
+The launcher first runs strict preflight checks on NPU 0 and NPU 1, then starts
+the RNN-only and Multi-IL smoke jobs in the background.
 
 ## Formal run
 

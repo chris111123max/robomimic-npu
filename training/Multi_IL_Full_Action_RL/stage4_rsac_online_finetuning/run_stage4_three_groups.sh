@@ -18,12 +18,12 @@ RUN_DIR="$OUT_ROOT/$STAMP"
 mkdir -p "$RUN_DIR"
 
 ACTIVE_GROUPS=(rnn_only_critic multi_il_critic)
-declare -A DEVICES=( [rnn_only_critic]="npu:1" [multi_il_critic]="npu:2" )
+declare -A DEVICES=( [rnn_only_critic]="npu:0" [multi_il_critic]="npu:1" )
 declare -A PIDS
 SMOKE_ARG=()
 if [[ "$MODE" == "smoke" ]]; then SMOKE_ARG=(--smoke-test); fi
 
-echo "Running Stage4 preflight for RNN-only on NPU 1 and Multi-IL on NPU 2..."
+echo "Running Stage4 preflight for RNN-only on NPU 0 and Multi-IL on NPU 1..."
 for GROUP in "${ACTIVE_GROUPS[@]}"; do
   python -u "$ROOT/training/Multi_IL_Full_Action_RL/stage4_rsac_online_finetuning/preflight_stage4.py" \
     --group "$GROUP" --device "${DEVICES[$GROUP]}" --output "$RUN_DIR/preflight_$GROUP.json"
@@ -68,6 +68,6 @@ nohup python -u "$ROOT/training/Multi_IL_Full_Action_RL/stage4_rsac_online_finet
 echo "$!" > "$RUN_DIR/finalizer.pid"
 
 echo "Stage4 run directory: $RUN_DIR"
-echo "RNN PID=${PIDS[rnn_only_critic]} device=npu:1 log=$RUN_DIR/rnn_only_critic/train.log"
-echo "Multi PID=${PIDS[multi_il_critic]} device=npu:2 log=$RUN_DIR/multi_il_critic/train.log"
+echo "RNN PID=${PIDS[rnn_only_critic]} device=npu:0 log=$RUN_DIR/rnn_only_critic/train.log"
+echo "Multi PID=${PIDS[multi_il_critic]} device=npu:1 log=$RUN_DIR/multi_il_critic/train.log"
 echo "Finalizer PID=$(cat "$RUN_DIR/finalizer.pid") log=$FINAL_LOG"
