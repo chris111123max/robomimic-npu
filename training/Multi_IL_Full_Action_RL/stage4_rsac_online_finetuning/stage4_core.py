@@ -124,8 +124,8 @@ class Stage3RSACAdapter(nn.Module):
     def forward(self, prev_actions, rewards, observs):
         del prev_actions, rewards
         features = self.actor.forward_sequence(observs.transpose(0, 1), reset_interval=True)
-        output = self.actor.actions_from_features(features, deterministic=False, return_log_prob=True)
-        return tuple(None if item is None else item.transpose(0, 1) for item in output)
+        actions, _, _, log_probs = self.actor.actions_from_features(features, deterministic=False, return_log_prob=True)
+        return actions.transpose(0, 1), log_probs.transpose(0, 1)
 
 
 def cpu_tree(value):

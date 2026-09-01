@@ -26,6 +26,7 @@ from common import extract_canonical_observation, try_seed_environment  # noqa: 
 from collect_multi_il_rollouts import progress_observation_schema  # noqa: E402
 from evaluate_stage3_actor import (close_env, env_success, extract_transport_progress,
                                    load_initial_states, partial_progress_score)  # noqa: E402
+from stage4_parallel_env import Stage4ParallelEnvPool  # noqa: E402
 import robomimic.utils.file_utils as FileUtils  # noqa: E402
 import robomimic.utils.obs_utils as ObsUtils  # noqa: E402
 
@@ -45,10 +46,10 @@ def effective_config(path, args):
     config = read_json(path); config["group"] = args.group; config["device"] = args.device
     if args.seed is not None: config["seed"] = args.seed
     if args.smoke_test:
-        config.update(total_env_steps=12, actor_freeze_steps=4, actor_warmup_end=8, evaluation_interval=5,
+        config.update(total_env_steps=40, actor_freeze_steps=10, actor_warmup_end=20, evaluation_interval=10,
                       evaluation_seed_start=10080, evaluation_seed_end=10081, evaluation_horizon=5,
                       replay_capacity=1000, minimum_replay_size=2, batch_size=2, updates_per_env_step=0.5,
-                      checkpoint_steps=[0, 4, 8, 12])
+                      checkpoint_steps=[0, 10, 20, 40])
     return config
 
 
@@ -62,6 +63,29 @@ def build_environment(actor_payload):
 def flatten(observation, keys):
     canonical = extract_canonical_observation(observation, keys, SHAPES)
     return np.concatenate([canonical[key].reshape(-1) for key in keys]).astype(np.float32), canonical
+
+
+def unflatten(state, keys):
+    result={};cursor=0
+    for key in keys:
+        size=int(np.prod(SHAPES[key]));result[key]=np.asarray(state[cursor:cursor+size]).reshape(SHAPES[key]);cursor+=size
+    return result
+
+
+@torch.no_grad()
+def batched_actor_actions(actor, observations, hidden, counters, workers, device):
+    """One recurrent policy step for an arbitrary subset of environment workers."""
+    indices=torch.as_tensor(workers,dtype=torch.long,device=device)
+    selected=tuple(item.index_select(1,indices) for item in hidden)
+    reset=torch.as_tensor([counters[worker] % actor.horizon == 0 for worker in workers],device=device)
+    if bool(reset.any()):
+        selected=tuple(item.masked_fill(reset.view(1,-1,1),0.0) for item in selected)
+    states=torch.as_tensor(np.stack([observations[worker] for worker in workers]),dtype=torch.float32,device=device)
+    output,new_hidden=actor.lstm(actor.observation_adapter(states).unsqueeze(1),selected)
+    action=actor.policy(output[:,0],deterministic=False,return_log_prob=False)[0]
+    for part,new_part in zip(hidden,new_hidden):part.index_copy_(1,indices,new_part)
+    for worker in workers:counters[worker]+=1
+    return action.cpu().numpy()
 
 
 def evaluate(actor, actor_payload, config, device, env_step, output):
@@ -129,11 +153,22 @@ def aggregate_updates(rows):
     return result
 
 
-def training_context(env, actor, obs, states, actions, rewards, dones, terminated, truncated, next_states, episode_return, episode_length):
-    getter=getattr(env,"get_state",None)
-    return {"active":bool(states),"env_state":None if not states or not callable(getter) else getter(),"observation":obs,
-        "states":states,"actions":actions,"rewards":rewards,"dones":dones,"terminated":terminated,"truncated":truncated,"next_states":next_states,"episode_return":episode_return,"episode_length":episode_length,
-        "actor_internal_state":cpu_tree(actor._state),"actor_counter":actor._counter}
+def new_episode(episode, observation):
+    return {"episode":int(episode),"observation":observation,"states":[],"actions":[],"rewards":[],"dones":[],
+            "terminated":[],"truncated":[],"next_states":[],"return":0.0,"length":0,
+            "success":False,"trash_ever":False,"payload_ever":False}
+
+
+def training_context(pool, contexts, hidden, counters, next_episode):
+    workers=sorted(contexts)
+    return {"parallel_envs":pool.num_envs,"active_workers":workers,"env_states":pool.get_states(workers),
+            "contexts":contexts,"actor_hidden":cpu_tree(hidden),"actor_counters":counters.tolist(),
+            "next_episode":int(next_episode)}
+
+
+def add_finished_episode(replay, context):
+    replay.add_episode(context["states"],context["actions"],context["rewards"],context["dones"],
+                       context["next_states"],context["terminated"],context["truncated"])
 
 
 def main():
@@ -142,15 +177,20 @@ def main():
     for name in ("checkpoints","evaluations","debug_nan","replay"): (group_dir/name).mkdir(exist_ok=True)
     actor,actor_payload,critic,target,source=initialize_models(args.group,config,device);engine=Stage4SAC(actor,critic,target,config,device);replay=OnlineSequenceReplay(config)
     audit=model_audit(args.group,actor,critic,target,source,config);atomic_json(group_dir/"initialization_audit.json",audit);atomic_json(group_dir/"config.json",config)
-    env=build_environment(actor_payload);schema=progress_observation_schema(env,actor_payload["observation_keys"],SHAPES)
-    env_step=0;episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[]
-    obs=None;states=[];actions=[];rewards=[];dones=[];terminated=[];truncated=[];next_states=[];episode_return=0.0;episode_length=0
+    schema_env=build_environment(actor_payload);schema=progress_observation_schema(schema_env,actor_payload["observation_keys"],SHAPES);close_env(schema_env)
+    pool=Stage4ParallelEnvPool(actor_payload["teacher_checkpoint"],actor_payload["observation_keys"],SHAPES,
+        config["parallel_envs"],config["evaluation_horizon"],config["terminate_on_success"],config["seed"],
+        config["parallel_start_method"],config["parallel_startup_timeout_seconds"],config["parallel_step_timeout_seconds"])
+    env_step=0;next_episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[];contexts={}
+    hidden=(torch.zeros(2,pool.num_envs,400,device=device),torch.zeros(2,pool.num_envs,400,device=device));counters=np.zeros(pool.num_envs,dtype=np.int64)
     try:
         if args.resume:
-            payload=load_resume(args.resume,engine,replay,device);env_step=int(payload["env_step"]);episode=int(payload["episode"]);context=payload["training_context"]
-            if context["active"]:
-                if context["env_state"] is None:raise RuntimeError("Resume checkpoint lacks active environment state")
-                obs=env.reset_to(context["env_state"]);states=context["states"];actions=context["actions"];rewards=context["rewards"];dones=context["dones"];terminated=context["terminated"];truncated=context["truncated"];next_states=context["next_states"];episode_return=float(context["episode_return"]);episode_length=int(context["episode_length"]);actor._counter=int(context["actor_counter"]);actor._state=None if context["actor_internal_state"] is None else tuple(item.to(device) for item in context["actor_internal_state"])
+            payload=load_resume(args.resume,engine,replay,device);env_step=int(payload["env_step"]);context=payload["training_context"]
+            if int(context["parallel_envs"])!=pool.num_envs:raise RuntimeError("Resume parallel_envs mismatch")
+            contexts={int(key):value for key,value in context["contexts"].items()};workers=sorted(contexts)
+            observations=pool.reset_to({int(key):value for key,value in context["env_states"].items()},{worker:contexts[worker]["length"] for worker in workers})
+            for worker in workers:contexts[worker]["observation"]=observations[worker]
+            hidden=tuple(item.to(device) for item in context["actor_hidden"]);counters=np.asarray(context["actor_counters"],dtype=np.int64);next_episode=int(context["next_episode"])
             completed_updates=engine.update_index
             metrics_path=group_dir/"evaluation_metrics.csv"
             if metrics_path.exists():
@@ -165,41 +205,56 @@ def main():
             replay_before=replay.transitions;report=evaluate(actor,actor_payload,config,device,0,group_dir/"evaluations"/"step_00000000.json");evaluation_rows.append(report)
             if replay.transitions!=replay_before:raise RuntimeError("Evaluation polluted online replay")
             append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in report.items() if key!="episodes"})
-            context=training_context(env,actor,obs,states,actions,rewards,dones,terminated,truncated,next_states,episode_return,episode_length)
-            save_checkpoint(group_dir/"checkpoints"/"step_00000000.pth",engine,replay,config,0,episode,actor_payload,context,report)
-            save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,0,episode,actor_payload,context,report);best_key=(report["success_rate"],report["mean_progress"],0)
+            context={"parallel_envs":pool.num_envs,"active_workers":[],"env_states":{},"contexts":{},"actor_hidden":cpu_tree(hidden),"actor_counters":counters.tolist(),"next_episode":next_episode}
+            save_checkpoint(group_dir/"checkpoints"/"step_00000000.pth",engine,replay,config,0,next_episode,actor_payload,context,report)
+            save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,0,next_episode,actor_payload,context,report);best_key=(report["success_rate"],report["mean_progress"],0)
         while env_step<int(config["total_env_steps"]):
-            if obs is None:
-                episode_seed=int(config["seed"])+episode;seed_all(episode_seed);try_seed_environment(env,episode_seed);obs=env.reset();seed_all(episode_seed);actor.reset()
-            state,_=flatten(obs,actor_payload["observation_keys"]);tensor=torch.as_tensor(state[None],dtype=torch.float32,device=device)
-            with torch.no_grad():action=actor.act(tensor,deterministic=False)[0][0].cpu().numpy()
-            if not np.isfinite(action).all():raise RuntimeError("Non-finite environment action")
-            next_obs,reward,raw_done,_=env.step(action);next_state,canonical=flatten(next_obs,actor_payload["observation_keys"]);progress=extract_transport_progress(canonical,schema);success=env_success(env)
-            env_step+=1;episode_length+=1;episode_return+=float(reward);finished=bool(raw_done or (config["terminate_on_success"] and success) or episode_length>=int(config["evaluation_horizon"]) or env_step>=int(config["total_env_steps"]))
-            states.append(state);actions.append(action);rewards.append(float(reward));dones.append(float(finished));terminated.append(float(finished and raw_done));truncated.append(float(finished and not raw_done));next_states.append(next_state);obs=next_obs
+            empty=[worker for worker in range(pool.num_envs) if worker not in contexts]
+            if empty:
+                seeds=[]
+                for worker in empty:seeds.append(int(config["seed"])+next_episode);contexts[worker]=new_episode(next_episode,None);next_episode+=1;counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
+                observations=pool.reset(empty,seeds)
+                for worker in empty:contexts[worker]["observation"]=observations[worker]
+            future=sorted(step for step in evaluation_steps|checkpoint_steps|{int(config["total_env_steps"])} if step>env_step);boundary=future[0]
+            workers=sorted(contexts)[:min(len(contexts),boundary-env_step)]
+            observations={worker:contexts[worker]["observation"] for worker in workers};batch_actions=batched_actor_actions(actor,observations,hidden,counters,workers,device)
+            if not np.isfinite(batch_actions).all():raise RuntimeError("Non-finite environment action")
+            results=pool.step(workers,batch_actions);finished_contexts=[]
+            for worker,action in zip(workers,batch_actions):
+                context=contexts[worker];state=context["observation"];next_state,reward,finished,info=results[worker];canonical=unflatten(next_state,actor_payload["observation_keys"]);progress=extract_transport_progress(canonical,schema)
+                context["states"].append(state);context["actions"].append(action);context["rewards"].append(float(reward));context["dones"].append(float(finished));context["terminated"].append(float(info["terminated"]));context["truncated"].append(float(info["truncated"]));context["next_states"].append(next_state)
+                context["observation"]=next_state;context["return"]+=float(reward);context["length"]+=1;context["success"]|=bool(info["success"]);context["trash_ever"]|=bool(progress["trash_in_trash_bin"]);context["payload_ever"]|=bool(progress["payload_in_target_bin"]);env_step+=1
+                if finished:finished_contexts.append(context);del contexts[worker];counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
+            if env_step==int(config["total_env_steps"]):
+                for worker in sorted(contexts):
+                    context=contexts[worker]
+                    if context["states"]:
+                        context["dones"][-1]=1.0;context["terminated"][-1]=0.0;context["truncated"][-1]=1.0;finished_contexts.append(context)
+                contexts.clear()
+            for context in finished_contexts:add_finished_episode(replay,context)
+            new_budget=max(0,int(np.floor(replay.transitions*float(config["updates_per_env_step"])))-completed_updates);update_rows=[]
+            if replay.transitions>=int(config["minimum_replay_size"]):
+                for _ in range(new_budget):update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"))
+                completed_updates+=new_budget
+            summary=aggregate_updates(update_rows)
+            for context in finished_contexts:
+                phase=phase_at(env_step,config);metrics={"env_step":env_step,"episode":context["episode"],"phase":phase["phase"],"actor_lr":phase["actor_lr"],"critic_lr":phase["critic_lr"],**summary,"buffer_size":replay.transitions,"episode_return":context["return"],"episode_length":context["length"],"success":int(context["success"]),"trash_ever":int(context["trash_ever"]),"payload_ever":int(context["payload_ever"]),"updates_this_batch":len(update_rows),"gradient_updates":completed_updates}
+                append_csv(group_dir/"training_metrics.csv",metrics);print(f"{args.group} env_step={env_step}/{config['total_env_steps']} episode={context['episode']} phase={phase['phase']} success={int(context['success'])} replay={replay.transitions} updates={completed_updates}",flush=True)
             if env_step in evaluation_steps:
                 replay_before=replay.transitions;report=evaluate(actor,actor_payload,config,device,env_step,group_dir/"evaluations"/f"step_{env_step:08d}.json");evaluation_rows.append(report)
                 if replay.transitions!=replay_before:raise RuntimeError("Evaluation polluted online replay")
                 append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in report.items() if key!="episodes"})
-                key=(report["success_rate"],report["mean_progress"],-env_step);context=training_context(env,actor,obs,states,actions,rewards,dones,terminated,truncated,next_states,episode_return,episode_length)
-                if key>best_key:save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,env_step,episode,actor_payload,context,report);best_key=key
+                key=(report["success_rate"],report["mean_progress"],-env_step);context=training_context(pool,contexts,hidden,counters,next_episode)
+                if key>best_key:save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,env_step,next_episode,actor_payload,context,report);best_key=key
             if env_step in checkpoint_steps:
-                context=training_context(env,actor,obs,states,actions,rewards,dones,terminated,truncated,next_states,episode_return,episode_length);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,episode,actor_payload,context,evaluation_rows[-1] if evaluation_rows and evaluation_rows[-1]["env_step"]==env_step else None)
-            if finished:
-                replay.add_episode(states,actions,rewards,dones,next_states,terminated,truncated);new_budget=max(0,int(np.floor(replay.transitions*float(config["updates_per_env_step"])))-completed_updates);update_rows=[]
-                if replay.transitions>=int(config["minimum_replay_size"]):
-                    for _ in range(new_budget):update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"))
-                    completed_updates+=new_budget
-                phase=phase_at(env_step,config);metrics={"env_step":env_step,"episode":episode,"phase":phase["phase"],"actor_lr":phase["actor_lr"],"critic_lr":phase["critic_lr"],**aggregate_updates(update_rows),"buffer_size":replay.transitions,"episode_return":episode_return,"episode_length":episode_length,"success":int(success),"trash_ever":int(progress["trash_in_trash_bin"]),"payload_ever":int(progress["payload_in_target_bin"]),"updates_this_episode":len(update_rows),"gradient_updates":completed_updates}
-                append_csv(group_dir/"training_metrics.csv",metrics);print(f"{args.group} env_step={env_step}/{config['total_env_steps']} episode={episode} phase={phase['phase']} success={int(success)} replay={replay.transitions} updates={completed_updates}",flush=True)
-                episode+=1;obs=None;states=[];actions=[];rewards=[];dones=[];terminated=[];truncated=[];next_states=[];episode_return=0.0;episode_length=0
-        final_report=evaluate(actor,actor_payload,config,device,env_step,group_dir/"evaluations"/f"step_{env_step:08d}.json");append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in final_report.items() if key!="episodes"})
-        context=training_context(env,actor,obs,states,actions,rewards,dones,terminated,truncated,next_states,episode_return,episode_length);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,episode,actor_payload,context,final_report);save_checkpoint(group_dir/"checkpoints"/"last.pth",engine,replay,config,env_step,episode,actor_payload,context,final_report)
+                context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,evaluation_rows[-1] if evaluation_rows and evaluation_rows[-1]["env_step"]==env_step else None)
+        final_report=evaluation_rows[-1]
+        context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report);save_checkpoint(group_dir/"checkpoints"/"last.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report)
         atomic_json(group_dir/"status.json",{"status":"COMPLETE","group":args.group,"env_step":env_step,"gradient_updates":completed_updates,"actor_hash_initial":audit["actor_hash"],"actor_hash_final":state_hash(actor),"critic_hash_initial":audit["critic_hash"],"nan_inf_failure":False})
         print(f"STAGE4 GROUP COMPLETE: {args.group} env_step={env_step}",flush=True)
     except BaseException as error:
         atomic_json(group_dir/"status.json",{"status":"FAILED","group":args.group,"env_step":env_step,"error":repr(error),"nan_inf_failure":"finite" in str(error).lower()});raise
-    finally:close_env(env)
+    finally:pool.close()
 
 
 if __name__=="__main__":main()

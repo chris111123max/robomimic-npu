@@ -7,6 +7,12 @@ experimental variable is Critic initialization: Stage2-R-v2 RNN-only update
 41000 or Stage2-R-v2 Multi-IL update 14000. The Random Critic implementation is
 retained for later use, but the default launcher does not preflight or start it.
 
+Each active group uses eight independent `forkserver` robosuite workers for
+online collection. The two-group launch therefore runs 16 CPU simulation
+processes in total, while neural-network inference and updates remain isolated
+on `npu:1` and `npu:2`. Steps are counted per worker transition, so each group
+still collects exactly 1,000,000 formal environment transitions.
+
 The online objective calls the vendored pomdp-baselines SAC loss and recurrent
 Critic directly. Stage4 adds orchestration, phase scheduling, global Critic
 gradient clipping, failure capture, exact evaluation, checkpointing, and replay
