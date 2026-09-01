@@ -59,13 +59,14 @@ def main():
     if stats["mean_min_distance"]>cfg["component_max_mean_l2_distance"] or stats["p99_min_distance"]>cfg["component_max_p99_l2_distance"]: raise RuntimeError(f"Component action-space sanity failed: {stats}")
     train_seeds=cfg["train_seeds"][:5] if a.smoke_test else cfg["train_seeds"]; val_seeds=cfg["validation_seeds"][:2] if a.smoke_test else cfg["validation_seeds"]
     train=CachedTargets(cache,train_seeds); val=CachedTargets(cache,val_seeds); epochs=2 if a.smoke_test else 300; fixed={1,2} if a.smoke_test else set(cfg["checkpoint_epochs"])
-    optimizer=torch.optim.Adam([{"params":actor.fcs.parameters(),"lr":cfg["backbone_lr"]},{"params":actor.last_fc.parameters(),"lr":cfg["head_lr"]}])
-    for param in actor.fcs.parameters(): param.requires_grad_(False)
+    backbone_parameters=[parameter for layer in actor.fcs for parameter in layer.parameters()]
+    optimizer=torch.optim.Adam([{"params":backbone_parameters,"lr":cfg["backbone_lr"]},{"params":actor.last_fc.parameters(),"lr":cfg["head_lr"]}])
+    for param in backbone_parameters: param.requires_grad_(False)
     rng=np.random.default_rng(cfg["random_seed"]); history=[]; best=float("inf"); best_epoch=None
     print(f"Stage3C-v2 train={train.statistics} validation={val.statistics} epochs={epochs}")
     for epoch in range(1,epochs+1):
         if epoch==51:
-            for param in actor.fcs.parameters(): param.requires_grad_(True)
+            for param in backbone_parameters: param.requires_grad_(True)
         phase="A_head_only" if epoch<=50 else "B_backbone_finetune"; actor.train(); order=rng.permutation(len(train)); sq=ab=0.; elements=0
         for start in range(0,len(order),cfg["batch_size"]):
             idx=order[start:start+cfg["batch_size"]]; state=torch.as_tensor(train.states[idx],device=device); target=torch.as_tensor(train.targets[idx],device=device); out=actor(state,deterministic=True)[0]; diff=out-target; loss=diff.square().mean()
