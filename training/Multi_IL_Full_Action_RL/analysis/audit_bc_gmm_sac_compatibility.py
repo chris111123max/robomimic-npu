@@ -346,6 +346,8 @@ def main():
     transition = load_transition(dataset_path, encoder["concat_order"])
     dataset_order_matches_checkpoint = transition["dataset_keys"] == encoder["concat_order"]
     checkpoint_order_matches_canonical = encoder["concat_order"] == CANONICAL_KEYS
+    checkpoint_uses_same_observation_fields = set(encoder["concat_order"]) == set(CANONICAL_KEYS)
+    dataset_uses_required_canonical_order = transition["dataset_keys"] == CANONICAL_KEYS
     dataset_shapes_match = all(
         list(transition["dataset_shapes"][key]) == CANONICAL_SHAPES[key]
         for key in CANONICAL_KEYS
@@ -437,13 +439,33 @@ def main():
             "required_canonical_order": CANONICAL_KEYS,
             "dataset_order_matches_checkpoint": dataset_order_matches_checkpoint,
             "checkpoint_order_matches_required_canonical": checkpoint_order_matches_canonical,
+            "checkpoint_uses_same_observation_fields": checkpoint_uses_same_observation_fields,
+            "dataset_uses_required_canonical_order": dataset_uses_required_canonical_order,
             "canonical_shapes_match": dataset_shapes_match,
+            "direct_backbone_transfer_input_order_compatible": bool(
+                dataset_order_matches_checkpoint and checkpoint_order_matches_canonical
+            ),
             "equivalent_59d_input": bool(
                 encoder["output_dim"] == 59
                 and not encoder["has_learned_encoder"]
                 and dataset_order_matches_checkpoint
                 and checkpoint_order_matches_canonical
                 and dataset_shapes_match
+            ),
+            "saved_action_direct_distillation_compatible": bool(
+                encoder["output_dim"] == 59
+                and not encoder["has_learned_encoder"]
+                and checkpoint_uses_same_observation_fields
+                and dataset_uses_required_canonical_order
+                and dataset_shapes_match
+                and sanity["pass"]
+            ),
+            "interpretation": (
+                "BC-GMM and SAC use the same seven observation fields but may flatten them "
+                "in different orders. Different internal flatten order blocks direct backbone "
+                "weight transfer, but does not block supervised distillation from Stage1 saved "
+                "actions when the Student uses the required canonical HDF5 order and forward "
+                "sanity reproduces the saved action."
             ),
         },
         "backbone_comparison": comparison,
@@ -461,9 +483,9 @@ def main():
         "stage4_modified": False,
         "output": str(Path(args.output)),
     }
-    if not report["state_ordering"]["equivalent_59d_input"]:
+    if not report["state_ordering"]["saved_action_direct_distillation_compatible"]:
         report["recommendation"] = (
-            "BLOCKED: BC-GMM and SAC do not currently receive the same canonical 59D state"
+            "BLOCKED: observation fields, canonical Student state, or saved-action mapping failed"
         )
     if not sanity["pass"]:
         report["recommendation"] = (

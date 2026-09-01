@@ -56,8 +56,8 @@ def run_audit(config, device, run_dir):
     report = read_json(run_report)
     shutil.copy2(run_report, repository_report)
     ordering = report["state_ordering"]
-    if not ordering["equivalent_59d_input"]:
-        raise RuntimeError(f"Audit state ordering failed: {ordering}")
+    if not ordering.get("saved_action_direct_distillation_compatible", False):
+        raise RuntimeError(f"Audit saved-action distillation compatibility failed: {ordering}")
     if report["bc_gmm"]["action_dim"] != 14 or not report["forward_sanity"]["pass"]:
         raise RuntimeError(f"Audit action mapping sanity failed: {report['forward_sanity']}")
     return report
