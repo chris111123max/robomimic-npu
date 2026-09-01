@@ -7,11 +7,10 @@ from pathlib import Path
 import h5py, numpy as np, torch
 
 HERE=Path(__file__).resolve().parent; PROJECT=HERE.parent
-for path in (HERE, PROJECT/"stage3c_v2_bc_gmm_component_distillation"):
-    if str(path) not in sys.path: sys.path.insert(0,str(path))
+if str(HERE) not in sys.path: sys.path.insert(0,str(HERE))
 from stage3_r_actor import (BC_RNN_KEYS,CANONICAL_KEYS,SHAPES,Stage3RActor,checkpoint_payload,
                             set_vendor_device,transfer_lstm)  # noqa
-from component_targets import component_means_to_environment_space  # noqa
+from stage3_r_component_targets import component_means_to_environment_space  # noqa
 import robomimic.utils.file_utils as FileUtils  # noqa
 
 def read(p):
