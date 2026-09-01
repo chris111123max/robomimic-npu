@@ -81,17 +81,24 @@ def update(critic, target, optimizer, batch, config, update_index):
     loss1 = (((q1 - bellman) ** 2) * mask).sum() / valid
     loss2 = (((q2 - bellman) ** 2) * mask).sum() / valid
     loss = loss1 + loss2
+    observs, previous_actions, previous_rewards, _ = aligned(batch)
+    hidden = critic.get_hidden_states(previous_actions, previous_rewards, observs)
+    forward_values={"q1":q1,"q2":q2,"bellman":bellman,"loss":loss,"hidden":hidden}
+    bad_forward=[name for name,value in forward_values.items() if not torch.isfinite(value).all()]
+    if bad_forward:raise RuntimeError(f"NaN/Inf before backward at recurrent critic update {update_index}: {bad_forward}")
     optimizer.zero_grad(); loss.backward()
-    grad_sq = torch.zeros((), device=loss.device)
-    for parameter in critic.parameters():
-        if parameter.grad is not None: grad_sq += parameter.grad.detach().pow(2).sum()
-    grad_norm = grad_sq.sqrt()
+    gradients=[parameter.grad.detach() for parameter in critic.parameters() if parameter.grad is not None]
+    bad_gradients=sum(int((~torch.isfinite(gradient)).sum().item()) for gradient in gradients)
+    if bad_gradients:raise RuntimeError(f"NaN/Inf gradients before optimizer step at recurrent critic update {update_index}: count={bad_gradients}")
+    grad_norm=torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(gradient.float()) for gradient in gradients]))
+    if not torch.isfinite(grad_norm):raise RuntimeError(f"Non-finite gradient norm at recurrent critic update {update_index}")
     optimizer.step()
+    bad_parameters=sum(int((~torch.isfinite(parameter)).sum().item()) for parameter in critic.parameters())
+    if bad_parameters:raise RuntimeError(f"Optimizer produced NaN/Inf parameters at recurrent critic update {update_index}: count={bad_parameters}")
     if update_index % int(config["target_update_interval"]) == 0:
         ptu.soft_update_from_to(critic, target, float(config["tau"]))
-    hidden = critic.get_hidden_states(*aligned(batch)[1:3], aligned(batch)[0])
-    finite = all(torch.isfinite(value).all() for value in (q1, q2, bellman, loss, grad_norm, hidden))
-    if not finite:raise RuntimeError(f"NaN/Inf in recurrent critic update {update_index}")
+    bad_target=sum(int((~torch.isfinite(parameter)).sum().item()) for parameter in target.parameters())
+    if bad_target:raise RuntimeError(f"Target update produced NaN/Inf parameters at recurrent critic update {update_index}: count={bad_target}")
     valid_hidden = hidden[:-1][mask.bool().expand_as(hidden[:-1])].reshape(-1, hidden.shape[-1])
     return {
         "critic_loss": float(loss.item()), "q1_loss": float(loss1.item()), "q2_loss": float(loss2.item()),

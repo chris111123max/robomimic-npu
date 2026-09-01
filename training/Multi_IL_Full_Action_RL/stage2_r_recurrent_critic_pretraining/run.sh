@@ -15,8 +15,14 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 ARGS=(--device "npu:${NPU_ID}")
 if [ "$MODE" = "smoke" ]; then
     ARGS+=(--smoke-test)
+elif [ "$MODE" = "resume" ]; then
+    if [ -z "${2:-}" ]; then
+        echo "Usage: NPU_ID=0 bash run.sh resume RUN_DIR" >&2
+        exit 2
+    fi
+    ARGS+=(--resume-run-dir "$2")
 elif [ "$MODE" != "formal" ]; then
-    echo "Usage: NPU_ID=0 bash run.sh [smoke|formal]" >&2
+    echo "Usage: NPU_ID=0 bash run.sh [smoke|formal|resume RUN_DIR]" >&2
     exit 2
 fi
 

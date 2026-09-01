@@ -38,6 +38,19 @@ Formal run:
 NPU_ID=0 bash training/Multi_IL_Full_Action_RL/stage2_r_recurrent_critic_pretraining/run.sh formal
 ```
 
+Resume an interrupted run from its latest `update_*.pth` checkpoint without
+repeating completed groups:
+
+```bash
+NPU_ID=0 bash training/Multi_IL_Full_Action_RL/stage2_r_recurrent_critic_pretraining/run.sh resume /absolute/run/directory
+```
+
+Resume keeps the architecture, loss, optimizer, learning rate, target update,
+data balance, and validation protocol unchanged. Because the original
+checkpoints predate resume support and do not contain NumPy replay RNG state,
+the launcher deterministically replays the prior sampling calls without model
+updates before continuing. This restores the exact sequence-sampler position.
+
 Outputs are written only below
 `training_runs/Multi_IL_Full_Action_RL/stage2_r_recurrent_critic_pretraining/`.
 Stage3-R is never modified and Stage4 is never started.

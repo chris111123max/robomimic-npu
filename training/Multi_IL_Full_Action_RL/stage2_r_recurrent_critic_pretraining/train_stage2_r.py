@@ -34,6 +34,9 @@ def write_csv(path,rows):
     if not rows:return
     with open(path,"w",newline="",encoding="utf-8") as handle:
         writer=csv.DictWriter(handle,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)
+def read_csv(path):
+    if not Path(path).is_file():return []
+    with open(path,newline="",encoding="utf-8") as handle:return list(csv.DictReader(handle))
 def device_of(name):
     if name.startswith("npu"):
         import torch_npu  # noqa
@@ -90,13 +93,32 @@ def compact(metrics):
     return {key:metrics.get(key) for key in keys}
 
 
-def train_group(name,sampler,records,base_state,config,device,directory,max_updates):
-    directory.mkdir(parents=True,exist_ok=False);(directory/"checkpoints").mkdir()
-    sampling_start={key:(value.sampled_sequences,value.effective_timesteps) for key,value in sampler.sources.items()}
-    critic,target=make_pair(config,device);critic.load_state_dict(base_state);target.load_state_dict(base_state);target.requires_grad_(False)
-    optimizer=torch.optim.Adam(critic.parameters(),lr=config["critic_lr"])
-    train_rows=[];validation_rows=[];acc=defaultdict(float);best=float("inf");best_update=0;interval=0
-    for index in range(1,max_updates+1):
+def train_group(name,sampler,records,base_state,config,device,directory,max_updates,resume=False):
+    if directory.exists() and not resume:raise FileExistsError(directory)
+    directory.mkdir(parents=True,exist_ok=resume);(directory/"checkpoints").mkdir(exist_ok=resume)
+    critic,target=make_pair(config,device);optimizer=torch.optim.Adam(critic.parameters(),lr=config["critic_lr"])
+    train_rows=read_csv(directory/"training_metrics.csv") if resume else [];validation_rows=read_csv(directory/"validation_metrics.csv") if resume else []
+    start_update=0;best=float("inf");best_update=0
+    completed_summary=directory/"summary.json"
+    if resume and completed_summary.is_file() and (directory/"checkpoints"/"last.pth").is_file():
+        print(f"Reusing completed Stage2-R group: {name}",flush=True);return read(completed_summary)
+    update_checkpoints=sorted((directory/"checkpoints").glob("update_*.pth"),key=lambda path:int(path.stem.split("_")[-1])) if resume else []
+    if update_checkpoints:
+        recovery=update_checkpoints[-1];payload=torch.load(recovery,map_location=device);start_update=int(payload["update"])
+        critic.load_state_dict(payload["critic_state_dict"]);target.load_state_dict(payload["target_critic_state_dict"]);optimizer.load_state_dict(payload["optimizer_state_dict"])
+        best_path=directory/"checkpoints"/"best.pth"
+        if best_path.is_file():
+            best_payload=torch.load(best_path,map_location="cpu");best=float(best_payload["validation"]["val_td_mse"]);best_update=int(best_payload["update"])
+        print(f"Resuming {name} from {recovery} at update {start_update}",flush=True)
+    else:
+        critic.load_state_dict(base_state);target.load_state_dict(base_state)
+    target.requires_grad_(False)
+    if start_update:
+        print(f"Replaying {start_update} sampler draws to restore the exact offline replay RNG position...",flush=True)
+        for _ in range(start_update):sampler.sample(config["sequence_batch_size"])
+        print("Sampler RNG position restored.",flush=True)
+    acc=defaultdict(float);interval=0
+    for index in range(start_update+1,max_updates+1):
         batch_np,counts=sampler.sample(config["sequence_batch_size"]);batch=tensor_batch(batch_np,device)
         stats=update(critic,target,optimizer,batch,config,index);interval+=1
         for key,value in stats.items():acc[key]+=value
@@ -113,7 +135,9 @@ def train_group(name,sampler,records,base_state,config,device,directory,max_upda
             print(f"{name} update {index}/{max_updates} loss={train_row['critic_loss']:.6f} val_td_mse={validation['val_td_mse']:.6f} ranking={validation['pairwise_ranking_accuracy']}",flush=True)
     final=evaluate(critic,target,records,config,device);torch.save(checkpoint(critic,target,optimizer,max_updates,config,final,name),directory/"checkpoints"/"last.pth")
     best_payload=torch.load(directory/"checkpoints"/"best.pth",map_location=device);critic.load_state_dict(best_payload["critic_state_dict"]);target.load_state_dict(best_payload["target_critic_state_dict"])
-    result=evaluate(critic,target,records,config,device);result["best_update"]=best_update;result["training_sampling"]={key:{"episodes":len(value.episodes),"sampled_sequences":value.sampled_sequences-sampling_start[key][0],"effective_timesteps":value.effective_timesteps-sampling_start[key][1]} for key,value in sampler.sources.items()}
+    result=evaluate(critic,target,records,config,device);result["best_update"]=best_update
+    sequence_counts={key:sum(int(float(row.get(f"{key}_sequences",0) or 0)) for row in train_rows) for key in sampler.sources}
+    result["training_sampling"]={key:{"episodes":len(value.episodes),"sampled_sequences":sequence_counts[key],"effective_timesteps":sequence_counts[key]*int(config["sequence_length"])} for key,value in sampler.sources.items()}
     result["training_sequences"]=sum(item["sampled_sequences"] for item in result["training_sampling"].values());result["training_effective_timesteps"]=sum(item["effective_timesteps"] for item in result["training_sampling"].values())
     write(directory/"summary.json",result);return result
 
@@ -128,9 +152,15 @@ def markdown(summary):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument("--config",default=str(HERE/"stage2_r_config.json"));parser.add_argument("--device",default="npu:0");parser.add_argument("--smoke-test",action="store_true");parser.add_argument("--run-id");args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument("--config",default=str(HERE/"stage2_r_config.json"));parser.add_argument("--device",default="npu:0");parser.add_argument("--smoke-test",action="store_true");parser.add_argument("--run-id");parser.add_argument("--resume-run-dir");args=parser.parse_args()
     config=read(args.config);device=device_of(args.device);set_device(device);seed_all(config["random_seed"])
-    run=Path(config["output_root"])/(args.run_id or (("smoke_" if args.smoke_test else "")+datetime.now().strftime("%Y%m%d_%H%M%S")));run.mkdir(parents=True,exist_ok=False);(run/"sanity").mkdir()
+    if args.resume_run_dir:
+        if args.smoke_test or args.run_id:raise ValueError("resume cannot be combined with smoke-test or run-id")
+        run=Path(args.resume_run_dir).resolve()
+        if not run.is_dir():raise FileNotFoundError(run)
+    else:
+        run=Path(config["output_root"])/(args.run_id or (("smoke_" if args.smoke_test else "")+datetime.now().strftime("%Y%m%d_%H%M%S")));run.mkdir(parents=True,exist_ok=False)
+    (run/"sanity").mkdir(exist_ok=True)
     if not Path(config["actor_checkpoint"]).is_file():raise FileNotFoundError(config["actor_checkpoint"])
     actor,payload=load_actor(config["actor_checkpoint"],device);actor.requires_grad_(False)
     if int(payload["epoch"])!=150:raise RuntimeError(f"Stage2-R requires Stage3-R epoch 150, got {payload['epoch']}")
@@ -148,12 +178,15 @@ def main():
     max_updates=20 if args.smoke_test else int(config["max_updates"]);effective=copy.deepcopy(config);effective["max_updates"]=max_updates
     if args.smoke_test:effective.update(sequence_batch_size=3,validation_every=10,checkpoint_every=10,validation_sequence_batch_size=32)
     write(run/"resolved_config.json",{**effective,"device":str(device),"train_seeds":train_seeds,"validation_seeds":val_seeds,"architecture":architecture(effective),"actor_checkpoint_epoch":payload["epoch"]})
-    base,target=make_pair(effective,device);base_state=copy.deepcopy(base.state_dict());random_dir=run/"random_critic";random_dir.mkdir();(random_dir/"checkpoints").mkdir()
-    random_eval=evaluate(base,target,records,effective,device);random_eval.update(best_update=0,training_sequences=0,training_effective_timesteps=0)
-    torch.save(checkpoint(base,target,None,0,effective,random_eval,"random_critic"),random_dir/"model_init.pth");write(random_dir/"summary.json",random_eval)
-    del base,target
-    rnn=train_group("rnn_only_critic",BalancedSampler({"bc_rnn":sources["bc_rnn"]},effective["random_seed"]+1),records,base_state,effective,device,run/"rnn_only_critic",max_updates)
-    multi=train_group("multi_il_critic",BalancedSampler(sources,effective["random_seed"]+2),records,base_state,effective,device,run/"multi_il_critic",max_updates)
+    random_dir=run/"random_critic"
+    if args.resume_run_dir and (random_dir/"model_init.pth").is_file():
+        random_payload=torch.load(random_dir/"model_init.pth",map_location=device);base_state=copy.deepcopy(random_payload["critic_state_dict"]);random_eval=read(random_dir/"summary.json");print("Reusing Random Critic initialization",flush=True)
+    else:
+        base,target=make_pair(effective,device);base_state=copy.deepcopy(base.state_dict());random_dir.mkdir();(random_dir/"checkpoints").mkdir()
+        random_eval=evaluate(base,target,records,effective,device);random_eval.update(best_update=0,training_sequences=0,training_effective_timesteps=0)
+        torch.save(checkpoint(base,target,None,0,effective,random_eval,"random_critic"),random_dir/"model_init.pth");write(random_dir/"summary.json",random_eval);del base,target
+    rnn=train_group("rnn_only_critic",BalancedSampler({"bc_rnn":sources["bc_rnn"]},effective["random_seed"]+1),records,base_state,effective,device,run/"rnn_only_critic",max_updates,bool(args.resume_run_dir))
+    multi=train_group("multi_il_critic",BalancedSampler(sources,effective["random_seed"]+2),records,base_state,effective,device,run/"multi_il_critic",max_updates,bool(args.resume_run_dir))
     ranking=lambda value: -1.0 if value is None else float(value)
     relation=(multi["val_td_mse"]<rnn["val_td_mse"]<random_eval["val_td_mse"] and ranking(multi["pairwise_ranking_accuracy"])>ranking(rnn["pairwise_ranking_accuracy"])>ranking(random_eval["pairwise_ranking_accuracy"]))
     summary={"stage":"Stage2-R","status":"SMOKE_TEST_PASSED" if args.smoke_test else "STAGE2_R_COMPLETE","run_directory":str(run),"pomdp_baselines_commit":effective["pomdp_baselines_commit"],"frozen_actor_checkpoint":effective["actor_checkpoint"],"actor_checkpoint_epoch":payload["epoch"],"actor_frozen":all(not parameter.requires_grad for parameter in actor.parameters()),"architecture":architecture(effective),"gamma":effective["gamma"],"tau":effective["tau"],"target_update_interval":effective["target_update_interval"],"train_seeds":train_seeds,"validation_seeds":val_seeds,"random_critic":compact(random_eval),"rnn_only_critic":compact(rnn),"multi_il_critic":compact(multi),"training_sampling":{"rnn_only":rnn["training_sampling"],"multi_il":multi["training_sampling"]},"multi_gt_rnn_gt_random":relation,"stage3_r_actor_modified":False,"stage4_started":False,"stage4_initialization_checkpoints":{"random":str(random_dir/"model_init.pth"),"rnn_only":str(run/"rnn_only_critic"/"checkpoints"/"best.pth"),"multi_il":str(run/"multi_il_critic"/"checkpoints"/"best.pth")}}
