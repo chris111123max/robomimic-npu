@@ -1,4 +1,4 @@
-# -*- coding: future_fstrings -*-
+# -*- coding: utf-8 -*-
 import sys, os, time
 
 t0 = time.time()
