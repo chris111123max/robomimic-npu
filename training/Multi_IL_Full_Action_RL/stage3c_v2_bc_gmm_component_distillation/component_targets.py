@@ -11,6 +11,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+import robomimic.utils.obs_utils as ObsUtils
+import robomimic.utils.python_utils as PyUtils
+import robomimic.utils.torch_utils as TorchUtils
+
 CANONICAL_KEYS = ["robot0_eef_pos", "robot0_eef_quat", "robot0_gripper_qpos",
                   "robot1_eef_pos", "robot1_eef_quat", "robot1_gripper_qpos", "object"]
 SHAPES = {"robot0_eef_pos": [3], "robot0_eef_quat": [4], "robot0_gripper_qpos": [2],
@@ -31,13 +35,50 @@ def load_policy(checkpoint, device):
     policy.start_episode()
     if policy.obs_normalization_stats is not None:
         raise RuntimeError("Stage3C-v2 backbone transfer requires an unnormalized low-dimensional checkpoint input")
-    if policy.action_normalization_stats is not None:
-        raise RuntimeError("Stage3C-v2 currently requires checkpoint actions already in environment space")
     gmm = policy.policy.nets["policy"]
     gmm.eval()
     for parameter in gmm.parameters():
         parameter.requires_grad_(False)
     return policy, gmm
+
+
+def component_means_to_environment_space(policy, means):
+    """Apply the exact RolloutPolicy post-processing to every GMM component mean."""
+    if policy.action_normalization_stats is None:
+        return means
+    original_shape = tuple(means.shape)
+    if len(original_shape) != 3:
+        raise RuntimeError(f"Expected component means [B,M,A], got {original_shape}")
+    flat = means.detach().cpu().numpy().reshape(-1, original_shape[-1])
+    action_keys = policy.policy.global_config.train.action_keys
+    statistics = policy.action_normalization_stats
+    action_shapes = {
+        key: statistics[key]["offset"].shape[1:] for key in statistics
+    }
+    action_dict = PyUtils.vector_to_action_dict(
+        flat, action_shapes=action_shapes, action_keys=action_keys
+    )
+    action_dict = ObsUtils.unnormalize_dict(action_dict, normalization_stats=statistics)
+    action_config = policy.policy.global_config.train.action_config
+    for key, value in action_dict.items():
+        this_format = action_config[key].get("format", None)
+        if this_format != "rot_6d":
+            continue
+        rotation_6d = torch.from_numpy(value)
+        conversion = action_config[key].get("convert_at_runtime", "rot_axis_angle")
+        if conversion == "rot_axis_angle":
+            action_dict[key] = TorchUtils.rot_6d_to_axis_angle(rot_6d=rotation_6d).numpy()
+        elif conversion == "rot_euler":
+            action_dict[key] = TorchUtils.rot_6d_to_euler_angles(
+                rot_6d=rotation_6d, convention="XYZ"
+            ).numpy()
+        else:
+            raise RuntimeError(f"Unsupported rot_6d runtime conversion: {conversion}")
+    transformed = PyUtils.action_dict_to_vector(action_dict, action_keys=action_keys)
+    transformed = transformed.reshape(original_shape[0], original_shape[1], -1)
+    if transformed.shape[-1] != 14:
+        raise RuntimeError(f"Environment component action dimension is not 14: {transformed.shape}")
+    return torch.as_tensor(transformed, device=means.device, dtype=means.dtype)
 
 
 def linear_layers(module):
@@ -115,7 +156,8 @@ def build_cache(dataset_path, cache_path, policy, gmm, device, seeds, batch_size
             with torch.no_grad():
                 dist = gmm.forward_train(prepared)
                 probs = dist.mixture_distribution.probs
-                means = dist.component_distribution.base_dist.loc
+                normalized_means = dist.component_distribution.base_dist.loc
+                means = component_means_to_environment_space(policy, normalized_means)
                 saved = torch.as_tensor(actions[start:stop], device=device)
                 if means.shape != (len(saved), 5, 14) or saved.shape != (len(saved), 14):
                     raise RuntimeError(f"Unexpected component/action shapes: means={means.shape}, saved={saved.shape}")
@@ -154,7 +196,11 @@ def build_cache(dataset_path, cache_path, policy, gmm, device, seeds, batch_size
         "fraction_distance_below_1e-4": float((d < 1e-4).mean()),
         "fraction_distance_below_1e-3": float((d < 1e-3).mean()),
         "fraction_distance_below_1e-2": float((d < 1e-2).mean()),
-        "action_space": "post-tanh environment action; checkpoint has no action normalization",
+        "action_space": (
+            "GMM post-tanh component means transformed with the checkpoint's exact "
+            "RolloutPolicy action unnormalization / runtime rotation conversion"
+        ),
+        "checkpoint_action_normalization_applied": policy.action_normalization_stats is not None,
         "action_space_confirmed": True,
         "component_means_shape_verified": ["B", 5, 14],
         "saved_action_shape_verified": ["B", 14],
