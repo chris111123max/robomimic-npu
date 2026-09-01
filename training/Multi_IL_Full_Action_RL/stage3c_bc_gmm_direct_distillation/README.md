@@ -11,7 +11,7 @@ python -u training/Multi_IL_Full_Action_RL/stage3c_bc_gmm_direct_distillation/ru
   --smoke-test --device npu:0
 ```
 
-Formal run (audit, training, held-out candidate screening, selection, then stop):
+Formal run (audit, training, 16-environment held-out candidate screening, selection, then stop):
 
 ```bash
 python -u training/Multi_IL_Full_Action_RL/stage3c_bc_gmm_direct_distillation/run_stage3c.py \

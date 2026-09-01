@@ -16,5 +16,6 @@
   "candidate_epochs": [25, 50, 100, 150, 200, 300],
   "random_seed": 20260828,
   "evaluation_horizon": 700,
+  "evaluation_num_envs": 16,
   "terminate_on_success": true
 }

@@ -68,6 +68,93 @@ def checkpoint_validation_mse(path):
     return float(payload["validation"]["val_mse"]), int(payload["epoch"])
 
 
+def seed_shards(seed_start, num_seeds, num_workers):
+    worker_count = min(int(num_workers), int(num_seeds))
+    quotient, remainder = divmod(int(num_seeds), worker_count)
+    shards = []
+    cursor = int(seed_start)
+    for worker_id in range(worker_count):
+        size = quotient + int(worker_id < remainder)
+        shards.append((worker_id, cursor, size))
+        cursor += size
+    return shards
+
+
+def aggregate_worker_reports(checkpoint, output, worker_reports):
+    reports = [read_json(path) for path in worker_reports]
+    episodes = sorted(
+        [episode for report in reports for episode in report["episodes"]],
+        key=lambda row: int(row["initial_seed"]),
+    )
+    if len(episodes) != 20 or [int(row["initial_seed"]) for row in episodes] != list(range(10080, 10100)):
+        raise RuntimeError("Parallel candidate evaluation did not produce exactly seeds 10080..10099")
+    successes = sum(int(row["success"]) for row in episodes)
+
+    def count(field):
+        return sum(int(row[field]) for row in episodes)
+
+    trash = count("ever_trash_in_bin")
+    payload = count("ever_payload_in_bin")
+    both = sum(int(row["ever_trash_in_bin"] and row["ever_payload_in_bin"]) for row in episodes)
+    combined = {
+        "stage": "stage3c_parallel_candidate_evaluation",
+        "checkpoint": str(checkpoint),
+        "parallel_environment_workers": len(reports),
+        "worker_reports": [str(path) for path in worker_reports],
+        "requested_episodes": 20,
+        "completed_episodes": len(episodes),
+        "evaluation_complete": len(episodes) == 20,
+        "successes": successes,
+        "success_rate": successes / len(episodes),
+        "subtask_completion": {
+            "trash": {"ever_completed_count": trash, "ever_completed_rate": trash / len(episodes)},
+            "payload": {"ever_completed_count": payload, "ever_completed_rate": payload / len(episodes)},
+            "both": {"ever_completed_count": both, "ever_completed_rate": both / len(episodes)},
+        },
+        "mean_partial_progress_score": float(
+            sum(float(row["partial_progress_score"]) for row in episodes) / len(episodes)
+        ),
+        "episodes": episodes,
+    }
+    write_json(output, combined)
+    return combined
+
+
+def evaluate_candidate_parallel(path, output, evaluation_dir, device, num_workers):
+    worker_dir = evaluation_dir / "workers" / path.stem
+    worker_dir.mkdir(parents=True, exist_ok=False)
+    processes = []
+    report_paths = []
+    log_streams = []
+    try:
+        for worker_id, seed_start, seed_count in seed_shards(10080, 20, num_workers):
+            report_path = worker_dir / f"worker_{worker_id:02d}.json"
+            log_path = worker_dir / f"worker_{worker_id:02d}.log"
+            stream = open(log_path, "w", encoding="utf-8")
+            command = [
+                sys.executable, "-u", str(EVALUATOR), "--checkpoint", str(path),
+                "--seed-start", str(seed_start), "--num-seeds", str(seed_count),
+                "--device", device, "--deterministic", "--output", str(report_path),
+            ]
+            print(f"Starting evaluation worker {worker_id:02d}: seeds {seed_start}..{seed_start + seed_count - 1}")
+            processes.append((worker_id, command, subprocess.Popen(
+                command, cwd=REPO_ROOT, stdout=stream, stderr=subprocess.STDOUT,
+            )))
+            report_paths.append(report_path)
+            log_streams.append(stream)
+        failures = []
+        for worker_id, command, process in processes:
+            return_code = process.wait()
+            if return_code:
+                failures.append((worker_id, return_code, command))
+        if failures:
+            raise RuntimeError(f"Parallel candidate evaluation worker failures: {failures}")
+    finally:
+        for stream in log_streams:
+            stream.close()
+    return aggregate_worker_reports(path, output, report_paths)
+
+
 def candidate_paths(checkpoint_dir):
     paths = sorted(checkpoint_dir.glob("bc_gmm_distill_epoch_*.pth"), key=lambda path: checkpoint_validation_mse(path)[1])
     best = checkpoint_dir / "bc_gmm_distill_best_val_mse.pth"
@@ -76,18 +163,13 @@ def candidate_paths(checkpoint_dir):
     return paths
 
 
-def screen_candidates(run_dir, device):
+def screen_candidates(run_dir, device, num_workers):
     evaluation_dir = run_dir / "candidate_evaluations"
     evaluation_dir.mkdir(exist_ok=False)
     rows = []
     for path in candidate_paths(run_dir / "checkpoints"):
         output = evaluation_dir / f"{path.stem}.json"
-        run([
-            sys.executable, "-u", EVALUATOR, "--checkpoint", path,
-            "--seed-start", "10080", "--num-seeds", "20",
-            "--device", device, "--deterministic", "--output", output,
-        ])
-        report = read_json(output)
+        report = evaluate_candidate_parallel(path, output, evaluation_dir, device, num_workers)
         if not report["evaluation_complete"]:
             raise RuntimeError(f"Incomplete candidate evaluation: {output}")
         subtasks = report["subtask_completion"]
@@ -145,7 +227,9 @@ def main():
         print(f"Run directory: {run_dir}")
         print("Stopped before closed-loop screening and Stage 4.")
         return
-    selection = screen_candidates(run_dir, args.device)
+    selection = screen_candidates(
+        run_dir, args.device, int(config.get("evaluation_num_envs", 16))
+    )
     summary = read_json(run_dir / "training_summary.json")
     summary["status"] = "STAGE3C_COMPLETE"
     summary["audit_forward_sanity"] = audit["forward_sanity"]
