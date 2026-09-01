@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import sys
 from pathlib import Path
 
@@ -90,8 +91,17 @@ def update(critic, target, optimizer, batch, config, update_index):
     gradients=[parameter.grad.detach() for parameter in critic.parameters() if parameter.grad is not None]
     bad_gradients=sum(int((~torch.isfinite(gradient)).sum().item()) for gradient in gradients)
     if bad_gradients:raise RuntimeError(f"NaN/Inf gradients before optimizer step at recurrent critic update {update_index}: count={bad_gradients}")
-    grad_norm=torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(gradient.float()) for gradient in gradients]))
-    if not torch.isfinite(grad_norm):raise RuntimeError(f"Non-finite gradient norm at recurrent critic update {update_index}")
+    # Do not reduce the complete gradient vector in NPU float32: that diagnostic
+    # reduction can overflow even when every gradient entry is finite. Scale each
+    # tensor on-device, then combine ordinary scalar norms in Python float64.
+    tensor_norms=[]
+    for gradient in gradients:
+        maximum=float(gradient.detach().abs().max().item())
+        if maximum==0.0:tensor_norms.append(0.0);continue
+        scaled=gradient.detach()/maximum
+        tensor_norms.append(maximum*math.sqrt(float(scaled.square().sum().item())))
+    grad_norm=math.hypot(*tensor_norms)
+    if not math.isfinite(grad_norm):raise RuntimeError(f"True non-finite gradient norm at recurrent critic update {update_index}")
     optimizer.step()
     bad_parameters=sum(int((~torch.isfinite(parameter)).sum().item()) for parameter in critic.parameters())
     if bad_parameters:raise RuntimeError(f"Optimizer produced NaN/Inf parameters at recurrent critic update {update_index}: count={bad_parameters}")
@@ -107,6 +117,6 @@ def update(critic, target, optimizer, batch, config, update_index):
         "target_q_std": float(bellman[mask.bool()].std(unbiased=False).item()),
         "hidden_norm_mean": float(valid_hidden.norm(dim=-1).mean().item()),
         "hidden_norm_std": float(valid_hidden.norm(dim=-1).std(unbiased=False).item()),
-        "gradient_norm": float(grad_norm.item()), "nan_inf_count": 0,
+        "gradient_norm": float(grad_norm), "nan_inf_count": 0,
         "effective_timesteps": int(mask.sum().item())
     }
