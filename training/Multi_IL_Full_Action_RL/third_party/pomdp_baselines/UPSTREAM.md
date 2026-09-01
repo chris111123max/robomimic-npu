@@ -13,3 +13,6 @@ unchanged.
 The legacy `future_fstrings` source-code encoding declarations were replaced
 with standard UTF-8 declarations. Python 3.10 natively supports the f-string
 syntax used by these files, so the external codec is unnecessary.
+
+`utils/logger.py` imports `Set` from `collections.abc` for Python 3.10+
+compatibility; `collections.Set` was removed from the public API.
