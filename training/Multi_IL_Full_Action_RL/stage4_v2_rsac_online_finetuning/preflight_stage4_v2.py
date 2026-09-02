@@ -21,6 +21,6 @@ def main():
  with tempfile.TemporaryDirectory() as temp:stats=engine.update(replay.sample(2,d),6000,Path(temp))
  if engine.algo.alpha_entropy!=before_alpha or before_alpha!=.001:raise RuntimeError("Fixed alpha changed")
  if state_hash(actor)==before_actor or state_hash(target)==before_target:raise RuntimeError("Actor/target finite update did not execute")
- audit.update(status="PASS",replay_empty_at_step0=True,sequence_length=10,freeze_steps=5000,warmup="5000->20000",automatic_entropy_tuning=False,fixed_alpha=.001,alpha_optimizer_exists=False,actor_loss="alpha*log_pi-min(Q1,Q2)",critic_update_finite=np.isfinite(stats["critic_loss"]),actor_update_finite=np.isfinite(stats["actor_loss"]),target_update_finite=True)
+ audit.update(status="PASS",replay_empty_at_step0=True,sequence_length=10,freeze_steps=5000,warmup="5000->20000",automatic_entropy_tuning=False,fixed_alpha=.001,alpha_optimizer_exists=False,actor_loss="alpha*log_pi-min(Q1,Q2)",critic_update_finite=bool(np.isfinite(stats["critic_loss"])),actor_update_finite=bool(np.isfinite(stats["actor_loss"])),target_update_finite=True)
  atomic_json(a.output,audit);print(json.dumps(audit,indent=2))
 if __name__=="__main__":main()
