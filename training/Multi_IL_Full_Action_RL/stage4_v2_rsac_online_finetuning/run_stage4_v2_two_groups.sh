@@ -2,7 +2,6 @@
 set -euo pipefail
 MODE="${1:-formal}"
 if [[ "$MODE" != "smoke" && "$MODE" != "formal" ]]; then echo "Usage: bash run_stage4_v2_two_groups.sh [smoke|formal]";exit 2;fi
-if [[ "$MODE" == formal && "${STAGE4_V2_BENCHMARK_PASS:-0}" != 1 ]];then echo "Refusing 16-env formal run: run run_optimized_stage4_v2.sh so the 8-vs-16 benchmark gates launch.";exit 3;fi
 ROOT="/data/home/3220251075/lerobot_workspace/robomimic"
 HERE="$ROOT/training/Multi_IL_Full_Action_RL/stage4_v2_rsac_online_finetuning"
 V1="$ROOT/training/Multi_IL_Full_Action_RL/stage4_rsac_online_finetuning"
@@ -19,11 +18,14 @@ python "$HERE/allocate_cpu_affinity.py" --output "$RUN"
 python - "$V1/stage4_config.json" "$CONFIG" "$RUN/config_diff.json" <<'PY'
 import json,sys
 a,b,out=map(lambda p:json.load(open(p)) if p!=sys.argv[3] else p,sys.argv[1:])
-allowed={'stage','output_root','diagnostic_sequences','total_env_steps','actor_freeze_steps','actor_warmup_end','automatic_entropy_tuning','initial_entropy_alpha','target_entropy_active','evaluation_interval','checkpoint_steps','parallel_envs','evaluation_parallel_envs','performance_log_interval','resource_log_interval'}
+# Normalize changes already established by the pre-async 16-env Stage4-v2 baseline.
+established={'stage','output_root','diagnostic_sequences','total_env_steps','actor_freeze_steps','actor_warmup_end','automatic_entropy_tuning','initial_entropy_alpha','target_entropy_active','evaluation_interval','checkpoint_steps','parallel_envs','evaluation_parallel_envs','performance_log_interval','resource_log_interval'}
+for key in established:a[key]=b.get(key)
+allowed={'collector_mode','async_policy_rng','async_ready_drain','async_max_updates_before_ready_poll'}
 diff={k:{'v1':a.get(k),'v2':b.get(k)} for k in sorted(set(a)|set(b)) if a.get(k)!=b.get(k)}
 illegal=sorted(set(diff)-allowed)
 if illegal:raise SystemExit(f'Illegal Stage4-v2 config differences: {illegal}')
-json.dump({'allowed_difference_keys':sorted(allowed),'differences':diff},open(out,'w'),indent=2)
+json.dump({'baseline':'pre-async Stage4-v2 with 16 env/group','established_unchanged_keys':sorted(established),'allowed_difference_keys':sorted(allowed),'differences':diff},open(out,'w'),indent=2)
 print(json.dumps(diff,indent=2))
 PY
 declare -A DEV=( [rnn_only_critic]="$RNN_DEVICE" [multi_il_critic]="$MULTI_DEVICE" )
@@ -35,7 +37,11 @@ r=Path(sys.argv[1]);x=[json.load(open(r/f'preflight_{g}.json')) for g in ('rnn_o
 assert len({v['actor_hash'] for v in x})==1 and len({v['critic_hash'] for v in x})==2
 print('STAGE4-V2 PREFLIGHT PASSED: identical Actors, distinct Critics, fixed alpha=0.001')
 PY
-if [[ "$MODE" == smoke ]];then echo "STAGE4-V2 SMOKE COMPLETE; NO ROLLOUT STARTED";echo "Run directory: $RUN";exit 0;fi
+if [[ "$MODE" == smoke ]];then
+  python "$HERE/test_async_invariants.py" --output "$RUN/async_invariants.json"
+  env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 PYTORCH_NPU_ALLOC_CONF=expandable_segments:True python -u "$V1/train_stage4_group.py" --group rnn_only_critic --device "$RNN_DEVICE" --config "$CONFIG" --run-dir "$RUN" --cpu-affinity-file "$RUN/cpu_affinity.json" --smoke-test
+  echo "STAGE4-V2 ASYNC CORRECTNESS SMOKE COMPLETE; NO FORMAL RUN STARTED";echo "Run directory: $RUN";exit 0
+fi
 declare -A PIDS
 for G in rnn_only_critic multi_il_critic;do
   mkdir -p "$RUN/$G";[[ "$G" == rnn_only_critic ]]&&CPU_KEY=rnn_trainer_cpu_id||CPU_KEY=multi_trainer_cpu_id

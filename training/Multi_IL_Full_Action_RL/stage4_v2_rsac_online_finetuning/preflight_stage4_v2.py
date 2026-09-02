@@ -8,6 +8,8 @@ from stage4_core import OnlineSequenceReplay,Stage4SAC,assert_phase_contract,ato
 def main():
  p=argparse.ArgumentParser();p.add_argument("--group",required=True);p.add_argument("--device",required=True);p.add_argument("--config",required=True);p.add_argument("--output",required=True);a=p.parse_args();c=read_json(a.config);c.update(group=a.group,device=a.device);assert_phase_contract(c)
  assert c["total_env_steps"]==100000 and c["actor_freeze_steps"]==5000 and c["actor_warmup_end"]==20000
+ assert c["parallel_envs"]==16 and c["collector_mode"]=="async_ready_queue"
+ assert c["initial_entropy_alpha"]==0.001 and c["automatic_entropy_tuning"] is False
  assert c["automatic_entropy_tuning"] is False and c["initial_entropy_alpha"]==.001 and c["sequence_length"]==10
  before=phase_at(4999,c);boundary=phase_at(5000,c);middle=phase_at(10000,c);end=phase_at(20000,c)
  assert before["actor_updates"] is False and boundary["actor_updates"] is False and boundary["actor_lr"]==0.0

@@ -1,6 +1,7 @@
 """Persistent process-per-environment robosuite pool for Stage4 collection."""
 from __future__ import annotations
 import multiprocessing as mp
+from multiprocessing.connection import wait as wait_connections
 import os
 import random
 import traceback
@@ -56,8 +57,9 @@ def _worker(connection,teacher_checkpoint,keys,shapes,horizon,terminate_on_succe
             elif command=="reset_to":
                 observation=env.reset_to(payload["state"]);steps=int(payload["steps"]);connection.send(("result",_flatten(observation,keys,shapes)))
             elif command=="step":
-                observation,reward,raw_done,_=env.step(np.asarray(payload,np.float32));steps+=1;success=_success(env);terminated=bool(raw_done);truncated=bool(not raw_done and ((terminate_on_success and success) or steps>=horizon));done=terminated or truncated
-                connection.send(("result",(_flatten(observation,keys,shapes),float(reward),done,{"success":success,"terminated":terminated,"truncated":truncated})))
+                envelope=payload if isinstance(payload,dict) else {"action":payload,"episode_id":None,"dispatch_time":None}
+                observation,reward,raw_done,_=env.step(np.asarray(envelope["action"],np.float32));steps+=1;success=_success(env);terminated=bool(raw_done);truncated=bool(not raw_done and ((terminate_on_success and success) or steps>=horizon));done=terminated or truncated
+                connection.send(("result",{"episode_id":envelope.get("episode_id"),"episode_step":steps,"dispatch_time":envelope.get("dispatch_time"),"finish_time":__import__("time").perf_counter(),"transition":(_flatten(observation,keys,shapes),float(reward),done,{"success":success,"terminated":terminated,"truncated":truncated})}))
             elif command=="get_state":connection.send(("result",env.get_state()))
             elif command=="close":connection.send(("closed",None));break
             else:raise RuntimeError(f"Unknown Stage4 environment command: {command}")
@@ -74,7 +76,7 @@ def _worker(connection,teacher_checkpoint,keys,shapes,horizon,terminate_on_succe
 
 class Stage4ParallelEnvPool:
     def __init__(self,teacher_checkpoint,keys,shapes,num_envs,horizon,terminate_on_success,seed,start_method="forkserver",startup_timeout=300,step_timeout=120,cpu_ids=None):
-        self.num_envs=int(num_envs);self.step_timeout=float(step_timeout);self.connections=[];self.processes=[]
+        self.num_envs=int(num_envs);self.step_timeout=float(step_timeout);self.connections=[];self.processes=[];self.in_flight=set();self.last_dispatch={}
         self.cpu_ids=None if cpu_ids is None else list(map(int,cpu_ids))
         if self.cpu_ids is not None and len(self.cpu_ids)!=self.num_envs:raise RuntimeError(f"Need {self.num_envs} CPU IDs, got {len(self.cpu_ids)}")
         if start_method not in mp.get_all_start_methods():raise RuntimeError(f"Unavailable multiprocessing method {start_method}")
@@ -104,7 +106,30 @@ class Stage4ParallelEnvPool:
 
     def step(self,workers,actions):
         for worker,action in zip(workers,actions):self.connections[worker].send(("step",action))
-        return {worker:self._receive(worker) for worker in workers}
+        results={worker:self._receive(worker) for worker in workers}
+        return {worker:(value["transition"] if isinstance(value,dict) and "transition" in value else value) for worker,value in results.items()}
+
+    def dispatch_steps(self, workers, actions, episode_ids):
+        import time
+        for worker,action,episode_id in zip(workers,actions,episode_ids):
+            if worker in self.in_flight:raise RuntimeError(f"Stage4 env worker {worker} already has an in-flight step")
+            stamp=time.perf_counter();self.connections[worker].send(("step",{"action":action,"episode_id":int(episode_id),"dispatch_time":stamp}));self.in_flight.add(worker);self.last_dispatch[worker]=stamp
+
+    def receive_ready(self, timeout=None, allow_empty=False):
+        """Wait for one result, then drain all other results already available."""
+        if not self.in_flight:raise RuntimeError("No Stage4 environment step is in flight")
+        candidates=[self.connections[w] for w in sorted(self.in_flight)];ready=wait_connections(candidates,timeout=self.step_timeout if timeout is None else timeout)
+        if not ready and allow_empty:return {}
+        if not ready:
+            details=[{"env_id":w,"pid":self.processes[w].pid,"alive":self.processes[w].is_alive(),"exitcode":self.processes[w].exitcode} for w in sorted(self.in_flight)]
+            raise TimeoutError(f"Async Stage4 workers timed out: {details}")
+        ready_set=set(ready)
+        # Non-blocking opportunistic drain after the first completion.
+        ready_set.update(connection for connection in candidates if connection.poll(0))
+        by_connection={connection:w for w,connection in enumerate(self.connections)};results={}
+        for connection in ready_set:
+            worker=by_connection[connection];results[worker]=self._receive(worker,timeout=0);self.in_flight.remove(worker)
+        return dict(sorted(results.items()))
 
     def get_states(self,workers):
         for worker in workers:self.connections[worker].send(("get_state",None))

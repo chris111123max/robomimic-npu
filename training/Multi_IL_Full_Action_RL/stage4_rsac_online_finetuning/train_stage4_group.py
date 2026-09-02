@@ -76,7 +76,7 @@ def unflatten(state, keys):
 
 
 @torch.no_grad()
-def batched_actor_actions(actor, observations, hidden, counters, workers, device, deterministic=False):
+def batched_actor_actions(actor, observations, hidden, counters, workers, device, deterministic=False, epsilon=None):
     """One recurrent policy step for an arbitrary subset of environment workers."""
     indices=torch.as_tensor(workers,dtype=torch.long,device=device)
     selected=tuple(item.index_select(1,indices) for item in hidden)
@@ -85,7 +85,13 @@ def batched_actor_actions(actor, observations, hidden, counters, workers, device
         selected=tuple(item.masked_fill(reset.view(1,-1,1),0.0) for item in selected)
     states=torch.as_tensor(np.stack([observations[worker] for worker in workers]),dtype=torch.float32,device=device)
     output,new_hidden=actor.lstm(actor.observation_adapter(states).unsqueeze(1),selected)
-    action=actor.policy(output[:,0],deterministic=deterministic,return_log_prob=False)[0]
+    features=output[:,0]
+    if epsilon is None:
+        action=actor.policy(features,deterministic=deterministic,return_log_prob=False)[0]
+    else:
+        h=features
+        for fc in actor.policy.fcs:h=actor.policy.hidden_activation(fc(h))
+        mean=actor.policy.last_fc(h);log_std=torch.clamp(actor.policy.last_fc_log_std(h),-20,2);action=torch.tanh(mean+torch.exp(log_std)*epsilon)
     for part,new_part in zip(hidden,new_hidden):part.index_copy_(1,indices,new_part)
     for worker in workers:counters[worker]+=1
     return action.cpu().numpy()
@@ -173,7 +179,10 @@ def training_context(pool, contexts, hidden, counters, next_episode):
     workers=sorted(contexts)
     return {"parallel_envs":pool.num_envs,"active_workers":workers,"env_states":pool.get_states(workers),
             "contexts":contexts,"actor_hidden":cpu_tree(hidden),"actor_counters":counters.tolist(),
-            "next_episode":int(next_episode)}
+            "next_episode":int(next_episode),"collector_mode":"async_ready_queue",
+            "update_budget":float(getattr(pool,"update_budget",0.0)),
+            "policy_rng_states":{str(worker):rng.get_state() for worker,rng in getattr(pool,"policy_rngs",{}).items()},
+            "resume_boundary_requirement":"checkpoint has no in-flight env.step; MuJoCo states and per-env buffers are captured at a quiescent transition boundary"}
 
 
 def add_finished_episode(replay, context):
@@ -204,7 +213,7 @@ def main():
     pool=Stage4ParallelEnvPool(actor_payload["teacher_checkpoint"],actor_payload["observation_keys"],SHAPES,
         config["parallel_envs"],config["evaluation_horizon"],config["terminate_on_success"],config["seed"],
         config["parallel_start_method"],config["parallel_startup_timeout_seconds"],config["parallel_step_timeout_seconds"],cpu_ids)
-    env_step=0;next_episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[];contexts={};perf={k:0.0 for k in ("rollout_seconds","policy_inference_seconds","replay_insert_seconds","critic_update_seconds","actor_update_seconds","evaluation_seconds","checkpoint_seconds")};perf_started=time.perf_counter();perf_step=0;cpu_started=time.process_time();resource_started=time.perf_counter();cgroup_started=cgroup_usage_usec()
+    env_step=0;next_episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[];contexts={};perf={k:0.0 for k in ("rollout_seconds","policy_inference_seconds","replay_insert_seconds","critic_update_seconds","actor_update_seconds","evaluation_seconds","checkpoint_seconds")};perf_started=time.perf_counter();perf_step=0;cpu_started=time.process_time();resource_started=time.perf_counter();cgroup_started=cgroup_usage_usec();pool.update_budget=0.0;pool.policy_rngs={worker:np.random.RandomState(int(config["seed"])+1000003*(worker+1)) for worker in range(pool.num_envs)};ready_batch_sizes=[];action_wait_ms=[];all_ready_batch_sizes=[];all_action_wait_ms=[];barrier_examples=[]
     hidden=(torch.zeros(2,pool.num_envs,400,device=device),torch.zeros(2,pool.num_envs,400,device=device));counters=np.zeros(pool.num_envs,dtype=np.int64)
     try:
         if args.resume:
@@ -214,6 +223,8 @@ def main():
             observations=pool.reset_to({int(key):value for key,value in context["env_states"].items()},{worker:contexts[worker]["length"] for worker in workers})
             for worker in workers:contexts[worker]["observation"]=observations[worker]
             hidden=tuple(item.to(device) for item in context["actor_hidden"]);counters=np.asarray(context["actor_counters"],dtype=np.int64);next_episode=int(context["next_episode"])
+            pool.update_budget=float(context.get("update_budget",0.0))
+            for worker,state in context.get("policy_rng_states",{}).items():pool.policy_rngs[int(worker)].set_state(tuple(state))
             completed_updates=engine.update_index
             metrics_path=group_dir/"evaluation_metrics.csv"
             if metrics_path.exists():
@@ -228,43 +239,56 @@ def main():
             replay_before=replay.transitions;t=time.perf_counter();report=evaluate(actor,actor_payload,config,device,0,group_dir/"evaluations"/"step_00000000.json",pool,schema,contexts);perf["evaluation_seconds"]+=time.perf_counter()-t;evaluation_rows.append(report)
             if replay.transitions!=replay_before:raise RuntimeError("Evaluation polluted online replay")
             append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in report.items() if key!="episodes"})
-            context={"parallel_envs":pool.num_envs,"active_workers":[],"env_states":{},"contexts":{},"actor_hidden":cpu_tree(hidden),"actor_counters":counters.tolist(),"next_episode":next_episode}
+            context=training_context(pool,contexts,hidden,counters,next_episode)
             save_checkpoint(group_dir/"checkpoints"/"step_00000000.pth",engine,replay,config,0,next_episode,actor_payload,context,report)
             save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,0,next_episode,actor_payload,context,report);best_key=(report["success_rate"],report["mean_progress"],0)
         while env_step<int(config["total_env_steps"]):
-            empty=[worker for worker in range(pool.num_envs) if worker not in contexts]
+            future=sorted(step for step in evaluation_steps|checkpoint_steps|performance_steps|resource_steps|{int(config["total_env_steps"])} if step>env_step);boundary=future[0]
+            capacity=boundary-env_step-len(pool.in_flight);empty=[worker for worker in range(pool.num_envs) if worker not in contexts][:max(0,capacity)]
             if empty:
                 seeds=[]
-                for worker in empty:seeds.append(int(config["seed"])+next_episode);contexts[worker]=new_episode(next_episode,None);next_episode+=1;counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
+                for worker in empty:seeds.append(int(config["seed"])+next_episode);contexts[worker]=new_episode(next_episode,None);contexts[worker]["environment_seed"]=seeds[-1];next_episode+=1;counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
                 observations=pool.reset(empty,seeds)
                 for worker in empty:contexts[worker]["observation"]=observations[worker]
-            future=sorted(step for step in evaluation_steps|checkpoint_steps|performance_steps|resource_steps|{int(config["total_env_steps"])} if step>env_step);boundary=future[0]
-            workers=sorted(contexts)[:min(len(contexts),boundary-env_step)]
-            observations={worker:contexts[worker]["observation"] for worker in workers};t=time.perf_counter();batch_actions=batched_actor_actions(actor,observations,hidden,counters,workers,device);perf["policy_inference_seconds"]+=time.perf_counter()-t
-            if not np.isfinite(batch_actions).all():raise RuntimeError("Non-finite environment action")
-            t=time.perf_counter();results=pool.step(workers,batch_actions);perf["rollout_seconds"]+=time.perf_counter()-t;finished_contexts=[]
-            for worker,action in zip(workers,batch_actions):
-                context=contexts[worker];state=context["observation"];next_state,reward,finished,info=results[worker];canonical=unflatten(next_state,actor_payload["observation_keys"]);progress=extract_transport_progress(canonical,schema)
-                context["states"].append(state);context["actions"].append(action);context["rewards"].append(float(reward));context["dones"].append(float(finished));context["terminated"].append(float(info["terminated"]));context["truncated"].append(float(info["truncated"]));context["next_states"].append(next_state)
-                context["observation"]=next_state;context["return"]+=float(reward);context["length"]+=1;context["success"]|=bool(info["success"]);context["trash_ever"]|=bool(progress["trash_in_trash_bin"]);context["payload_ever"]|=bool(progress["payload_in_target_bin"]);env_step+=1
-                if finished:finished_contexts.append(context);del contexts[worker];counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
+            capacity=boundary-env_step-len(pool.in_flight);ready=[worker for worker in sorted(contexts) if worker not in pool.in_flight and "pending_action" not in contexts[worker]][:max(0,capacity)]
+            if ready:
+                observations={worker:contexts[worker]["observation"] for worker in ready};epsilon=torch.as_tensor(np.stack([pool.policy_rngs[worker].standard_normal(14) for worker in ready]),dtype=torch.float32,device=device);t=time.perf_counter();actions=batched_actor_actions(actor,observations,hidden,counters,ready,device,False,epsilon);perf["policy_inference_seconds"]+=time.perf_counter()-t
+                if not np.isfinite(actions).all():raise RuntimeError("Non-finite asynchronous environment action")
+                dispatch=time.perf_counter();ready_batch_sizes.append(len(ready));all_ready_batch_sizes.append(len(ready))
+                for worker,action in zip(ready,actions):
+                    contexts[worker]["pending_action"]=action;contexts[worker]["action_dispatch_time"]=dispatch
+                    if "last_finish_time" in contexts[worker]:
+                        finish_time=contexts[worker].pop("last_finish_time");wait_ms=(dispatch-finish_time)*1000.0;action_wait_ms.append(wait_ms);all_action_wait_ms.append(wait_ms)
+                        if pool.in_flight and len(barrier_examples)<10:barrier_examples.append({"env_id":worker,"env_step_finish_time":finish_time,"next_action_dispatch_time":dispatch,"dispatch_delay_ms":(dispatch-finish_time)*1000.0,"other_envs_still_running":sorted(pool.in_flight)})
+                pool.dispatch_steps(ready,actions,[contexts[worker]["episode"] for worker in ready])
+            update_rows=[]
+            results={}
+            while pool.in_flight and pool.update_budget>=1.0 and replay.transitions>=int(config["minimum_replay_size"]):
+                update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"));perf["critic_update_seconds"]+=engine.last_update_timing["critic_update_seconds"];perf["actor_update_seconds"]+=engine.last_update_timing["actor_update_seconds"];pool.update_budget-=1.0;completed_updates+=1
+                results=pool.receive_ready(timeout=0,allow_empty=True)
+                if results:break
+            if not pool.in_flight and not results:continue
+            t=time.perf_counter()
+            if not results:results=pool.receive_ready()
+            perf["rollout_seconds"]+=time.perf_counter()-t;finished_contexts=[];still_running=set(pool.in_flight)
+            for worker,envelope in results.items():
+                context=contexts[worker]
+                if int(envelope["episode_id"])!=int(context["episode"]):raise RuntimeError(f"Async episode mismatch env={worker}")
+                action=context.pop("pending_action");context.pop("action_dispatch_time");context["last_finish_time"]=float(envelope["finish_time"]);next_state,reward,finished,info=envelope["transition"];canonical=unflatten(next_state,actor_payload["observation_keys"]);progress=extract_transport_progress(canonical,schema)
+                state=context["observation"];context["states"].append(state);context["actions"].append(action);context["rewards"].append(float(reward));context["dones"].append(float(finished));context["terminated"].append(float(info["terminated"]));context["truncated"].append(float(info["truncated"]));context["next_states"].append(next_state);context["observation"]=next_state;context["return"]+=float(reward);context["length"]+=1;context["success"]|=bool(info["success"]);context["trash_ever"]|=bool(progress["trash_in_trash_bin"]);context["payload_ever"]|=bool(progress["payload_in_target_bin"]);env_step+=1
+                if finished:finished_contexts.append((worker,context));del contexts[worker];counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
+            pool.update_budget=float(max(0,int(np.floor(env_step*float(config["updates_per_env_step"]))) - completed_updates))
             if env_step==int(config["total_env_steps"]):
                 for worker in sorted(contexts):
                     context=contexts[worker]
-                    if context["states"]:
-                        context["dones"][-1]=1.0;context["terminated"][-1]=0.0;context["truncated"][-1]=1.0;finished_contexts.append(context)
+                    if context["states"]:context["dones"][-1]=1.0;context["terminated"][-1]=0.0;context["truncated"][-1]=1.0;finished_contexts.append((worker,context))
                 contexts.clear()
             t=time.perf_counter()
-            for context in finished_contexts:add_finished_episode(replay,context)
+            for _,context in finished_contexts:add_finished_episode(replay,context)
             perf["replay_insert_seconds"]+=time.perf_counter()-t
-            new_budget=max(0,int(np.floor(replay.transitions*float(config["updates_per_env_step"])))-completed_updates);update_rows=[]
-            if replay.transitions>=int(config["minimum_replay_size"]):
-                for _ in range(new_budget):
-                    update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"));perf["critic_update_seconds"]+=engine.last_update_timing["critic_update_seconds"];perf["actor_update_seconds"]+=engine.last_update_timing["actor_update_seconds"]
-                completed_updates+=new_budget
             summary=aggregate_updates(update_rows)
-            for context in finished_contexts:
-                phase=phase_at(env_step,config);metrics={"env_step":env_step,"episode":context["episode"],"phase":phase["phase"],"actor_lr":phase["actor_lr"],"critic_lr":phase["critic_lr"],**summary,"buffer_size":replay.transitions,"episode_return":context["return"],"episode_length":context["length"],"success":int(context["success"]),"trash_ever":int(context["trash_ever"]),"payload_ever":int(context["payload_ever"]),"updates_this_batch":len(update_rows),"gradient_updates":completed_updates}
+            for worker,context in finished_contexts:
+                phase=phase_at(env_step,config);metrics={"env_step":env_step,"env_id":worker,"episode_id":context["episode"],"environment_seed":context["environment_seed"],"phase":phase["phase"],"actor_lr":phase["actor_lr"],"critic_lr":phase["critic_lr"],**summary,"buffer_size":replay.transitions,"episode_return":context["return"],"episode_length":context["length"],"success":int(context["success"]),"trash_ever":int(context["trash_ever"]),"payload_ever":int(context["payload_ever"]),"updates_this_batch":len(update_rows),"gradient_updates":completed_updates,"update_backlog":pool.update_budget}
                 append_csv(group_dir/"training_metrics.csv",metrics);print(f"{args.group} env_step={env_step}/{config['total_env_steps']} episode={context['episode']} phase={phase['phase']} success={int(context['success'])} replay={replay.transitions} updates={completed_updates}",flush=True)
             if env_step in evaluation_steps:
                 replay_before=replay.transitions;t=time.perf_counter();report=evaluate(actor,actor_payload,config,device,env_step,group_dir/"evaluations"/f"step_{env_step:08d}.json",pool,schema,contexts);perf["evaluation_seconds"]+=time.perf_counter()-t;evaluation_rows.append(report)
@@ -275,15 +299,19 @@ def main():
             if env_step in checkpoint_steps:
                 t=time.perf_counter();context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,evaluation_rows[-1] if evaluation_rows and evaluation_rows[-1]["env_step"]==env_step else None);perf["checkpoint_seconds"]+=time.perf_counter()-t
             if env_step in performance_steps:
-                elapsed=time.perf_counter()-perf_started;append_csv(group_dir/"performance_metrics.csv",{"env_step":env_step,"env_steps_per_second":(env_step-perf_step)/elapsed,**perf});perf={key:0.0 for key in perf};perf_started=time.perf_counter();perf_step=env_step
+                elapsed=time.perf_counter()-perf_started;micro=np.asarray(ready_batch_sizes or [0],dtype=float);waits=np.asarray(action_wait_ms or [0],dtype=float);learner=perf["critic_update_seconds"]+perf["actor_update_seconds"];append_csv(group_dir/"performance_metrics.csv",{"env_step":env_step,"env_steps_per_second":(env_step-perf_step)/elapsed,"ready_microbatch_min":float(micro.min()),"ready_microbatch_mean":float(micro.mean()),"ready_microbatch_p50":float(np.percentile(micro,50)),"ready_microbatch_p95":float(np.percentile(micro,95)),"ready_microbatch_max":float(micro.max()),"worker_waiting_for_action_ms_mean":float(waits.mean()),"worker_waiting_for_action_ms_p95":float(np.percentile(waits,95)),"rollout_time_fraction":perf["rollout_seconds"]/elapsed,"learner_time_fraction":learner/elapsed,"actor_inference_time_fraction":perf["policy_inference_seconds"]/elapsed,"update_backlog":pool.update_budget,"live_workers":pool.live_worker_count(),**perf});perf={key:0.0 for key in perf};ready_batch_sizes=[];action_wait_ms=[];perf_started=time.perf_counter();perf_step=env_step
             if env_step in resource_steps:
                 wall=time.perf_counter()-resource_started;usage=cgroup_usage_usec();append_csv(group_dir/"resource_metrics.csv",{"env_step":env_step,"process_cpu_percentage":100.0*(time.process_time()-cpu_started)/wall,"live_environment_workers":pool.live_worker_count(),"cgroup_cpu_usage_usec":usage,"cgroup_cpu_usage_delta_usec":None if usage is None or cgroup_started is None else usage-cgroup_started});cpu_started=time.process_time();resource_started=time.perf_counter();cgroup_started=usage
+        while pool.update_budget>=1.0 and replay.transitions>=int(config["minimum_replay_size"]):
+            engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan");pool.update_budget-=1.0;completed_updates+=1
+        all_micro=np.asarray(all_ready_batch_sizes or [0],dtype=float);all_wait=np.asarray(all_action_wait_ms or [0],dtype=float)
+        atomic_json(group_dir/"async_collector_report.json",{"collector_mode":"async_ready_queue","ipc":"multiprocessing.Pipe + multiprocessing.connection.wait + poll(0) drain","wait_for_all_barrier":False,"training_envs":pool.num_envs,"dynamic_actor_batch":{"min":float(all_micro.min()),"mean":float(all_micro.mean()),"p50":float(np.percentile(all_micro,50)),"p95":float(np.percentile(all_micro,95)),"max":float(all_micro.max())},"worker_waiting_for_action_ms":{"mean":float(all_wait.mean()),"p95":float(np.percentile(all_wait,95))},"barrier_examples":barrier_examples,"fast_worker_redispatched_while_slow_worker_running":bool(barrier_examples),"per_env_policy_rng":True,"central_actor":True,"worker_local_actor":False,"env_step":env_step,"gradient_updates":completed_updates,"remaining_update_budget":pool.update_budget})
         final_report=evaluation_rows[-1]
         context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report);save_checkpoint(group_dir/"checkpoints"/"last.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report)
         atomic_json(group_dir/"status.json",{"status":"COMPLETE","group":args.group,"env_step":env_step,"gradient_updates":completed_updates,"actor_hash_initial":audit["actor_hash"],"actor_hash_final":state_hash(actor),"critic_hash_initial":audit["critic_hash"],"nan_inf_failure":False})
         print(f"STAGE4 GROUP COMPLETE: {args.group} env_step={env_step}",flush=True)
     except BaseException as error:
-        atomic_json(group_dir/"status.json",{"status":"FAILED","group":args.group,"env_step":env_step,"error":repr(error),"nan_inf_failure":"finite" in str(error).lower()});raise
+        atomic_json(group_dir/"async_failure.json",{"group":args.group,"env_step":env_step,"error":repr(error),"in_flight_env_ids":sorted(pool.in_flight),"workers":[{"env_id":worker,"pid":process.pid,"alive":process.is_alive(),"exitcode":process.exitcode,"episode_id":contexts.get(worker,{}).get("episode"),"episode_step":contexts.get(worker,{}).get("length")} for worker,process in enumerate(pool.processes)]});atomic_json(group_dir/"status.json",{"status":"FAILED","group":args.group,"env_step":env_step,"error":repr(error),"nan_inf_failure":"finite" in str(error).lower()});raise
     finally:pool.close()
 
 
