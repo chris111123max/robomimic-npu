@@ -199,9 +199,9 @@ class Stage4SAC:
         if self.algo.automatic_entropy_tuning: torch.save(cpu_tree(self.algo.alpha_entropy_optim.state_dict()), directory / "alpha_optimizer.pth")
         atomic_json(directory / "config.json", self.config); atomic_json(directory / "diagnostics.json", diagnostics); return directory
 
-    def update(self, batch, env_step, debug_root):
+    def update(self, batch, env_step, debug_root, phase_step=None):
         critic_started=time.perf_counter()
-        self.update_index += 1; phase = phase_at(env_step, self.config)
+        self.update_index += 1; phase = phase_at(env_step if phase_step is None else phase_step, self.config)
         self.actor.requires_grad_(phase["actor_updates"])
         for group in self.actor_optimizer.param_groups: group["lr"] = phase["actor_lr"]
         for group in self.critic_optimizer.param_groups: group["lr"] = phase["critic_lr"]

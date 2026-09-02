@@ -8,7 +8,7 @@ from stage4_core import OnlineSequenceReplay,Stage4SAC,assert_phase_contract,ato
 def main():
  p=argparse.ArgumentParser();p.add_argument("--group",required=True);p.add_argument("--device",required=True);p.add_argument("--config",required=True);p.add_argument("--output",required=True);a=p.parse_args();c=read_json(a.config);c.update(group=a.group,device=a.device);assert_phase_contract(c)
  assert c["total_env_steps"]==100000 and c["actor_freeze_steps"]==5000 and c["actor_warmup_end"]==20000
- assert c["parallel_envs"]==16 and c["collector_mode"]=="async_ready_queue"
+ assert c["parallel_envs"]==16 and c["collector_mode"]=="sync" and c["schedule_clock"]=="learning_relative"
  assert c["initial_entropy_alpha"]==0.001 and c["automatic_entropy_tuning"] is False
  assert c["automatic_entropy_tuning"] is False and c["initial_entropy_alpha"]==.001 and c["sequence_length"]==10
  before=phase_at(4999,c);boundary=phase_at(5000,c);middle=phase_at(10000,c);end=phase_at(20000,c)
@@ -20,7 +20,7 @@ def main():
  obs=np.zeros((12,59),np.float32);act=np.zeros((12,14),np.float32);rew=np.zeros(12,np.float32);done=np.zeros(12,np.uint8);done[-1]=1;replay.add_episode(obs,act,rew,done,obs,done,np.zeros_like(done));engine=Stage4SAC(actor,critic,target,c,d)
  if engine.algo.automatic_entropy_tuning or hasattr(engine.algo,"alpha_entropy_optim"):raise RuntimeError("Stage4-v2 unexpectedly created alpha optimizer")
  before_alpha=engine.algo.alpha_entropy;before_actor=state_hash(actor);before_target=state_hash(target)
- with tempfile.TemporaryDirectory() as temp:stats=engine.update(replay.sample(2,d),6000,Path(temp))
+ with tempfile.TemporaryDirectory() as temp:stats=engine.update(replay.sample(2,d),6000,Path(temp),phase_step=6000)
  if engine.algo.alpha_entropy!=before_alpha or before_alpha!=.001:raise RuntimeError("Fixed alpha changed")
  if state_hash(actor)==before_actor or state_hash(target)==before_target:raise RuntimeError("Actor/target finite update did not execute")
  audit.update(status="PASS",replay_empty_at_step0=True,sequence_length=10,freeze_steps=5000,warmup="5000->20000",automatic_entropy_tuning=False,fixed_alpha=.001,alpha_optimizer_exists=False,actor_loss="alpha*log_pi-min(Q1,Q2)",critic_update_finite=bool(np.isfinite(stats["critic_loss"])),actor_update_finite=bool(np.isfinite(stats["actor_loss"])),target_update_finite=True)
