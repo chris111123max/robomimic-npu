@@ -70,7 +70,7 @@ def load_critic(config,path,device,initial=False,group=None):
     state=payload["critic_state_dict"]
     critic.load_state_dict(state,strict=True);critic.eval().requires_grad_(False);return critic,payload
 
-def q_values(critic,observs,prev_actions,rewards,current_actions):
+def q_values(critic,prev_actions,rewards,observs,current_actions):
     q1,q2=critic(prev_actions,rewards,observs,current_actions);return torch.minimum(q1,q2)
 
 def ranks(x):
