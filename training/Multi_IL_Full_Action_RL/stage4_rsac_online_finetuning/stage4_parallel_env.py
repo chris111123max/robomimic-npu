@@ -1,6 +1,7 @@
-"""Eight-process low-dimensional robosuite pool for Stage4 collection."""
+"""Persistent process-per-environment robosuite pool for Stage4 collection."""
 from __future__ import annotations
 import multiprocessing as mp
+import os
 import random
 import traceback
 import numpy as np
@@ -33,14 +34,21 @@ def _seed_env(env,seed):
         current=getattr(current,"env",None)
 
 
-def _worker(connection,teacher_checkpoint,keys,shapes,horizon,terminate_on_success,seed):
+THREAD_ENV=("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS","VECLIB_MAXIMUM_THREADS")
+
+
+def _worker(connection,teacher_checkpoint,keys,shapes,horizon,terminate_on_success,seed,cpu_id):
     env=None
     try:
+        for name in THREAD_ENV:os.environ[name]="1"
+        if cpu_id is not None:
+            if not hasattr(os,"sched_setaffinity"):raise RuntimeError("CPU affinity requested but os.sched_setaffinity is unavailable")
+            os.sched_setaffinity(0,{int(cpu_id)})
         import robomimic.utils.file_utils as FileUtils
         import robomimic.utils.obs_utils as ObsUtils
         checkpoint=FileUtils.maybe_dict_from_checkpoint(ckpt_path=teacher_checkpoint);config,_=FileUtils.config_from_checkpoint(ckpt_dict=checkpoint);ObsUtils.initialize_obs_utils_with_config(config)
         env,_=FileUtils.env_from_checkpoint(ckpt_dict=checkpoint,render=False,render_offscreen=False,verbose=False);_seed_env(env,seed);steps=0
-        connection.send(("ready",None))
+        connection.send(("ready",{"pid":os.getpid(),"cpu_id":cpu_id,"affinity":sorted(os.sched_getaffinity(0)) if hasattr(os,"sched_getaffinity") else None}))
         while True:
             command,payload=connection.recv()
             if command=="reset":
@@ -65,13 +73,16 @@ def _worker(connection,teacher_checkpoint,keys,shapes,horizon,terminate_on_succe
 
 
 class Stage4ParallelEnvPool:
-    def __init__(self,teacher_checkpoint,keys,shapes,num_envs,horizon,terminate_on_success,seed,start_method="forkserver",startup_timeout=300,step_timeout=120):
+    def __init__(self,teacher_checkpoint,keys,shapes,num_envs,horizon,terminate_on_success,seed,start_method="forkserver",startup_timeout=300,step_timeout=120,cpu_ids=None):
         self.num_envs=int(num_envs);self.step_timeout=float(step_timeout);self.connections=[];self.processes=[]
+        self.cpu_ids=None if cpu_ids is None else list(map(int,cpu_ids))
+        if self.cpu_ids is not None and len(self.cpu_ids)!=self.num_envs:raise RuntimeError(f"Need {self.num_envs} CPU IDs, got {len(self.cpu_ids)}")
         if start_method not in mp.get_all_start_methods():raise RuntimeError(f"Unavailable multiprocessing method {start_method}")
         context=mp.get_context(start_method)
         try:
             for worker in range(self.num_envs):
-                parent,child=context.Pipe();process=context.Process(target=_worker,args=(child,teacher_checkpoint,keys,shapes,int(horizon),bool(terminate_on_success),int(seed)+worker),name=f"stage4-env-{worker:02d}",daemon=True);process.start();child.close();self.connections.append(parent);self.processes.append(process);self._receive(worker,"ready",startup_timeout);print(f"Stage4 environment worker {worker+1:02d}/{self.num_envs:02d} ready (pid={process.pid})",flush=True)
+                cpu_id=None if self.cpu_ids is None else self.cpu_ids[worker]
+                parent,child=context.Pipe();process=context.Process(target=_worker,args=(child,teacher_checkpoint,keys,shapes,int(horizon),bool(terminate_on_success),int(seed)+worker,cpu_id),name=f"stage4-env-{worker:02d}",daemon=True);process.start();child.close();self.connections.append(parent);self.processes.append(process);ready=self._receive(worker,"ready",startup_timeout);print(f"Stage4 environment worker {worker+1:02d}/{self.num_envs:02d} ready (pid={process.pid}, cpu={ready['cpu_id']})",flush=True)
         except BaseException:self.close(force=True);raise
 
     def _receive(self,worker,expected="result",timeout=None):
@@ -98,6 +109,19 @@ class Stage4ParallelEnvPool:
     def get_states(self,workers):
         for worker in workers:self.connections[worker].send(("get_state",None))
         return {worker:self._receive(worker) for worker in workers}
+
+    @property
+    def worker_pids(self):return [process.pid for process in self.processes if process.is_alive()]
+
+    def live_worker_count(self):return sum(process.is_alive() for process in self.processes)
+
+    def worker_cpu_seconds(self):
+        ticks=float(os.sysconf("SC_CLK_TCK"));total=0.0
+        for pid in self.worker_pids:
+            try:
+                fields=open(f"/proc/{pid}/stat").read().split();total+=(int(fields[13])+int(fields[14]))/ticks
+            except (FileNotFoundError,ProcessLookupError):pass
+        return total
 
     def close(self,force=False):
         for connection,process in zip(getattr(self,"connections",[]),getattr(self,"processes",[])):

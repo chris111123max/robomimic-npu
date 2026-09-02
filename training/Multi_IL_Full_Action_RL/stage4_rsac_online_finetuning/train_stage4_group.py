@@ -7,8 +7,11 @@ import copy
 import csv
 import json
 import os
+for _name in ("OMP_NUM_THREADS","MKL_NUM_THREADS","OPENBLAS_NUM_THREADS","NUMEXPR_NUM_THREADS","VECLIB_MAXIMUM_THREADS"):
+    os.environ[_name]="1"
 import random
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +41,7 @@ SHAPES = {"robot0_eef_pos": [3], "robot0_eef_quat": [4], "robot0_gripper_qpos": 
 def parse_args():
     parser = argparse.ArgumentParser(); parser.add_argument("--group", choices=GROUPS, required=True); parser.add_argument("--device", required=True)
     parser.add_argument("--config", default=str(HERE / "stage4_config.json")); parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--seed", type=int); parser.add_argument("--smoke-test", action="store_true"); parser.add_argument("--resume")
+    parser.add_argument("--seed", type=int); parser.add_argument("--smoke-test", action="store_true"); parser.add_argument("--resume");parser.add_argument("--cpu-affinity-file")
     return parser.parse_args()
 
 
@@ -73,7 +76,7 @@ def unflatten(state, keys):
 
 
 @torch.no_grad()
-def batched_actor_actions(actor, observations, hidden, counters, workers, device):
+def batched_actor_actions(actor, observations, hidden, counters, workers, device, deterministic=False):
     """One recurrent policy step for an arbitrary subset of environment workers."""
     indices=torch.as_tensor(workers,dtype=torch.long,device=device)
     selected=tuple(item.index_select(1,indices) for item in hidden)
@@ -82,30 +85,37 @@ def batched_actor_actions(actor, observations, hidden, counters, workers, device
         selected=tuple(item.masked_fill(reset.view(1,-1,1),0.0) for item in selected)
     states=torch.as_tensor(np.stack([observations[worker] for worker in workers]),dtype=torch.float32,device=device)
     output,new_hidden=actor.lstm(actor.observation_adapter(states).unsqueeze(1),selected)
-    action=actor.policy(output[:,0],deterministic=False,return_log_prob=False)[0]
+    action=actor.policy(output[:,0],deterministic=deterministic,return_log_prob=False)[0]
     for part,new_part in zip(hidden,new_hidden):part.index_copy_(1,indices,new_part)
     for worker in workers:counters[worker]+=1
     return action.cpu().numpy()
 
 
-def evaluate(actor, actor_payload, config, device, env_step, output):
-    saved_rng = rng_state(); saved_state = cpu_tree(actor._state); saved_counter = actor._counter; was_training = actor.training
+def evaluate(actor, actor_payload, config, device, env_step, output, pool, schema, training_contexts):
+    """Evaluate seeds concurrently on the existing persistent pool, then restore training envs."""
+    saved_rng = rng_state();was_training=actor.training;active=sorted(training_contexts);saved_envs=pool.get_states(active) if active else {}
     seeds = list(range(int(config["evaluation_seed_start"]), int(config["evaluation_seed_end"]) + 1)); initial = load_initial_states(config["initial_states"], seeds)
-    env = build_environment(actor_payload); schema = progress_observation_schema(env, actor_payload["observation_keys"], SHAPES); rows=[]; actor.eval()
+    rows=[];actor.eval();pending=list(seeds);contexts={};hidden=(torch.zeros(2,pool.num_envs,400,device=device),torch.zeros(2,pool.num_envs,400,device=device));counters=np.zeros(pool.num_envs,dtype=np.int64)
     try:
-        for seed in seeds:
-            seed_all(seed); observation = env.reset_to(copy.deepcopy(initial[seed])); seed_all(seed); actor.reset()
-            episode_return=0.0; ever_trash=ever_payload=final_trash=final_payload=False; raw_done=False; success=env_success(env)
-            for index in range(int(config["evaluation_horizon"])):
-                state, _ = flatten(observation, actor_payload["observation_keys"]); tensor = torch.as_tensor(state[None], device=device)
-                with torch.no_grad(): action = actor.act(tensor, deterministic=True)[0][0].cpu().numpy()
-                observation, reward, raw_done, _ = env.step(action); episode_return += float(reward)
-                _, canonical = flatten(observation, actor_payload["observation_keys"]); progress = extract_transport_progress(canonical, schema)
-                final_trash = progress["trash_in_trash_bin"]; final_payload = progress["payload_in_target_bin"]; ever_trash |= final_trash; ever_payload |= final_payload; success = env_success(env)
-                if raw_done or (config["terminate_on_success"] and success): break
-            rows.append({"seed": seed, "success": int(success), "trash": int(ever_trash), "payload": int(ever_payload), "progress": partial_progress_score(success, ever_trash, ever_payload), "return": episode_return, "length": index + 1})
+        while pending or contexts:
+            free=[w for w in range(min(pool.num_envs,int(config.get("evaluation_parallel_envs",pool.num_envs)))) if w not in contexts]
+            assignments={}
+            for worker in free:
+                if not pending:break
+                seed=pending.pop(0);contexts[worker]={"seed":seed,"observation":None,"return":0.0,"length":0,"success":False,"trash":False,"payload":False};assignments[worker]=copy.deepcopy(initial[seed])
+            if assignments:
+                observations=pool.reset_to(assignments,{w:0 for w in assignments})
+                for w,o in observations.items():contexts[w]["observation"]=o
+            workers=sorted(contexts);observations={w:contexts[w]["observation"] for w in workers};actions=batched_actor_actions(actor,observations,hidden,counters,workers,device,True);results=pool.step(workers,actions)
+            for worker in list(workers):
+                c=contexts[worker];state,reward,done,info=results[worker];c["observation"]=state;c["return"]+=float(reward);c["length"]+=1;c["success"]|=bool(info["success"]);progress=extract_transport_progress(unflatten(state,actor_payload["observation_keys"]),schema);c["trash"]|=bool(progress["trash_in_trash_bin"]);c["payload"]|=bool(progress["payload_in_target_bin"])
+                if done or c["length"]>=int(config["evaluation_horizon"]):rows.append({"seed":c["seed"],"success":int(c["success"]),"trash":int(c["trash"]),"payload":int(c["payload"]),"progress":partial_progress_score(c["success"],c["trash"],c["payload"]),"return":c["return"],"length":c["length"]});del contexts[worker];counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
     finally:
-        close_env(env); restore_rng(saved_rng); actor._state = None if saved_state is None else tuple(item.to(device) for item in saved_state); actor._counter = saved_counter; actor.train(was_training)
+        if active:
+            restored=pool.reset_to(saved_envs,{w:training_contexts[w]["length"] for w in active})
+            for worker,state in restored.items():training_contexts[worker]["observation"]=state
+        restore_rng(saved_rng);actor.train(was_training)
+    rows.sort(key=lambda row:row["seed"])
     count=len(rows); report={"env_step":int(env_step),"success_count":sum(row["success"] for row in rows),"success_rate":sum(row["success"] for row in rows)/count,
         "trash_ever_count":sum(row["trash"] for row in rows),"trash_ever_rate":sum(row["trash"] for row in rows)/count,
         "payload_ever_count":sum(row["payload"] for row in rows),"payload_ever_rate":sum(row["payload"] for row in rows)/count,
@@ -170,9 +180,22 @@ def add_finished_episode(replay, context):
     replay.add_episode(context["states"],context["actions"],context["rewards"],context["dones"],
                        context["next_states"],context["terminated"],context["truncated"])
 
+def cgroup_usage_usec():
+    path=Path("/sys/fs/cgroup/cpu.stat")
+    if not path.exists():return None
+    values=dict(line.split() for line in path.read_text().splitlines() if len(line.split())==2)
+    return int(values.get("usage_usec",0))
+
 
 def main():
-    args=parse_args();config=effective_config(args.config,args);assert_phase_contract(config);device=select_device(args.device);seed_all(config["seed"])
+    args=parse_args();torch.set_num_threads(1)
+    try:torch.set_num_interop_threads(1)
+    except RuntimeError:
+        if torch.get_num_interop_threads()!=1:raise
+    config=effective_config(args.config,args);assert_phase_contract(config);device=select_device(args.device);seed_all(config["seed"])
+    cpu_ids=None
+    if args.cpu_affinity_file:
+        affinity=read_json(args.cpu_affinity_file);key="rnn_cpu_ids" if args.group=="rnn_only_critic" else "multi_cpu_ids";cpu_ids=affinity[key][:int(config["parallel_envs"])];config["cpu_affinity_file"]=str(Path(args.cpu_affinity_file).resolve());config["cpu_affinity_ids"]=cpu_ids
     group_dir=Path(args.run_dir).resolve()/args.group;group_dir.mkdir(parents=True,exist_ok=True)
     for name in ("checkpoints","evaluations","debug_nan","replay"): (group_dir/name).mkdir(exist_ok=True)
     actor,actor_payload,critic,target,source=initialize_models(args.group,config,device);engine=Stage4SAC(actor,critic,target,config,device);replay=OnlineSequenceReplay(config)
@@ -180,8 +203,8 @@ def main():
     schema_env=build_environment(actor_payload);schema=progress_observation_schema(schema_env,actor_payload["observation_keys"],SHAPES);close_env(schema_env)
     pool=Stage4ParallelEnvPool(actor_payload["teacher_checkpoint"],actor_payload["observation_keys"],SHAPES,
         config["parallel_envs"],config["evaluation_horizon"],config["terminate_on_success"],config["seed"],
-        config["parallel_start_method"],config["parallel_startup_timeout_seconds"],config["parallel_step_timeout_seconds"])
-    env_step=0;next_episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[];contexts={}
+        config["parallel_start_method"],config["parallel_startup_timeout_seconds"],config["parallel_step_timeout_seconds"],cpu_ids)
+    env_step=0;next_episode=1;completed_updates=0;best_key=(-1.0,-1.0,float("-inf"));evaluation_rows=[];contexts={};perf={k:0.0 for k in ("rollout_seconds","policy_inference_seconds","replay_insert_seconds","critic_update_seconds","actor_update_seconds","evaluation_seconds","checkpoint_seconds")};perf_started=time.perf_counter();perf_step=0;cpu_started=time.process_time();resource_started=time.perf_counter();cgroup_started=cgroup_usage_usec()
     hidden=(torch.zeros(2,pool.num_envs,400,device=device),torch.zeros(2,pool.num_envs,400,device=device));counters=np.zeros(pool.num_envs,dtype=np.int64)
     try:
         if args.resume:
@@ -200,9 +223,9 @@ def main():
                     best_key=max((float(row["success_rate"]),float(row["mean_progress"]),-int(row["env_step"])) for row in existing)
                     evaluation_rows=[{"env_step":int(existing[-1]["env_step"])}]
         evaluation_steps=set(range(0,int(config["total_env_steps"])+1,int(config["evaluation_interval"])))|{int(config["actor_freeze_steps"]),int(config["actor_warmup_end"]),int(config["total_env_steps"])}
-        checkpoint_steps=set(map(int,config["checkpoint_steps"]))
+        checkpoint_steps=set(map(int,config["checkpoint_steps"]));performance_steps=set(range(int(config.get("performance_log_interval",1000)),int(config["total_env_steps"])+1,int(config.get("performance_log_interval",1000))));resource_steps=set(range(int(config.get("resource_log_interval",5000)),int(config["total_env_steps"])+1,int(config.get("resource_log_interval",5000))))
         if env_step==0:
-            replay_before=replay.transitions;report=evaluate(actor,actor_payload,config,device,0,group_dir/"evaluations"/"step_00000000.json");evaluation_rows.append(report)
+            replay_before=replay.transitions;t=time.perf_counter();report=evaluate(actor,actor_payload,config,device,0,group_dir/"evaluations"/"step_00000000.json",pool,schema,contexts);perf["evaluation_seconds"]+=time.perf_counter()-t;evaluation_rows.append(report)
             if replay.transitions!=replay_before:raise RuntimeError("Evaluation polluted online replay")
             append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in report.items() if key!="episodes"})
             context={"parallel_envs":pool.num_envs,"active_workers":[],"env_states":{},"contexts":{},"actor_hidden":cpu_tree(hidden),"actor_counters":counters.tolist(),"next_episode":next_episode}
@@ -215,11 +238,11 @@ def main():
                 for worker in empty:seeds.append(int(config["seed"])+next_episode);contexts[worker]=new_episode(next_episode,None);next_episode+=1;counters[worker]=0;hidden[0][:,worker].zero_();hidden[1][:,worker].zero_()
                 observations=pool.reset(empty,seeds)
                 for worker in empty:contexts[worker]["observation"]=observations[worker]
-            future=sorted(step for step in evaluation_steps|checkpoint_steps|{int(config["total_env_steps"])} if step>env_step);boundary=future[0]
+            future=sorted(step for step in evaluation_steps|checkpoint_steps|performance_steps|resource_steps|{int(config["total_env_steps"])} if step>env_step);boundary=future[0]
             workers=sorted(contexts)[:min(len(contexts),boundary-env_step)]
-            observations={worker:contexts[worker]["observation"] for worker in workers};batch_actions=batched_actor_actions(actor,observations,hidden,counters,workers,device)
+            observations={worker:contexts[worker]["observation"] for worker in workers};t=time.perf_counter();batch_actions=batched_actor_actions(actor,observations,hidden,counters,workers,device);perf["policy_inference_seconds"]+=time.perf_counter()-t
             if not np.isfinite(batch_actions).all():raise RuntimeError("Non-finite environment action")
-            results=pool.step(workers,batch_actions);finished_contexts=[]
+            t=time.perf_counter();results=pool.step(workers,batch_actions);perf["rollout_seconds"]+=time.perf_counter()-t;finished_contexts=[]
             for worker,action in zip(workers,batch_actions):
                 context=contexts[worker];state=context["observation"];next_state,reward,finished,info=results[worker];canonical=unflatten(next_state,actor_payload["observation_keys"]);progress=extract_transport_progress(canonical,schema)
                 context["states"].append(state);context["actions"].append(action);context["rewards"].append(float(reward));context["dones"].append(float(finished));context["terminated"].append(float(info["terminated"]));context["truncated"].append(float(info["truncated"]));context["next_states"].append(next_state)
@@ -231,23 +254,30 @@ def main():
                     if context["states"]:
                         context["dones"][-1]=1.0;context["terminated"][-1]=0.0;context["truncated"][-1]=1.0;finished_contexts.append(context)
                 contexts.clear()
+            t=time.perf_counter()
             for context in finished_contexts:add_finished_episode(replay,context)
+            perf["replay_insert_seconds"]+=time.perf_counter()-t
             new_budget=max(0,int(np.floor(replay.transitions*float(config["updates_per_env_step"])))-completed_updates);update_rows=[]
             if replay.transitions>=int(config["minimum_replay_size"]):
-                for _ in range(new_budget):update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"))
+                for _ in range(new_budget):
+                    update_rows.append(engine.update(replay.sample(config["batch_size"],device),env_step,group_dir/"debug_nan"));perf["critic_update_seconds"]+=engine.last_update_timing["critic_update_seconds"];perf["actor_update_seconds"]+=engine.last_update_timing["actor_update_seconds"]
                 completed_updates+=new_budget
             summary=aggregate_updates(update_rows)
             for context in finished_contexts:
                 phase=phase_at(env_step,config);metrics={"env_step":env_step,"episode":context["episode"],"phase":phase["phase"],"actor_lr":phase["actor_lr"],"critic_lr":phase["critic_lr"],**summary,"buffer_size":replay.transitions,"episode_return":context["return"],"episode_length":context["length"],"success":int(context["success"]),"trash_ever":int(context["trash_ever"]),"payload_ever":int(context["payload_ever"]),"updates_this_batch":len(update_rows),"gradient_updates":completed_updates}
                 append_csv(group_dir/"training_metrics.csv",metrics);print(f"{args.group} env_step={env_step}/{config['total_env_steps']} episode={context['episode']} phase={phase['phase']} success={int(context['success'])} replay={replay.transitions} updates={completed_updates}",flush=True)
             if env_step in evaluation_steps:
-                replay_before=replay.transitions;report=evaluate(actor,actor_payload,config,device,env_step,group_dir/"evaluations"/f"step_{env_step:08d}.json");evaluation_rows.append(report)
+                replay_before=replay.transitions;t=time.perf_counter();report=evaluate(actor,actor_payload,config,device,env_step,group_dir/"evaluations"/f"step_{env_step:08d}.json",pool,schema,contexts);perf["evaluation_seconds"]+=time.perf_counter()-t;evaluation_rows.append(report)
                 if replay.transitions!=replay_before:raise RuntimeError("Evaluation polluted online replay")
                 append_csv(group_dir/"evaluation_metrics.csv",{key:value for key,value in report.items() if key!="episodes"})
                 key=(report["success_rate"],report["mean_progress"],-env_step);context=training_context(pool,contexts,hidden,counters,next_episode)
                 if key>best_key:save_checkpoint(group_dir/"checkpoints"/"best_success.pth",engine,replay,config,env_step,next_episode,actor_payload,context,report);best_key=key
             if env_step in checkpoint_steps:
-                context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,evaluation_rows[-1] if evaluation_rows and evaluation_rows[-1]["env_step"]==env_step else None)
+                t=time.perf_counter();context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,evaluation_rows[-1] if evaluation_rows and evaluation_rows[-1]["env_step"]==env_step else None);perf["checkpoint_seconds"]+=time.perf_counter()-t
+            if env_step in performance_steps:
+                elapsed=time.perf_counter()-perf_started;append_csv(group_dir/"performance_metrics.csv",{"env_step":env_step,"env_steps_per_second":(env_step-perf_step)/elapsed,**perf});perf={key:0.0 for key in perf};perf_started=time.perf_counter();perf_step=env_step
+            if env_step in resource_steps:
+                wall=time.perf_counter()-resource_started;usage=cgroup_usage_usec();append_csv(group_dir/"resource_metrics.csv",{"env_step":env_step,"process_cpu_percentage":100.0*(time.process_time()-cpu_started)/wall,"live_environment_workers":pool.live_worker_count(),"cgroup_cpu_usage_usec":usage,"cgroup_cpu_usage_delta_usec":None if usage is None or cgroup_started is None else usage-cgroup_started});cpu_started=time.process_time();resource_started=time.perf_counter();cgroup_started=usage
         final_report=evaluation_rows[-1]
         context=training_context(pool,contexts,hidden,counters,next_episode);save_checkpoint(group_dir/"checkpoints"/f"step_{env_step:08d}.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report);save_checkpoint(group_dir/"checkpoints"/"last.pth",engine,replay,config,env_step,next_episode,actor_payload,context,final_report)
         atomic_json(group_dir/"status.json",{"status":"COMPLETE","group":args.group,"env_step":env_step,"gradient_updates":completed_updates,"actor_hash_initial":audit["actor_hash"],"actor_hash_final":state_hash(actor),"critic_hash_initial":audit["critic_hash"],"nan_inf_failure":False})

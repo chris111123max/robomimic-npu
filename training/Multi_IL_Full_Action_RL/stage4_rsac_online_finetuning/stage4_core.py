@@ -10,6 +10,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -199,6 +200,7 @@ class Stage4SAC:
         atomic_json(directory / "config.json", self.config); atomic_json(directory / "diagnostics.json", diagnostics); return directory
 
     def update(self, batch, env_step, debug_root):
+        critic_started=time.perf_counter()
         self.update_index += 1; phase = phase_at(env_step, self.config)
         self.actor.requires_grad_(phase["actor_updates"])
         for group in self.actor_optimizer.param_groups: group["lr"] = phase["actor_lr"]
@@ -216,11 +218,12 @@ class Stage4SAC:
         try: grad_norm = torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.config["critic_max_grad_norm"]), error_if_nonfinite=True, foreach=False)
         except RuntimeError as error:
             directory=self._debug_failure(debug_root,env_step,batch,{"reason":"nonfinite_critic_global_norm","error":str(error),"update":self.update_index});raise RuntimeError(f"Non-finite Stage4 critic norm; saved {directory}") from error
-        self.critic_optimizer.step()
+        self.critic_optimizer.step();critic_seconds=time.perf_counter()-critic_started
         if any(not torch.isfinite(parameter).all() for parameter in self.critic.parameters()):
             directory=self._debug_failure(debug_root,env_step,batch,{"reason":"nonfinite_critic_parameter","update":self.update_index});raise RuntimeError(f"Non-finite Stage4 critic parameter; saved {directory}")
-        actor_loss_value = alpha_loss_value = entropy = actor_grad_norm = None
+        actor_loss_value = alpha_loss_value = entropy = actor_grad_norm = None;actor_seconds=0.0
         if phase["actor_updates"]:
+            actor_started=time.perf_counter()
             for parameter in self.critic.parameters(): parameter.requires_grad_(False)
             policy_loss, log_probs = self.algo.actor_loss(False, False, self.actor_adapter, None, self.critic, self.target, observs, actions, rewards)
             actor_loss = (policy_loss * mask).sum() / valid
@@ -239,13 +242,14 @@ class Stage4SAC:
             for parameter in self.critic.parameters(): parameter.requires_grad_(True)
             mean_log_prob = float(((log_probs[:-1] * mask).sum() / valid).detach().item()); entropy = -mean_log_prob
             alpha_loss_value = float((-self.algo.log_alpha_entropy.exp().detach() * (mean_log_prob + self.algo.target_entropy)).item()) if self.algo.automatic_entropy_tuning else 0.0
-            self.algo.update_others(mean_log_prob); actor_loss_value = float(actor_loss.item())
+            self.algo.update_others(mean_log_prob); actor_loss_value = float(actor_loss.item());actor_seconds=time.perf_counter()-actor_started
         if self.update_index % int(self.config["target_update_interval"]) == 0: ptu.soft_update_from_to(self.critic, self.target, float(self.config["tau"]))
         if any(not torch.isfinite(parameter).all() for parameter in self.target.parameters()):
             directory=self._debug_failure(debug_root,env_step,batch,{"reason":"nonfinite_target_critic_parameter","update":self.update_index});raise RuntimeError(f"Non-finite Stage4 target Critic; saved {directory}")
         if not np.isfinite(float(self.algo.alpha_entropy)):
             directory=self._debug_failure(debug_root,env_step,batch,{"reason":"nonfinite_entropy_alpha","update":self.update_index});raise RuntimeError(f"Non-finite Stage4 entropy alpha; saved {directory}")
         td = torch.minimum(q1, q2) - target_q
+        self.last_update_timing={"critic_update_seconds":critic_seconds,"actor_update_seconds":actor_seconds}
         return {"phase": phase["phase"], "actor_lr": phase["actor_lr"], "critic_lr": phase["critic_lr"], "actor_loss": actor_loss_value, "critic_loss": float(critic_loss.item()), "alpha": float(self.algo.alpha_entropy), "alpha_loss": alpha_loss_value, "entropy": entropy, "Q1_mean": float(q1[mask.bool()].mean().item()), "Q2_mean": float(q2[mask.bool()].mean().item()), "target_q_mean": float(target_q[mask.bool()].mean().item()), "TD_error_mean": float(td[mask.bool()].mean().item()), "TD_error_std": float(td[mask.bool()].std(unbiased=False).item()), "critic_grad_norm": float(grad_norm.item()), "critic_fraction_clipped": float(float(grad_norm.item()) > float(self.config["critic_max_grad_norm"])), "actor_grad_norm": actor_grad_norm}
 
 
