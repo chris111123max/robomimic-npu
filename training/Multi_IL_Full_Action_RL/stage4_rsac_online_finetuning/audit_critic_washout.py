@@ -97,7 +97,7 @@ def grad_pair(critics,actor_state,actor_path,batch,device,seed,alpha):
     b,observs,prev,rewards=aligned(batch,device);seed_all(seed);actions,logp=Stage3RSACAdapter(actor)(prev,rewards,observs);mask=b["mask"];valid=mask.sum().clamp_min(1.0)
     losses=[]
     for critic in critics:
-        q=q_values(critic,prev,rewards,observs,actions[1:]);q_loss=-(q*mask).sum()/valid;full=(float(alpha)*logp[1:]*mask).sum()/valid+q_loss;losses.append((q_loss,full))
+        q=q_values(critic,prev,rewards,observs,actions)[:-1];q_loss=-(q*mask).sum()/valid;full=(float(alpha)*logp[:-1]*mask).sum()/valid+q_loss;losses.append((q_loss,full))
     vectors=[]
     for index,(q_loss,full) in enumerate(losses):
         qg=flatten_grads(torch.autograd.grad(q_loss,parameters,retain_graph=True,allow_unused=True),parameters)
@@ -136,7 +136,7 @@ def main():
         b,observs,prev,rewards=aligned(batch,device);mask=b["mask"].bool()
         with torch.no_grad():
             behavior=[q_values(c,prev,rewards,observs,b["act"])[mask].cpu().numpy() for c in critics]
-            seed_all(20260902);pi_actions,_=Stage3RSACAdapter(actor)(prev,rewards,observs);policy=[q_values(c,prev,rewards,observs,pi_actions[1:])[mask].cpu().numpy() for c in critics]
+            seed_all(20260902);pi_actions,_=Stage3RSACAdapter(actor)(prev,rewards,observs);policy=[q_values(c,prev,rewards,observs,pi_actions)[:-1][mask].cpu().numpy() for c in critics]
         bs=similarity(*behavior);ps=similarity(*policy);pd,pdn=parameter_distance(*critics);alphas=[alpha_of(x,config) for x in payloads];gr=[]
         size=batch["obs"].shape[1]
         for i in range(a.gradient_batches):
