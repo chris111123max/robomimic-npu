@@ -1,6 +1,6 @@
 """Standard feed-forward SAC with a Stage2-new-compatible Twin Critic."""
 from __future__ import annotations
-import copy, hashlib, sys
+import copy, hashlib, math, sys
 from pathlib import Path
 import numpy as np, torch
 
@@ -33,7 +33,9 @@ class Stage3SAC:
             if not torch.equal(value,self.target.state_dict()[key]): raise AssertionError("Target Critic is not an exact step-0 copy")
         self.actor_optimizer=torch.optim.Adam(actor.parameters(),lr=float(config["actor_lr"]),weight_decay=0.0)
         self.critic_optimizer=torch.optim.AdamW(critic.parameters(),lr=float(config["critic_lr"]),weight_decay=float(config["critic_weight_decay"]))
-        self.log_alpha=torch.tensor(np.log(float(config["initial_alpha"])),dtype=torch.float32,device=device,requires_grad=True);self.alpha_optimizer=torch.optim.Adam([self.log_alpha],lr=float(config["alpha_lr"]),weight_decay=0.0);self.updates=0
+        alpha_init=float(config["alpha_init"])
+        if not math.isfinite(alpha_init) or alpha_init<=0: raise ValueError(f"alpha_init must be finite and positive, got {alpha_init}")
+        self.log_alpha=torch.tensor(math.log(alpha_init),dtype=torch.float32,device=device,requires_grad=True);self.alpha_optimizer=torch.optim.Adam([self.log_alpha],lr=float(config["alpha_lr"]),weight_decay=0.0);self.updates=0
     @property
     def alpha(self): return self.log_alpha.exp()
     def action(self,state,deterministic=False):
@@ -41,7 +43,8 @@ class Stage3SAC:
     def update(self,batch):
         b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()}; gamma=float(self.config["gamma"])
         next_action,_,_,next_logp,*_=self.actor(b["next_observations"],reparameterize=True,return_log_prob=True)
-        with torch.no_grad(): tq1,tq2=self.target(b["next_observations"],next_action); target=b["rewards"]+gamma*(1-b["terminals"])*(torch.minimum(tq1,tq2)-self.alpha.detach()*next_logp)
+        with torch.no_grad():
+            tq1,tq2=self.target(b["next_observations"],next_action);target_qmin=torch.minimum(tq1,tq2);entropy_bonus=-self.alpha.detach()*next_logp;target=b["rewards"]+gamma*(1-b["terminals"])*(target_qmin+entropy_bonus)
         q1,q2=self.critic(b["observations"],b["actions"]);l1=torch.nn.functional.mse_loss(q1,target);l2=torch.nn.functional.mse_loss(q2,target);critic_loss=l1+l2
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward();self.critic_optimizer.step()
         action,_,_,logp,*_=self.actor(b["observations"],reparameterize=True,return_log_prob=True)
@@ -52,6 +55,13 @@ class Stage3SAC:
         tau=float(self.config["tau"])
         with torch.no_grad():
             for source,dest in zip(self.critic.parameters(),self.target.parameters()): dest.mul_(1-tau).add_(source,alpha=tau)
-        self.updates+=1; td=torch.cat((q1-target,q2-target))
+        self.updates+=1; td=torch.cat((q1-target,q2-target));qmin=torch.minimum(q1,q2)
         sampled=action.detach()
-        return {"critic_loss":float(critic_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"actor_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"alpha_loss":float(alpha_loss.item()),"entropy":float((-logp).mean().item()),"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        def tensor_stats(name,value,minimum_maximum=False):
+            result={f"{name}_mean":float(value.mean().item()),f"{name}_std":float(value.std(unbiased=False).item())}
+            if minimum_maximum:result.update({f"{name}_min":float(value.min().item()),f"{name}_max":float(value.max().item())})
+            return result
+        policy_entropy=float((-logp).mean().item())
+        metrics={"critic_loss":float(critic_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"actor_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        metrics.update(tensor_stats("reward",b["rewards"],True));metrics.update(tensor_stats("target_qmin",target_qmin));metrics.update(tensor_stats("entropy_bonus",entropy_bonus,True));metrics.update(tensor_stats("td_target",target,True));metrics.update(tensor_stats("q1",q1));metrics.update(tensor_stats("q2",q2));metrics["qmin_mean"]=float(qmin.mean().item())
+        return metrics

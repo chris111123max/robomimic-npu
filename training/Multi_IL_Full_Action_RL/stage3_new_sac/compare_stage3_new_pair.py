@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 def stats(x):
-    x=np.asarray(x,float);return {"mean":float(x.mean()),"std":float(x.std()),"median":float(np.median(x)),"p90":float(np.percentile(x,90)),"p95":float(np.percentile(x,95))}
+    x=np.asarray(x,float);return {"mean":float(x.mean()),"std":float(x.std()),"median":float(np.median(x)),"p10":float(np.percentile(x,10)),"p90":float(np.percentile(x,90)),"p95":float(np.percentile(x,95))}
 def ranks(x):
     x=np.asarray(x);order=np.argsort(x,kind="mergesort");r=np.empty(len(x),float);values=x[order];start=0
     for end in range(1,len(x)+1):
@@ -16,6 +16,9 @@ def corr(a,b):
     a,b=np.asarray(a).reshape(-1),np.asarray(b).reshape(-1);return None if len(a)<2 or np.std(a)==0 or np.std(b)==0 else float(np.corrcoef(a,b)[0,1])
 def cosine(a,b):
     denom=np.maximum(np.linalg.norm(a,axis=1)*np.linalg.norm(b,axis=1),1e-12);return stats(np.sum(a*b,axis=1)/denom)
+def geometry(a,b):
+    a,b=np.asarray(a,float).reshape(-1),np.asarray(b,float).reshape(-1);ac,bc=a-a.mean(),b-b.mean();az=ac/max(a.std(),1e-12);bz=bc/max(b.std(),1e-12)
+    return {"centered_pearson":corr(ac,bc),"centered_spearman":corr(ranks(ac),ranks(bc)),"zscore_pearson":corr(az,bz),"zscore_spearman":corr(ranks(az),ranks(bz))}
 def compare_npz(left_path,right_path):
     result={}
     with np.load(left_path) as left,np.load(right_path) as right:
@@ -23,7 +26,8 @@ def compare_npz(left_path,right_path):
         for probe in probes:
             row={}
             for head in ("q1","q2","qmin"):
-                a,b=left[f"{probe}__{head}"].reshape(-1),right[f"{probe}__{head}"].reshape(-1);row[head]={"mean_abs_difference":float(np.mean(np.abs(a-b))),"pearson":corr(a,b),"spearman":corr(ranks(a),ranks(b))}
+                a,b=left[f"{probe}__{head}"].reshape(-1),right[f"{probe}__{head}"].reshape(-1);mean_a,mean_b=float(a.mean()),float(b.mean());absolute=abs(mean_a-mean_b);row[head]={"mean_abs_difference":float(np.mean(np.abs(a-b))),"pearson":corr(a,b),"spearman":corr(ranks(a),ranks(b)),"mean_q_rnn":mean_a,"mean_q_multi":mean_b,"absolute_mean_difference":absolute,"relative_mean_difference":float(absolute/max(abs(mean_a),abs(mean_b),1e-12)),"normalized_geometry":geometry(a,b)}
+                if head=="qmin":row["qmin_absolute_scale"]={"mean_qmin_rnn":mean_a,"mean_qmin_multi":mean_b,"absolute_difference":absolute,"relative_difference":float(absolute/max(abs(mean_a),abs(mean_b),1e-12))}
             a,b=left[f"{probe}__mu"],right[f"{probe}__mu"];row["actor_action_l2_difference"]=stats(np.linalg.norm(a-b,axis=1));row["gradient_cosine_q1"]=cosine(left[f"{probe}__grad_q1"],right[f"{probe}__grad_q1"]);row["gradient_cosine_q2"]=cosine(left[f"{probe}__grad_q2"],right[f"{probe}__grad_q2"]);result[probe]=row
     return result
 def load_evaluations(group):

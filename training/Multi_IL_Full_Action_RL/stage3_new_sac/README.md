@@ -29,7 +29,7 @@ exact copy.  Online Critic optimization uses AdamW with weight decay `1e-4`;
 Actor and alpha optimizers use zero weight decay.
 
 The TD target and Actor objective are standard clipped-double-Q SAC with
-automatic entropy tuning, target entropy `-14`, initial alpha `1`, soft target
+automatic entropy tuning, target entropy `-14`, initial alpha `0.01`, soft target
 updates (`tau=0.005`), and UTD=1.  After each environment transition the code
 immediately inserts one online transition and, once replay has 1000 transitions,
 performs one joint SAC update.  There are no episode-end update bursts.
@@ -57,6 +57,14 @@ success terminals do not.
 
 ## Budget, evaluation, probes, and resume
 
+The earlier `alpha_init=1.0` pair is retained unchanged as the
+`alpha_init_1p0_diagnostic` run. It records the early soft-Q scale transient and
+must not be deleted, overwritten, or resumed for the corrected experiment. The
+new `alpha_init_0p01` pair starts again from the original Stage2 best Critics,
+an empty online replay, fresh optimizers, and the exact original shared Actor
+and seed manifest. Automatic entropy tuning remains enabled; only
+`log_alpha` initialization changes from `log(1)` to `log(0.01)`.
+
 The first run uses 300,000 actual environment transitions per group.  Evaluations
 use 10 fixed seeds `20000..20009` at steps 0, 25k, 50k, 100k, 150k, 200k, and
 300k.  Evaluation is deterministic and its transitions are never inserted into
@@ -67,6 +75,14 @@ Stage2's saved deterministic probe manifest is reused at steps 0, 1k, 5k, 10k,
 Actor actions, and both action gradients.  Pair comparison reports head-wise
 absolute Q differences and Pearson/Spearman correlations, gradient cosines,
 Actor-action L2 divergence, and the two success-rate learning curves.
+
+Every SAC update logs reward mean/std/min/max, target-Qmin mean/std, entropy
+bonus mean/std/min/max, final TD-target mean/std/min/max, current Q1/Q2/Qmin
+scale, alpha/log-alpha/loss, target entropy, and policy entropy. Pair comparison
+reports Q1/Q2 action-gradient cosine distributions (mean/std/median/p10/p90),
+Actor divergence, absolute and relative Qmin scale differences, and
+centered/z-score Pearson and Spearman geometry diagnostics. These are analysis
+metrics only and do not alter training.
 
 Milestone checkpoints and `latest.pth` contain all models, optimizers, alpha,
 RNG state, episode/environment context, and a separate complete online replay
@@ -87,15 +103,19 @@ comparison.  It does not use robosuite or server artifacts.
 
 ## Formal server run
 
-Set the already completed Stage2-new run once:
+Set the completed Stage2-new run and the retained alpha=1 diagnostic pair. A
+new output directory is mandatory:
 
 ```bash
 cd /data/home/3220251075/lerobot_workspace/robomimic
 conda activate robosuite_npu
 STAGE2_RUN=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_new_critic_pretraining/stage2new_formal_001
-PAIR_ID=stage3new_pair_001
+REFERENCE_PAIR_RUN=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac/stage3new_pair_002
+PAIR_ID=stage3new_alpha0p01_001
 python training/Multi_IL_Full_Action_RL/stage3_new_sac/prepare_stage3_new_pair.py \
   --run-id "$PAIR_ID" \
+  --reference-pair-run-dir "$REFERENCE_PAIR_RUN" \
+  --alpha-init 0.01 \
   --stage2-run-dir "$STAGE2_RUN" \
   --rnn-q-checkpoint "$STAGE2_RUN/rnn_q/checkpoints/best.pth" \
   --multi-q-checkpoint "$STAGE2_RUN/multi_q/checkpoints/best.pth" \
@@ -105,7 +125,7 @@ python training/Multi_IL_Full_Action_RL/stage3_new_sac/prepare_stage3_new_pair.p
 The prepare command prints `PAIR_RUN_DIR`.  In terminal 1 / NPU 0:
 
 ```bash
-PAIR_RUN_DIR=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac/stage3new_pair_001
+PAIR_RUN_DIR=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac/stage3new_alpha0p01_001
 STAGE2_RUN=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_new_critic_pretraining/stage2new_formal_001
 python -u training/Multi_IL_Full_Action_RL/stage3_new_sac/train_stage3_new.py \
   --group rnn_q --device npu:0 --pair-run-dir "$PAIR_RUN_DIR" \
@@ -116,7 +136,7 @@ python -u training/Multi_IL_Full_Action_RL/stage3_new_sac/train_stage3_new.py \
 In terminal 2 / NPU 1:
 
 ```bash
-PAIR_RUN_DIR=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac/stage3new_pair_001
+PAIR_RUN_DIR=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac/stage3new_alpha0p01_001
 STAGE2_RUN=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_new_critic_pretraining/stage2new_formal_001
 python -u training/Multi_IL_Full_Action_RL/stage3_new_sac/train_stage3_new.py \
   --group multi_q --device npu:1 --pair-run-dir "$PAIR_RUN_DIR" \

@@ -27,5 +27,5 @@ def record_probe(actor,critic,probes,device,npz_path):
         with torch.no_grad():mu=actor(states,deterministic=True)[0]
         values={"q1":q1.detach().cpu().numpy(),"q2":q2.detach().cpu().numpy(),"qmin":torch.minimum(q1,q2).detach().cpu().numpy(),"mu":mu.cpu().numpy(),"grad_q1":g1.cpu().numpy(),"grad_q2":g2.cpu().numpy()}
         for key,value in values.items():arrays[f"{name}__{key}"]=value
-        summary[name]={"count":len(states),"qmin":_stats(values["qmin"]),"grad_q1_norm":_stats(np.linalg.norm(values["grad_q1"],axis=1)),"grad_q2_norm":_stats(np.linalg.norm(values["grad_q2"],axis=1))}
+        summary[name]={"count":len(states),"q1":_stats(values["q1"]),"q2":_stats(values["q2"]),"qmin":_stats(values["qmin"]),"actor_action_l2_norm":_stats(np.linalg.norm(values["mu"],axis=1)),"grad_q1_norm":_stats(np.linalg.norm(values["grad_q1"],axis=1)),"grad_q2_norm":_stats(np.linalg.norm(values["grad_q2"],axis=1))}
     np.savez_compressed(npz_path,**arrays);return summary

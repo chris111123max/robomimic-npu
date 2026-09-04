@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one member of the prepared Stage3-new paired SAC experiment."""
 from __future__ import annotations
-import argparse, copy, hashlib, json, os, random
+import argparse, copy, hashlib, json, math, os, random
 from pathlib import Path
 import numpy as np, torch
 from stage3_new_agent import Stage3SAC, build_actor, state_hash, strict_stage2_load
@@ -20,6 +20,11 @@ def log(path,value):
     with open(path,"a",encoding="utf-8") as f:f.write(json.dumps(value,sort_keys=True)+"\n")
 def contract_hash(config):
     ignored={"resolved_device","total_env_steps"};payload={k:v for k,v in config.items() if k not in ignored};return hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+def file_hash(path):
+    digest=hashlib.sha256()
+    with open(path,"rb") as f:
+        for chunk in iter(lambda:f.read(1024*1024),b""):digest.update(chunk)
+    return digest.hexdigest()
 def device(name):
     if name.startswith("npu"):
         try:import torch_npu  # noqa:F401
@@ -46,7 +51,7 @@ def save(path,agent,replay,sampler,offline,config,group,stage2,env_steps,episode
     torch.save(payload,path);torch.save(payload,path.parent/"latest.pth")
 def load_resume(path,agent,offline,config,env):
     p=torch.load(path,map_location=agent.device)
-    if p["group"] not in ("rnn_q","multi_q") or p["config"]["training_seed"]!=config["training_seed"]:raise RuntimeError("Resume checkpoint is incompatible with pair config")
+    if p["group"] not in ("rnn_q","multi_q") or contract_hash(p["config"])!=contract_hash(config):raise RuntimeError("Resume checkpoint is incompatible with pair config")
     agent.actor.load_state_dict(p["actor_state_dict"]);agent.critic.load_state_dict(p["critic_state_dict"]);agent.target.load_state_dict(p["target_critic_state_dict"]);agent.actor_optimizer.load_state_dict(p["actor_optimizer_state_dict"]);agent.critic_optimizer.load_state_dict(p["critic_optimizer_state_dict"]);agent.log_alpha.data.copy_(p["log_alpha"].to(agent.device));agent.alpha_optimizer.load_state_dict(p["alpha_optimizer_state_dict"]);agent.updates=int(p["gradient_updates"])
     replay=TransitionBuffer.load(p["replay_path"]);sampler=SymmetricSampler(offline,replay,config["training_seed"]);offline.rng.bit_generator.state=p["offline_rng_state"];sampler.rng.bit_generator.state=p["sampler_rng_state"];sampler.turn=int(p["sampler_turn"]);sampler.counts=p["sampler_counts"]
     context=p["episode_context"]
@@ -60,26 +65,34 @@ def preserved_evaluation(actor,env,seeds,horizon,device_):
     finally:restore_rng(state)
 def main():
     a=args();pair=Path(a.pair_run_dir).resolve();config=read(pair/"shared"/"config_resolved.json");sources=read(pair/"shared"/"stage2_source_manifest.json");seeds=read(pair/"shared"/"seed_manifest.json")
+    if not config.get("automatic_entropy_tuning") or "alpha_init" not in config:raise RuntimeError("Prepared pair does not use the explicit automatic-alpha initialization contract")
     if a.total_env_steps is not None:config["total_env_steps"]=a.total_env_steps
     expected=str(Path(sources[a.group]["checkpoint"]).resolve());actual=str(Path(a.critic_init_checkpoint).resolve())
     if expected!=actual:raise RuntimeError(f"Critic checkpoint differs from prepared pair: {actual} != {expected}")
     d=device(a.device);group_dir=pair/a.group
     for name in ("checkpoints","evaluations","probes"): (group_dir/name).mkdir(exist_ok=True)
-    expert=ExpertDataset(config["expert_dataset"],config["training_seed"]);actor=build_actor(config,d);actor_payload=torch.load(pair/"shared"/"actor_init.pth",map_location=d);actor.load_state_dict(actor_payload["actor_state_dict"],strict=True)
+    actor_init_path=pair/"shared"/"actor_init.pth";seed_manifest_path=pair/"shared"/"seed_manifest.json";expert=ExpertDataset(config["expert_dataset"],config["training_seed"]);actor=build_actor(config,d);actor_payload=torch.load(actor_init_path,map_location=d);actor.load_state_dict(actor_payload["actor_state_dict"],strict=True)
     if state_hash(actor)!=actor_payload["actor_hash"]:raise RuntimeError("Shared Actor initialization hash mismatch")
     critic,stage2_payload=strict_stage2_load(actual,d,config);agent=Stage3SAC(actor,critic,config,d);online=TransitionBuffer(config["online_replay_capacity"],59,14,config["training_seed"]);sampler=SymmetricSampler(expert,online,config["training_seed"])
+    expected_alpha=float(config["alpha_init"]);actual_alpha=float(agent.alpha.item())
+    if not math.isclose(actual_alpha,expected_alpha,rel_tol=1e-5,abs_tol=1e-8):raise RuntimeError(f"alpha step-0 sanity check failed: {actual_alpha} != {expected_alpha}")
     env=build_env(config["expert_dataset"]);eval_env=build_env(config["expert_dataset"]);probes,probe_manifest=load_fixed_probes(config["stage2_run_dir"])
     env_steps=episode_index=0;context=None;terminated_count=truncated_count=success_count=0
     if a.resume:
         payload,online,sampler,context=load_resume(a.resume,agent,expert,config,env);env_steps=int(payload["env_steps"]);episode_index=int(payload["episode_index"])
     else:seed_all(config["training_seed"])
-    audit={"group":a.group,"device":str(d),"pair_contract_hash":contract_hash(config),"actor":{"class":"TanhGaussianPolicy","hidden_dims":config["hidden_dims"],"initial_hash":actor_payload["actor_hash"]},"critic":{"stage2_checkpoint":actual,"model_config":stage2_payload["model_config"],"online_equals_target_step0":not bool(a.resume)},"gamma":config["gamma"],"utd":config["utd"],"batch_size":config["batch_size"],"critic_weight_decay":agent.critic_optimizer.param_groups[0]["weight_decay"],"automatic_entropy_tuning":config["automatic_entropy_tuning"],"target_entropy":config["target_entropy"],"expert_dataset":expert.audit(),"online_replay_capacity":online.capacity,"min_online_replay_size":config["min_online_replay_size"],"total_env_steps":config["total_env_steps"],"evaluation_seeds":seeds["evaluation_seeds"],"train_seed_rule":seeds["train_seed_rule"]}
+    current_alpha=float(agent.alpha.item())
+    audit={"group":a.group,"device":str(d),"pair_contract_hash":contract_hash(config),"experiment_tag":config.get("experiment_tag"),"actor":{"class":"TanhGaussianPolicy","hidden_dims":config["hidden_dims"],"source":str(actor_init_path),"initial_hash":actor_payload["actor_hash"],"artifact_sha256":file_hash(actor_init_path)},"critic":{"stage2_checkpoint":actual,"model_config":stage2_payload["model_config"],"online_equals_target_step0":not bool(a.resume)},"fresh_run":not bool(a.resume),"initial_state":{"env_steps":env_steps,"gradient_updates":agent.updates,"online_replay_size":online.size},"gamma":config["gamma"],"utd":config["utd"],"batch_size":config["batch_size"],"critic_weight_decay":agent.critic_optimizer.param_groups[0]["weight_decay"],"automatic_entropy_tuning":config["automatic_entropy_tuning"],"alpha_init":config["alpha_init"],"log_alpha_init":math.log(float(config["alpha_init"])),"alpha_at_step0":actual_alpha if not a.resume else None,"target_entropy":config["target_entropy"],"expert_dataset":expert.audit(),"online_replay_capacity":online.capacity,"min_online_replay_size":config["min_online_replay_size"],"total_env_steps":config["total_env_steps"],"seed_manifest_sha256":file_hash(seed_manifest_path),"evaluation_seeds":seeds["evaluation_seeds"],"train_seed_rule":seeds["train_seed_rule"]}
     peer=pair/("multi_q" if a.group=="rnn_q" else "rnn_q")/"runtime_audit.json"
     if peer.exists():
         peer_audit=read(peer)
         if peer_audit.get("pair_contract_hash")!=audit["pair_contract_hash"]:raise RuntimeError("Peer process uses a different shared SAC configuration")
         if not a.resume and int(peer_audit["total_env_steps"])!=int(audit["total_env_steps"]):raise RuntimeError("Fresh paired processes use different environment-step budgets")
+        if peer_audit.get("actor",{}).get("artifact_sha256")!=audit["actor"]["artifact_sha256"] or peer_audit.get("seed_manifest_sha256")!=audit["seed_manifest_sha256"]:raise RuntimeError("Peer process does not use identical shared Actor and seeds")
     write(group_dir/"runtime_audit.json",audit)
+    alpha_label="alpha_at_step0" if not a.resume else "alpha_at_resume"
+    print(f"{a.group} automatic_entropy_tuning={config['automatic_entropy_tuning']} alpha_init={config['alpha_init']} log_alpha_init={math.log(float(config['alpha_init'])):.9f} {alpha_label}={current_alpha:.9f}",flush=True)
+    print(f"{a.group} fresh_run={not bool(a.resume)} env_steps={env_steps} gradient_updates={agent.updates} online_replay_size={online.size} Actor_source={actor_init_path} Critic_source={actual}",flush=True)
     total=int(config["total_env_steps"]);eval_steps=set(map(int,config["evaluation_env_steps"]))|{total};probe_steps=set(map(int,config["probe_env_steps"]))|{total};checkpoint_steps=set(map(int,config["checkpoint_env_steps"]))|{total}
     if env_steps==0:
         before=online.size;report=preserved_evaluation(actor,eval_env,seeds["evaluation_seeds"],config["horizon"],d);assert online.size==before;write(group_dir/"evaluations"/"step_000000.json",report)
@@ -102,7 +115,7 @@ def main():
             if metrics is not None:
                 log(group_dir/"train_metrics.jsonl",metrics)
                 if env_steps%1000==0 or "episode_return" in metrics:
-                    print(f"{a.group} env_steps={env_steps}/{config['total_env_steps']} replay={online.size} updates={agent.updates} alpha={metrics.get('alpha')} success={metrics.get('success')}",flush=True)
+                    print(f"{a.group} env_steps={env_steps}/{config['total_env_steps']} replay={online.size} updates={agent.updates} alpha={metrics.get('alpha',float(agent.alpha.item()))} success={metrics.get('success','-')}",flush=True)
             if env_steps in eval_steps:
                 before=online.size;report=preserved_evaluation(actor,eval_env,seeds["evaluation_seeds"],config["horizon"],d)
                 if online.size!=before:raise RuntimeError("Evaluation polluted online replay")
