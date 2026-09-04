@@ -9,12 +9,17 @@ from torch import nn
 
 
 class QNetwork(nn.Module):
-    def __init__(self, state_dim=59, action_dim=14, hidden_dims=(256, 256)):
+    def __init__(self, state_dim=59, action_dim=14, hidden_dims=(256, 256), layer_norm=False):
         super().__init__()
         dimensions = [state_dim + action_dim, *hidden_dims, 1]
         layers = []
         for input_dim, output_dim in zip(dimensions[:-2], dimensions[1:-1]):
-            layers.extend((nn.Linear(input_dim, output_dim), nn.ReLU()))
+            layers.append(nn.Linear(input_dim, output_dim))
+            # Kept optional so existing Stage2 checkpoints and experiments retain
+            # their original Linear -> ReLU architecture.
+            if layer_norm:
+                layers.append(nn.LayerNorm(output_dim))
+            layers.append(nn.ReLU())
         layers.append(nn.Linear(dimensions[-2], dimensions[-1]))
         self.network = nn.Sequential(*layers)
         self.state_dim = int(state_dim)
@@ -26,10 +31,10 @@ class QNetwork(nn.Module):
 
 
 class TwinCritic(nn.Module):
-    def __init__(self, state_dim=59, action_dim=14, hidden_dims=(256, 256)):
+    def __init__(self, state_dim=59, action_dim=14, hidden_dims=(256, 256), layer_norm=False):
         super().__init__()
-        self.q1 = QNetwork(state_dim, action_dim, hidden_dims)
-        self.q2 = QNetwork(state_dim, action_dim, hidden_dims)
+        self.q1 = QNetwork(state_dim, action_dim, hidden_dims, layer_norm)
+        self.q2 = QNetwork(state_dim, action_dim, hidden_dims, layer_norm)
 
     def forward(self, state, action):
         return self.q1(state, action), self.q2(state, action)
@@ -39,8 +44,8 @@ class TwinCritic(nn.Module):
         return torch.minimum(q1, q2)
 
 
-def make_critic_pair(state_dim, action_dim, hidden_dims, device):
-    critic = TwinCritic(state_dim, action_dim, hidden_dims).to(device)
+def make_critic_pair(state_dim, action_dim, hidden_dims, device, layer_norm=False):
+    critic = TwinCritic(state_dim, action_dim, hidden_dims, layer_norm).to(device)
     target = copy.deepcopy(critic).to(device)
     target.requires_grad_(False)
     target.eval()
@@ -52,4 +57,3 @@ def soft_update(source, target, tau):
     for source_parameter, target_parameter in zip(source.parameters(), target.parameters()):
         target_parameter.mul_(1.0 - tau)
         target_parameter.add_(source_parameter, alpha=tau)
-
