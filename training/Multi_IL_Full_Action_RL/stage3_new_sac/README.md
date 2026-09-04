@@ -48,6 +48,9 @@ Pure-IL BC-RNN checkpoint, but does not contain the server HDF5 absolute path.
 `train.data` at runtime, validates the HDF5 environment and schema, and records
 the resolved path.  `--expert-dataset` is also supported when the exact path is
 already known.  There is no observation normalization or extra action scaling.
+Official robomimic demonstration files may contain additional low-dimensional
+observation datasets; they are ignored while the required seven canonical keys
+are selected in the fixed Stage1/Stage2 order to produce exactly 59 dimensions.
 Stored robomimic demonstration `dones` are used as the offline terminal masks;
 online time-limit truncations retain SAC bootstrap while genuine environment or
 success terminals do not.

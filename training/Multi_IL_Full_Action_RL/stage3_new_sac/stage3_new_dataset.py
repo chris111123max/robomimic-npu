@@ -19,7 +19,8 @@ class ExpertDataset:
                 demo=f["data"][name]
                 for required in ("obs","next_obs","actions","rewards","dones"):
                     if required not in demo: raise RuntimeError(f"{demo.name}: missing {required}")
-                if tuple(demo["obs"].keys()) != KEYS and set(demo["obs"].keys()) != set(KEYS): raise RuntimeError(f"{demo.name}: observation keys differ from canonical contract")
+                missing_obs=set(KEYS)-set(demo["obs"].keys());missing_next=set(KEYS)-set(demo["next_obs"].keys())
+                if missing_obs or missing_next:raise RuntimeError(f"{demo.name}: missing canonical observation keys obs={sorted(missing_obs)} next_obs={sorted(missing_next)}")
                 obs=self._flatten(demo["obs"]); nxt=self._flatten(demo["next_obs"]); actions=np.asarray(demo["actions"],np.float32); rewards=np.asarray(demo["rewards"],np.float32).reshape(-1,1); dones=np.asarray(demo["dones"],np.float32).reshape(-1,1)
                 length=len(actions)
                 if obs.shape!=(length,59) or nxt.shape!=(length,59) or actions.shape!=(length,14) or rewards.shape!=(length,1) or dones.shape!=(length,1): raise RuntimeError(f"{demo.name}: transition shape mismatch")
