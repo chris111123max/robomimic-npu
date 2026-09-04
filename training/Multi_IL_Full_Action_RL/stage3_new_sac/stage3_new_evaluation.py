@@ -27,6 +27,11 @@ def success(env):
 def build_env(expert_dataset):
     import robomimic.utils.file_utils as FileUtils
     import robomimic.utils.env_utils as EnvUtils
+    import robomimic.utils.obs_utils as ObsUtils
+    # Stage3-new consumes only the fixed seven-key low-dimensional contract and
+    # does not load a robomimic algorithm config. Initialize the global modality
+    # registry explicitly before EnvRobosuite.get_observation is first called.
+    ObsUtils.initialize_obs_modality_mapping_from_dict({"low_dim":list(KEYS)})
     meta=FileUtils.get_env_metadata_from_dataset(dataset_path=str(expert_dataset));
     if "Transport" not in str(meta.get("env_name","")): raise RuntimeError(f"Expected Transport metadata, got {meta.get('env_name')!r}")
     return EnvUtils.create_env_from_metadata(meta,render=False,render_offscreen=False,use_image_obs=False)
