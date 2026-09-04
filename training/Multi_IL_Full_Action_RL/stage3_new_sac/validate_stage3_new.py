@@ -5,7 +5,7 @@ import hashlib,json,subprocess,sys,tempfile
 from pathlib import Path
 import h5py,numpy as np,torch
 from compare_stage3_new_pair import compare_npz
-from stage3_new_agent import Stage3SAC,build_actor,strict_stage2_load
+from stage3_new_agent import Stage3SAC,build_actor,state_hash,strict_stage2_load
 from stage3_new_dataset import ExpertDataset,KEYS
 from stage3_new_evaluation import evaluate
 from stage3_new_probe import record_probe
