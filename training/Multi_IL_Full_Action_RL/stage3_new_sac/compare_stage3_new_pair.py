@@ -36,10 +36,16 @@ def load_evaluations(group):
         with open(path,encoding="utf-8") as f:row=json.load(f)
         row["env_steps"]=int(path.stem.split("_")[1]);rows.append(row)
     return rows
+def load_source_diagnostics(group):
+    path=group/"source_diagnostics.jsonl";last=None
+    if path.exists():
+        with open(path,encoding="utf-8") as f:
+            for line in f:last=json.loads(line)
+    return last
 def compare_pair(pair):
     pair=Path(pair);left,right=pair/"rnn_q",pair/"multi_q";left_steps={p.stem.split("_")[1]:p for p in (left/"probes").glob("step_*.npz")};right_steps={p.stem.split("_")[1]:p for p in (right/"probes").glob("step_*.npz")}
     probes={step:compare_npz(left_steps[step],right_steps[step]) for step in sorted(set(left_steps)&set(right_steps),key=int)};curves={"rnn_q":load_evaluations(left),"multi_q":load_evaluations(right)}
-    output=pair/"pair_comparison";output.mkdir(exist_ok=True);write(output/"critic_washout.json",probes);write(output/"learning_curve_comparison.json",curves);summary={"pair_run_dir":str(pair),"matched_probe_steps":[int(x) for x in probes],"rnn_q_evaluations":len(curves["rnn_q"]),"multi_q_evaluations":len(curves["multi_q"])};write(output/"stage3_new_summary.json",summary);return summary
+    output=pair/"pair_comparison";output.mkdir(exist_ok=True);write(output/"critic_washout.json",probes);write(output/"learning_curve_comparison.json",curves);summary={"pair_run_dir":str(pair),"matched_probe_steps":[int(x) for x in probes],"rnn_q_evaluations":len(curves["rnn_q"]),"multi_q_evaluations":len(curves["multi_q"]),"source_diagnostics_final":{"rnn_q":load_source_diagnostics(left),"multi_q":load_source_diagnostics(right)}};write(output/"stage3_new_summary.json",summary);return summary
 def write(path,value):
     with open(path,"w",encoding="utf-8") as f:json.dump(value,f,indent=2,sort_keys=True);f.write("\n")
 def main():

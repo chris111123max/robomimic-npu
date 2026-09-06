@@ -175,3 +175,44 @@ expert and online states. TD-target components call the same
 `Stage3SAC.target_components` helper used by training. The scripts are
 read-only with respect to models, datasets, checkpoints, and replay; they only
 create files under `<PAIR_RUN>/audits/`.
+
+## Stage3-new CQL-lite
+
+`stage3_new_cqllite_config.json` enables the paired stabilized experiment while
+the baseline config explicitly keeps `cql.enabled=false`. For both expert and
+online halves, each replay action is the support anchor. Each state receives
+one detached stochastic current-policy action and ten uniform actions sampled
+from the real robosuite `action_spec` bounds. The two head penalties are
+`logsumexp(Q_i(s, a_ood)) - Q_i(s, a_data)` and their sum is weighted by the
+fixed `lambda=0.1` in the existing Critic optimizer. Actor loss, TD target,
+automatic alpha, UTD, replay threshold, 50/50 sampling, and terminal semantics
+are unchanged.
+
+The CQL run must be prepared fresh with the vanilla alpha0p01 pair supplied as
+`--reference-pair-run-dir`; this byte-copies only its original shared Actor and
+seed manifest, while both Critics reload their Stage2 best checkpoints. Runtime
+logs include raw/weighted CQL loss and support-vs-OOD Q statistics. Fixed
+source-separated diagnostics are written every 5000 environment steps (plus
+step 1000) to each group's `source_diagnostics.jsonl`.
+
+Synthetic validation:
+
+```bash
+python training/Multi_IL_Full_Action_RL/stage3_new_sac/validate_stage3_cqllite.py
+```
+
+Preparation uses the existing CLI with the CQL config:
+
+```bash
+python training/Multi_IL_Full_Action_RL/stage3_new_sac/prepare_stage3_new_pair.py \
+  --config training/Multi_IL_Full_Action_RL/stage3_new_sac/stage3_new_cqllite_config.json \
+  --reference-pair-run-dir "$BASELINE_PAIR_RUN" --alpha-init 0.01 \
+  --run-id "$PAIR_ID" --stage2-run-dir "$STAGE2_RUN" \
+  --rnn-q-checkpoint "$STAGE2_RUN/rnn_q/checkpoints/best.pth" \
+  --multi-q-checkpoint "$STAGE2_RUN/multi_q/checkpoints/best.pth" \
+  --expert-checkpoint "$EXPERT_CHECKPOINT"
+```
+
+After both groups finish, run `compare_stage3_new_pair.py` for the within-CQL
+pair and `compare_stage3_cql_baseline.py --cql-pair-run-dir ...
+--baseline-pair-run-dir ...` for milestone comparison with vanilla SAC.
