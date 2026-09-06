@@ -159,3 +159,19 @@ python training/Multi_IL_Full_Action_RL/stage3_new_sac/compare_stage3_new_pair.p
 
 Formal output is isolated under
 `.../stage3_new_sac/<PAIR_ID>/{shared,rnn_q,multi_q,pair_comparison}`.
+
+## Read-only terminal and Q-source audits
+
+`audit_stage3_terminal_semantics.py` inspects the real expert HDF5 schema and
+reports exactly how its stored `dones` become the SAC bootstrap mask. It does
+not infer missing terminated or truncated fields. It also checks whether a
+demo's final stored `next_obs` matches the next demo's first observation.
+
+`audit_stage3_q_source_decomposition.py` loads a saved Stage3 checkpoint and
+its referenced `.replay.npz`. The completed run is recoverable because every
+checkpoint records `replay_path`, and `last.pth` points to `last.replay.npz`.
+It compares dataset/behavior, current-policy, and fixed-seed random actions on
+expert and online states. TD-target components call the same
+`Stage3SAC.target_components` helper used by training. The scripts are
+read-only with respect to models, datasets, checkpoints, and replay; they only
+create files under `<PAIR_RUN>/audits/`.

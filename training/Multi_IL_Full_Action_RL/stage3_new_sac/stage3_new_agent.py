@@ -40,11 +40,14 @@ class Stage3SAC:
     def alpha(self): return self.log_alpha.exp()
     def action(self,state,deterministic=False):
         with torch.no_grad(): return self.actor(torch.as_tensor(state,dtype=torch.float32,device=self.device).reshape(-1,59),deterministic=deterministic)[0].cpu().numpy()
-    def update(self,batch):
-        b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()}; gamma=float(self.config["gamma"])
+    def target_components(self,b):
+        """Return the exact target terms used by training without updating state."""
         next_action,_,_,next_logp,*_=self.actor(b["next_observations"],reparameterize=True,return_log_prob=True)
         with torch.no_grad():
-            tq1,tq2=self.target(b["next_observations"],next_action);target_qmin=torch.minimum(tq1,tq2);entropy_bonus=-self.alpha.detach()*next_logp;target=b["rewards"]+gamma*(1-b["terminals"])*(target_qmin+entropy_bonus)
+            tq1,tq2=self.target(b["next_observations"],next_action);target_qmin=torch.minimum(tq1,tq2);entropy_bonus=-self.alpha.detach()*next_logp;td_target=b["rewards"]+float(self.config["gamma"])*(1-b["terminals"])*(target_qmin+entropy_bonus)
+        return {"target_qmin":target_qmin,"next_logp":next_logp.detach(),"entropy_bonus":entropy_bonus,"td_target":td_target}
+    def update(self,batch):
+        b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()};components=self.target_components(b);target_qmin=components["target_qmin"];entropy_bonus=components["entropy_bonus"];target=components["td_target"]
         q1,q2=self.critic(b["observations"],b["actions"]);l1=torch.nn.functional.mse_loss(q1,target);l2=torch.nn.functional.mse_loss(q2,target);critic_loss=l1+l2
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward();self.critic_optimizer.step()
         action,_,_,logp,*_=self.actor(b["observations"],reparameterize=True,return_log_prob=True)
