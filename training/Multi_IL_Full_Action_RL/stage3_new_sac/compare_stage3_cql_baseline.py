@@ -5,7 +5,7 @@ import argparse,json
 from pathlib import Path
 
 MILESTONES={1000,5000,10000,25000,50000,75000,100000,150000,200000,250000,300000}
-METRICS=("qmin_mean","target_qmin_mean","td_target_mean","critic_loss","critic_td_loss","cql_loss_raw","cql_loss_weighted","alpha","policy_minus_data_q_mean","random_max_minus_data_q_mean")
+METRICS=("qmin_mean","target_qmin_mean","td_target_mean","critic_loss","critic_loss_total","critic_td_loss","cql_loss_raw","cql_loss_weighted","anchor_loss_raw","anchor_loss_weighted","anchor_teacher_student_pearson_q1","anchor_teacher_student_pearson_q2","alpha","policy_minus_data_q_mean","random_max_minus_data_q_mean")
 def read(path):
     with open(path,encoding="utf-8") as f:return json.load(f)
 def metric_rows(group):

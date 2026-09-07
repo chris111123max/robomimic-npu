@@ -27,7 +27,7 @@ def strict_stage2_load(path,device,config):
     critic=build_critic(59,14,config["hidden_dims"],"relu",True,device); critic.load_state_dict(payload["critic_state_dict"],strict=True); return critic,payload
 
 class Stage3SAC:
-    def __init__(self,actor,critic,config,device,action_low=None,action_high=None):
+    def __init__(self,actor,critic,config,device,action_low=None,action_high=None,teacher=None):
         self.actor,self.critic,self.target,self.config,self.device=actor,critic,copy.deepcopy(critic).to(device),config,device;self.target.requires_grad_(False)
         for key,value in critic.state_dict().items():
             if not torch.equal(value,self.target.state_dict()[key]): raise AssertionError("Target Critic is not an exact step-0 copy")
@@ -39,6 +39,11 @@ class Stage3SAC:
         low=-np.ones(14,np.float32) if action_low is None else np.asarray(action_low,np.float32);high=np.ones(14,np.float32) if action_high is None else np.asarray(action_high,np.float32)
         if low.shape!=(14,) or high.shape!=(14,) or not np.isfinite(low).all() or not np.isfinite(high).all() or not np.all(low<high):raise ValueError("Invalid environment action bounds")
         self.action_low=torch.as_tensor(low,dtype=torch.float32,device=device);self.action_high=torch.as_tensor(high,dtype=torch.float32,device=device)
+        self.teacher=teacher
+        if self.teacher is not None:
+            self.teacher.eval();self.teacher.requires_grad_(False)
+            optimizer_ids={id(p) for group in self.critic_optimizer.param_groups for p in group["params"]}
+            if any(id(p) in optimizer_ids for p in self.teacher.parameters()):raise RuntimeError("Frozen teacher entered Critic optimizer")
     @property
     def alpha(self): return self.log_alpha.exp()
     def action(self,state,deterministic=False):
@@ -60,6 +65,19 @@ class Stage3SAC:
     @staticmethod
     def cql_penalty(q_ood,q_data):return torch.logsumexp(q_ood,dim=1).mean()-q_data.mean()
     @staticmethod
+    def zscore(q,eps=1e-6):
+        q=q.reshape(-1);return (q-q.mean())/(q.std(unbiased=False)+float(eps))
+    @staticmethod
+    def pearson(a,b,eps=1e-12):
+        a,b=a.reshape(-1),b.reshape(-1);ac,bc=a-a.mean(),b-b.mean();return (ac*bc).mean()/(ac.std(unbiased=False)*bc.std(unbiased=False)+float(eps))
+    def anchor_components(self,batch):
+        if self.teacher is None:raise RuntimeError("Anchor enabled without frozen Stage2 teacher")
+        cfg=self.config.get("anchor",{});eps=float(cfg.get("eps",1e-6));states=torch.as_tensor(batch["state"],dtype=torch.float32,device=self.device);actions=torch.as_tensor(batch["action"],dtype=torch.float32,device=self.device)
+        sq1,sq2=self.critic(states,actions)
+        with torch.no_grad():tq1,tq2=self.teacher(states,actions)
+        sq1,sq2,tq1,tq2=(x.reshape(-1) for x in (sq1,sq2,tq1,tq2));l1=torch.nn.functional.mse_loss(self.zscore(sq1,eps),self.zscore(tq1,eps));l2=torch.nn.functional.mse_loss(self.zscore(sq2,eps),self.zscore(tq2,eps));raw=.5*(l1+l2)
+        return {"loss_q1":l1,"loss_q2":l2,"loss":raw,"student_q1":sq1,"student_q2":sq2,"teacher_q1":tq1,"teacher_q2":tq2,"student_q1_mean":sq1.mean(),"student_q1_std":sq1.std(unbiased=False),"student_q2_mean":sq2.mean(),"student_q2_std":sq2.std(unbiased=False),"teacher_q1_mean":tq1.mean(),"teacher_q1_std":tq1.std(unbiased=False),"teacher_q2_mean":tq2.mean(),"teacher_q2_std":tq2.std(unbiased=False),"pearson_q1":self.pearson(sq1,tq1),"pearson_q2":self.pearson(sq2,tq2),"teacher_std_near_zero":((tq1.std(unbiased=False)<1e-8)|(tq2.std(unbiased=False)<1e-8)).float()}
+    @staticmethod
     def ensure_finite(values):
         bad=[name for name,value in values.items() if torch.is_tensor(value) and not torch.isfinite(value).all()]
         if bad:raise FloatingPointError(f"Non-finite Stage3 SAC/CQL tensors: {bad}")
@@ -69,11 +87,14 @@ class Stage3SAC:
             q1,q2=self.critic(b["observations"],b["actions"]);cql=self.cql_components(b["observations"],q1,q2);target=self.target_components(b);gap=cql["q_policy"]-cql["q_data"];random_gap=cql["q_random_max"]-cql["q_data"]
         values={"q_data_mean":cql["q_data"].mean(),"q_policy_mean":cql["q_policy"].mean(),"q_random_max_mean":cql["q_random_max"].mean(),"policy_minus_data_q_mean":gap.mean(),"policy_gt_data_fraction":(gap>0).float().mean(),"random_max_minus_data_q_mean":random_gap.mean(),"random_max_gt_data_fraction":(random_gap>0).float().mean(),"target_qmin_mean":target["target_qmin"].mean(),"entropy_bonus_mean":target["entropy_bonus"].mean(),"td_target_mean":target["td_target"].mean(),"reward_mean":b["rewards"].mean()}
         self.ensure_finite(values);return {key:float(value.item()) for key,value in values.items()}
-    def update(self,batch):
+    def update(self,batch,anchor_batch=None):
         b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()};components=self.target_components(b);target_qmin=components["target_qmin"];entropy_bonus=components["entropy_bonus"];target=components["td_target"]
         q1,q2=self.critic(b["observations"],b["actions"]);l1=torch.nn.functional.mse_loss(q1,target);l2=torch.nn.functional.mse_loss(q2,target);critic_td_loss=l1+l2;cql_cfg=self.config.get("cql",{});cql_enabled=bool(cql_cfg.get("enabled",False))
-        cql_values=self.cql_components(b["observations"],q1,q2) if cql_enabled else None;cql_raw=cql_values["loss"] if cql_enabled else critic_td_loss.new_zeros(());cql_weighted=float(cql_cfg.get("lambda",.1))*cql_raw;critic_loss=critic_td_loss+cql_weighted
-        self.ensure_finite({"critic_td_loss":critic_td_loss,"cql_loss":cql_raw,"critic_loss":critic_loss,"q1":q1,"q2":q2,"target_qmin":target_qmin,"td_target":target,"alpha":self.alpha})
+        cql_values=self.cql_components(b["observations"],q1,q2) if cql_enabled else None;cql_raw=cql_values["loss"] if cql_enabled else critic_td_loss.new_zeros(());cql_weighted=float(cql_cfg.get("lambda",.1))*cql_raw
+        anchor_cfg=self.config.get("anchor",{});anchor_enabled=bool(anchor_cfg.get("enabled",False))
+        if anchor_enabled and anchor_batch is None:raise RuntimeError("Every anchored Critic update requires an independent anchor batch")
+        anchor_values=self.anchor_components(anchor_batch) if anchor_enabled else None;anchor_raw=anchor_values["loss"] if anchor_enabled else critic_td_loss.new_zeros(());anchor_weighted=float(anchor_cfg.get("lambda",.1))*anchor_raw;critic_loss=critic_td_loss+cql_weighted+anchor_weighted
+        self.ensure_finite({"critic_td_loss":critic_td_loss,"cql_loss":cql_raw,"anchor_loss":anchor_raw,"critic_loss":critic_loss,"q1":q1,"q2":q2,"target_qmin":target_qmin,"td_target":target,"alpha":self.alpha})
         self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward();self.critic_optimizer.step()
         self.ensure_finite({f"critic_parameter_{index}":parameter for index,parameter in enumerate(self.critic.parameters())})
         action,_,_,logp,*_=self.actor(b["observations"],reparameterize=True,return_log_prob=True)
@@ -92,7 +113,10 @@ class Stage3SAC:
             if minimum_maximum:result.update({f"{name}_min":float(value.min().item()),f"{name}_max":float(value.max().item())})
             return result
         policy_entropy=float((-logp).mean().item())
-        metrics={"critic_loss":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"actor_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        metrics={"critic_loss":float(critic_loss.item()),"critic_loss_total":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"anchor_loss_q1_raw":float(anchor_values["loss_q1"].item()) if anchor_enabled else 0.0,"anchor_loss_q2_raw":float(anchor_values["loss_q2"].item()) if anchor_enabled else 0.0,"anchor_loss_raw":float(anchor_raw.item()),"anchor_loss_weighted":float(anchor_weighted.item()),"actor_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        if anchor_enabled:
+            for name in ("teacher_q1_mean","teacher_q1_std","teacher_q2_mean","teacher_q2_std","student_q1_mean","student_q1_std","student_q2_mean","student_q2_std","pearson_q1","pearson_q2","teacher_std_near_zero"):metrics[f"anchor_{name}"]=float(anchor_values[name].item())
+            metrics["anchor_teacher_student_pearson_q1"]=metrics["anchor_pearson_q1"];metrics["anchor_teacher_student_pearson_q2"]=metrics["anchor_pearson_q2"]
         if cql_enabled:
             gap=cql_values["q_policy"]-cql_values["q_data"];random_gap=cql_values["q_random_max"]-cql_values["q_data"];metrics.update({"q_data_mean":float(cql_values["q_data"].mean().item()),"q_policy_cql_mean":float(cql_values["q_policy"].mean().item()),"q_random_mean":float(cql_values["q_random"].mean().item()),"q_random_max_mean":float(cql_values["q_random_max"].mean().item()),"policy_minus_data_q_mean":float(gap.mean().item()),"policy_minus_data_q_median":float(gap.median().item()),"random_max_minus_data_q_mean":float(random_gap.mean().item()),"fraction_policy_gt_data":float((gap>0).float().mean().item()),"fraction_random_max_gt_data":float((random_gap>0).float().mean().item())})
         metrics.update(tensor_stats("reward",b["rewards"],True));metrics.update(tensor_stats("target_qmin",target_qmin));metrics.update(tensor_stats("entropy_bonus",entropy_bonus,True));metrics.update(tensor_stats("td_target",target,True));metrics.update(tensor_stats("q1",q1));metrics.update(tensor_stats("q2",q2));metrics["qmin_mean"]=float(qmin.mean().item())

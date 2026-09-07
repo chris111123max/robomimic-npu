@@ -216,3 +216,29 @@ python training/Multi_IL_Full_Action_RL/stage3_new_sac/prepare_stage3_new_pair.p
 After both groups finish, run `compare_stage3_new_pair.py` for the within-CQL
 pair and `compare_stage3_cql_baseline.py --cql-pair-run-dir ...
 --baseline-pair-run-dir ...` for milestone comparison with vanilla SAC.
+
+## CQL-lite + frozen Stage2 value-geometry anchor
+
+`stage3_new_cqllite_anchor_config.json` adds a frozen copy of the corresponding
+Stage2 Twin Critic. Student and teacher start from the same checkpoint. Every
+Critic update independently samples 256 Stage2 training transitions and matches
+each Q head after batch-wise z-scoring (`unbiased=False`, epsilon `1e-6`). The
+raw anchor is the mean of the two head losses and has fixed weight `0.1`; it
+never updates the Actor and never participates in TD or CQL.
+
+The audited Stage2 loader and split are reused. RNN-Q samples BC-RNN only.
+Multi-Q reuses the rotating policy-balanced RNN/Transformer/GMM sampler.
+Validation transitions are diagnostics only. `step0_anchor_audit.json` verifies
+student/teacher equality; `anchor_diagnostics.jsonl` records train/validation
+correlations and fixed-probe success-minus-failure geometry.
+
+Only `mujoco.FatalError` is recovered during physics stepping. The corrupt step
+is discarded without consuming an environment step, the episode is excluded
+from normal outcome statistics, and the incident is recorded in
+`sim_fatal_errors.jsonl`. Five consecutive failures stop the run. Evaluation
+retries an affected seed once and excludes persistent simulator errors from the
+success-rate denominator.
+
+```bash
+python training/Multi_IL_Full_Action_RL/stage3_new_sac/validate_stage3_cqllite_anchor.py
+```

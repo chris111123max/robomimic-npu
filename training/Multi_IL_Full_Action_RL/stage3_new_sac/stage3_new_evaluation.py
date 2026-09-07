@@ -39,15 +39,23 @@ def close_env(env):
     current=getattr(env,"env",env); fn=getattr(current,"close",None)
     if callable(fn): fn()
 def reset_seed(env,seed): seed_all(seed);seed_env(env,seed);obs=env.reset();seed_all(seed);return obs
-def evaluate(actor,env,seeds,horizon,device):
+def mujoco_fatal_error_type():
+    import mujoco
+    return mujoco.FatalError
+def evaluate(actor,env,seeds,horizon,device,sim_error_retries=0):
     rows=[]
     for seed in seeds:
-        obs=reset_seed(env,seed); total=0.0;steps=0;raw_done=False;won=success(env)
-        for step in range(int(horizon)):
-            state=torch.as_tensor(flatten(obs)[None],device=device)
-            with torch.no_grad(): action=actor(state,deterministic=True)[0][0].cpu().numpy()
-            obs,reward,raw_done,_=env.step(action);total+=float(reward);steps=step+1;won=success(env)
-            if raw_done or won or steps>=horizon: break
-        time_limit=bool(steps>=horizon and not won)
-        rows.append({"seed":int(seed),"return":total,"length":steps,"success":won,"terminated":bool(won or (raw_done and not time_limit)),"truncated":time_limit})
-    return {"episodes":rows,"success_rate":float(np.mean([r["success"] for r in rows])),"mean_return":float(np.mean([r["return"] for r in rows])),"mean_length":float(np.mean([r["length"] for r in rows]))}
+        fatal=None
+        for attempt in range(int(sim_error_retries)+1):
+            try:
+                obs=reset_seed(env,seed);total=0.0;steps=0;raw_done=False;won=success(env)
+                for step in range(int(horizon)):
+                    state=torch.as_tensor(flatten(obs)[None],device=device)
+                    with torch.no_grad():action=actor(state,deterministic=True)[0][0].cpu().numpy()
+                    obs,reward,raw_done,_=env.step(action);total+=float(reward);steps=step+1;won=success(env)
+                    if raw_done or won or steps>=horizon:break
+                time_limit=bool(steps>=horizon and not won);rows.append({"seed":int(seed),"return":total,"length":steps,"success":won,"terminated":bool(won or (raw_done and not time_limit)),"truncated":time_limit,"sim_error":False,"attempts":attempt+1});fatal=None;break
+            except mujoco_fatal_error_type() as error:fatal=error
+        if fatal is not None:rows.append({"seed":int(seed),"return":None,"length":None,"success":None,"terminated":False,"truncated":False,"sim_error":True,"attempts":int(sim_error_retries)+1,"exception":str(fatal)})
+    valid=[r for r in rows if not r["sim_error"]]
+    return {"episodes":rows,"valid_episodes":len(valid),"sim_error_episodes":len(rows)-len(valid),"success_rate":(float(np.mean([r["success"] for r in valid])) if valid else None),"mean_return":(float(np.mean([r["return"] for r in valid])) if valid else None),"mean_length":(float(np.mean([r["length"] for r in valid])) if valid else None)}
