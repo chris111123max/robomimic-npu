@@ -37,18 +37,31 @@ class BatchedFrozenRNNProposer(FrozenRNNProposer):
         self.num_envs=int(num_envs)
         if self.num_envs <= 0:
             raise ValueError("num_envs must be positive")
-        # Direct batched forward_step is necessary so each environment owns an
-        # independent hidden-state row. This project uses normalized [-1, 1]
-        # actions; fail loudly instead of silently bypassing RolloutPolicy
-        # action de-normalization if a different checkpoint is supplied.
-        if getattr(self.rollout, "action_normalization_stats", None) is not None:
-            raise RuntimeError(
-                "BatchedFrozenRNNProposer currently requires a checkpoint "
-                "without action normalization"
-            )
+        # Keep the official RolloutPolicy action post-processing for
+        # checkpoints that store action normalization statistics.
+        self.action_normalization_stats=getattr(self.rollout,"action_normalization_stats",None)
+        self.action_keys=getattr(self.rollout.policy.global_config.train,"action_keys",None)
+        self.action_config=getattr(self.rollout.policy.global_config.train,"action_config",{})
         self.hidden=None
         self.counters=np.zeros(self.num_envs,np.int64)
         self.open_loop=[None]*self.num_envs
+    def _postprocess_actions(self,actions):
+        if self.action_normalization_stats is None:return actions
+        from robomimic.utils import obs_utils as ObsUtils
+        from robomimic.utils import python_utils as PyUtils
+        from robomimic.utils import torch_utils as TorchUtils
+        action=np.asarray(actions,np.float32);shapes={key:self.action_normalization_stats[key]["offset"].shape[1:] for key in self.action_normalization_stats}
+        action_dict=PyUtils.vector_to_action_dict(action,action_shapes=shapes,action_keys=self.action_keys)
+        action_dict=ObsUtils.unnormalize_dict(action_dict,normalization_stats=self.action_normalization_stats)
+        for key,value in action_dict.items():
+            fmt=self.action_config[key].get("format",None)
+            if fmt!="rot_6d":continue
+            conversion=self.action_config[key].get("convert_at_runtime","rot_axis_angle");rot=torch.as_tensor(value,dtype=torch.float32)
+            if conversion=="rot_axis_angle":value=TorchUtils.rot_6d_to_axis_angle(rot).numpy()
+            elif conversion=="rot_euler":value=TorchUtils.rot_6d_to_euler_angles(rot,convention="XYZ").numpy()
+            else:raise ValueError(f"Unsupported runtime action conversion {conversion!r}")
+            action_dict[key]=value
+        return np.asarray(PyUtils.action_dict_to_vector(action_dict,action_keys=self.action_keys),np.float32)
     @staticmethod
     def _replace_rows(value,initial,indices):
         if torch.is_tensor(value):value=value.clone();value[:,indices]=initial[:,indices];return value
@@ -94,7 +107,7 @@ class BatchedFrozenRNNProposer(FrozenRNNProposer):
             prepared={key:torch.cat([self.open_loop[i][key] for i in ids],0) for key in prepared}
         hidden=self._take_rows(self.hidden,ids)
         with torch.no_grad():action,hidden=algo.nets["policy"].forward_step(prepared,goal_dict=None,rnn_state=hidden)
-        self.hidden=self._assign_rows(self.hidden,hidden,ids);self.counters[ids]+=1;result=action.detach().cpu().numpy().astype(np.float32)
+        self.hidden=self._assign_rows(self.hidden,hidden,ids);self.counters[ids]+=1;result=action.detach().cpu().numpy().astype(np.float32);result=self._postprocess_actions(result)
         if result.shape!=(len(ids),14) or not np.isfinite(result).all():raise RuntimeError(f"Invalid batched BC-RNN proposals {result.shape}")
         return result
     def actions(self,observations):return self.actions_for(range(self.num_envs),observations)
