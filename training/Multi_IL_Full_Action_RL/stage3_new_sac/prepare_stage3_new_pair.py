@@ -21,7 +21,7 @@ def sha(path):
         for chunk in iter(lambda:f.read(1024*1024),b""):h.update(chunk)
     return h.hexdigest()
 def args():
-    p=argparse.ArgumentParser();p.add_argument("--config",default=str(HERE/"stage3_new_config.json"));p.add_argument("--output-root");p.add_argument("--run-id");p.add_argument("--expert-dataset");p.add_argument("--expert-checkpoint");p.add_argument("--bc-rnn-checkpoint");p.add_argument("--stage2-run-dir",required=True);p.add_argument("--rnn-q-checkpoint",required=True);p.add_argument("--multi-q-checkpoint",required=True);p.add_argument("--reference-pair-run-dir");p.add_argument("--alpha-init",type=float,default=0.01);return p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument("--config",default=str(HERE/"stage3_new_config.json"));p.add_argument("--output-root");p.add_argument("--run-id");p.add_argument("--expert-dataset");p.add_argument("--expert-checkpoint");p.add_argument("--bc-rnn-checkpoint");p.add_argument("--expert-cache-workers",type=int,default=16);p.add_argument("--stage2-run-dir",required=True);p.add_argument("--rnn-q-checkpoint",required=True);p.add_argument("--multi-q-checkpoint",required=True);p.add_argument("--reference-pair-run-dir");p.add_argument("--alpha-init",type=float,default=0.01);return p.parse_args()
 def resolve_expert(a):
     if a.expert_dataset:return str(Path(a.expert_dataset).resolve()),"explicit CLI path"
     if not a.expert_checkpoint:raise ValueError("Provide --expert-dataset or --expert-checkpoint")
@@ -69,7 +69,9 @@ def main():
         write(shared/"seed_manifest.json",{"training_seed":c["training_seed"],"train_seed_rule":"train_seed_base + episode_index","train_seed_base":c["train_seed_base"],"evaluation_seeds":list(range(c["evaluation_seed_start"],c["evaluation_seed_start"]+c["evaluation_episodes"]))})
         reference={"reference_pair_run_dir":None,"actor_init_source":"generated from training_seed","actor_init_sha256":sha(shared/"actor_init.pth"),"seed_manifest_source":"generated from config","seed_manifest_sha256":sha(shared/"seed_manifest.json"),"new_alpha_init":c["alpha_init"]}
     handoff_cache=None
-    if handoff.get("enabled",False):handoff_cache=build_expert_cache(c["expert_dataset"],c["bc_rnn_checkpoint"],shared/"expert_rnn_proposal_cache.npz","cpu");c["expert_rnn_proposal_cache"]=handoff_cache["cache_path"]
+    if handoff.get("enabled",False):
+        if a.expert_cache_workers<1:raise ValueError("--expert-cache-workers must be positive")
+        handoff_cache=build_expert_cache(c["expert_dataset"],c["bc_rnn_checkpoint"],shared/"expert_rnn_proposal_cache.npz","cpu",a.expert_cache_workers);c["expert_rnn_proposal_cache"]=handoff_cache["cache_path"]
     sources={}
     for group,path in (("rnn_q",a.rnn_q_checkpoint),("multi_q",a.multi_q_checkpoint)):
         _,payload=strict_stage2_load(path,"cpu",c);sources[group]={"checkpoint":str(Path(path).resolve()),"sha256":sha(path),"validation_metric":payload.get("validation_metric"),"model_config":payload.get("model_config"),"gamma":payload.get("gamma")}

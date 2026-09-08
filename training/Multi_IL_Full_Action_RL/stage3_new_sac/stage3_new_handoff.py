@@ -1,6 +1,7 @@
 """Frozen robomimic BC-RNN proposals and target-Q handoff primitives."""
 from __future__ import annotations
-import hashlib,json,random
+import hashlib,json,random,os,time,multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor,as_completed
 from collections import OrderedDict
 from pathlib import Path
 import h5py,numpy as np,torch
@@ -46,6 +47,31 @@ def _rng_state():
 def _set_rng_state(state):
     random.setstate(state["python"]);np.random.set_state(state["numpy"]);torch.random.set_rng_state(state["torch"])
 
+_CACHE_DATASET=None
+_CACHE_PROPOSER=None
+
+def _cache_worker_init(dataset_path,checkpoint):
+    global _CACHE_DATASET,_CACHE_PROPOSER
+    torch.set_num_threads(1)
+    try:torch.set_num_interop_threads(1)
+    except RuntimeError:pass
+    _CACHE_DATASET=h5py.File(dataset_path,"r")
+    _CACHE_PROPOSER=FrozenRNNProposer(checkpoint,"cpu")
+
+def _cache_one_demo(task):
+    index,name=task;demo=_CACHE_DATASET["data"][name];length=len(demo["actions"])
+    if length<=0 or "obs" not in demo or "next_obs" not in demo:raise RuntimeError(f"Incomplete expert trajectory {demo.name}")
+    # A stable per-demo RNG makes parallel scheduling irrelevant while retaining
+    # any sampling semantics implemented by the official rollout policy.
+    seed=20260908+index;random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
+    _CACHE_PROPOSER.start_episode();first_rng=_rng_state(); gant=[]
+    for t in range(length):gant.append(_CACHE_PROPOSER.action({key:demo["obs"][key][t] for key in KEYS}))
+    final_next=_CACHE_PROPOSER.action({key:demo["next_obs"][key][length-1] for key in KEYS});gant=np.stack(gant);gnext=np.concatenate((gant[1:],final_next[None]),axis=0)
+    continued_rng=_rng_state();_set_rng_state(first_rng);_CACHE_PROPOSER.start_episode();first_again=_CACHE_PROPOSER.action({key:demo["obs"][key][0] for key in KEYS});_set_rng_state(continued_rng)
+    diff=float(np.max(np.abs(first_again-gant[0])))
+    if not np.allclose(first_again,gant[0],rtol=0,atol=1e-6):raise RuntimeError(f"BC-RNN hidden reset integrity failed for {name}; max_abs_diff={diff}")
+    return index,name,gant.astype(np.float32),gnext.astype(np.float32),diff
+
 def select_actions(target,states,rl_actions,rnn_actions):
     with torch.no_grad():
         q1rl,q2rl=target(states,rl_actions);q1rnn,q2rnn=target(states,rnn_actions);qrl=torch.minimum(q1rl,q2rl).reshape(-1);qrnn=torch.minimum(q1rnn,q2rnn).reshape(-1);rl_wins=qrl>qrnn;chosen=torch.where(rl_wins[:,None],rl_actions,rnn_actions)
@@ -63,24 +89,24 @@ def handoff_imitation(actor,states,rnn_actions,mask):
     if not bool(mask.any()):return states.sum()*0.0,0
     mean=actor(states[mask],deterministic=True)[0];return torch.nn.functional.mse_loss(mean,rnn_actions[mask]),int(mask.sum().item())
 
-def build_expert_cache(dataset_path,checkpoint,output,device="cpu"):
-    proposer=FrozenRNNProposer(checkpoint,device);actions=[];next_actions=[];episodes=[]
+def build_expert_cache(dataset_path,checkpoint,output,device="cpu",workers=None):
+    if str(device)!="cpu":raise ValueError("Parallel expert cache generation currently requires device=cpu")
     with h5py.File(dataset_path,"r") as f:
         if "data" not in f or "episodes" in f:raise RuntimeError("Expert cache requires ordered robomimic /data/demo_* trajectories")
-        for name in sorted(f["data"]):
-            demo=f["data"][name];length=len(demo["actions"])
-            if length<=0 or "obs" not in demo or "next_obs" not in demo:raise RuntimeError(f"Incomplete expert trajectory {demo.name}")
-            proposer.start_episode();episode_actions=[];first_rng=_rng_state()
-            for t in range(length):episode_actions.append(proposer.action({key:demo["obs"][key][t] for key in KEYS}))
-            final_next=proposer.action({key:demo["next_obs"][key][length-1] for key in KEYS});episode_actions=np.stack(episode_actions);episode_next=np.concatenate((episode_actions[1:],final_next[None]),axis=0);actions.append(episode_actions);next_actions.append(episode_next)
-            # A loaded rollout policy may consume RNG internally. Reproduce the
-            # original first-action RNG state so this check isolates recurrent
-            # reset semantics, then restore the uninterrupted cache RNG stream.
-            continued_rng=_rng_state();_set_rng_state(first_rng);proposer.start_episode();first_again=proposer.action({key:demo["obs"][key][0] for key in KEYS});_set_rng_state(continued_rng)
-            if not np.allclose(first_again,episode_actions[0],rtol=0,atol=1e-6):raise RuntimeError(f"BC-RNN hidden reset integrity failed for {name}")
-            episodes.append({"name":name,"length":length,"offset":sum(x["length"] for x in episodes),"first_action_reset_max_abs_diff":float(np.max(np.abs(first_again-episode_actions[0])))})
+        names=sorted(f["data"]);lengths=[len(f["data"][name]["actions"]) for name in names]
+    count=len(names);workers=int(workers or min(16,os.cpu_count() or 1,count));workers=max(1,min(workers,count));results=[None]*count;started=time.monotonic();finished_transitions=0
+    print(f"[expert-cache] episodes={count} transitions={sum(lengths)} workers={workers}",flush=True)
+    context=mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers,mp_context=context,initializer=_cache_worker_init,initargs=(dataset_path,checkpoint)) as pool:
+        futures={pool.submit(_cache_one_demo,(i,name)):i for i,name in enumerate(names)}
+        for completed,future in enumerate(as_completed(futures),1):
+            result=future.result();results[result[0]]=result;finished_transitions+=len(result[2]);elapsed=max(time.monotonic()-started,1e-9);rate=finished_transitions/elapsed;remaining=(sum(lengths)-finished_transitions)/rate if rate else float("inf")
+            print(f"[expert-cache] {completed}/{count} episodes, {finished_transitions}/{sum(lengths)} transitions, {rate:.1f} trans/s, ETA {remaining/60:.1f} min",flush=True)
+    actions=[];next_actions=[];episodes=[];offset=0
+    for _,name,episode_actions,episode_next,diff in results:
+        actions.append(episode_actions);next_actions.append(episode_next);episodes.append({"name":name,"length":len(episode_actions),"offset":offset,"first_action_reset_max_abs_diff":diff});offset+=len(episode_actions)
     action=np.concatenate(actions).astype(np.float32);nxt=np.concatenate(next_actions).astype(np.float32);output=Path(output);np.savez_compressed(output,rnn_actions=action,rnn_next_actions=nxt)
-    manifest={"source_dataset_path":str(Path(dataset_path).resolve()),"bc_rnn_checkpoint_path":str(Path(checkpoint).resolve()),"bc_rnn_checkpoint_sha256":sha256(checkpoint),"cache_path":str(output.resolve()),"cache_sha256":sha256(output),"transition_count":len(action),"episode_count":len(episodes),"episode_boundaries":episodes,"recurrent_protocol":"start_episode once per demo; obs called sequentially; final next_obs called once"}
+    manifest={"source_dataset_path":str(Path(dataset_path).resolve()),"bc_rnn_checkpoint_path":str(Path(checkpoint).resolve()),"bc_rnn_checkpoint_sha256":sha256(checkpoint),"cache_path":str(output.resolve()),"cache_sha256":sha256(output),"transition_count":len(action),"episode_count":len(episodes),"episode_boundaries":episodes,"workers":workers,"elapsed_seconds":time.monotonic()-started,"recurrent_protocol":"parallel across demos; start_episode once per demo; obs sequential within demo; final next_obs called once","rng_protocol":"stable seed 20260908 + sorted demo index"}
     with open(output.with_suffix(".manifest.json"),"x",encoding="utf-8") as f:json.dump(manifest,f,indent=2,sort_keys=True);f.write("\n")
     return manifest
 
