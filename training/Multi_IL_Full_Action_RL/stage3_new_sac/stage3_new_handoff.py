@@ -30,6 +30,48 @@ class FrozenRNNProposer:
         algo=self.rollout.policy;algo._rnn_hidden_state=_device_copy(state["hidden"],algo.device);algo._rnn_counter=int(state["counter"]);self.calls=int(state.get("calls",algo._rnn_counter))
         if state.get("open_loop_obs") is not None:algo._open_loop_obs=_device_copy(state["open_loop_obs"],algo.device)
 
+class BatchedFrozenRNNProposer(FrozenRNNProposer):
+    """One frozen network with independently reset recurrent rows."""
+    def __init__(self,checkpoint,device,num_envs):
+        super().__init__(checkpoint,device);self.num_envs=int(num_envs);self.hidden=None;self.counters=np.zeros(self.num_envs,np.int64);self.open_loop=[None]*self.num_envs
+    @staticmethod
+    def _replace_rows(value,initial,indices):
+        if torch.is_tensor(value):value=value.clone();value[:,indices]=initial[:,indices];return value
+        if isinstance(value,tuple):return tuple(BatchedFrozenRNNProposer._replace_rows(a,b,indices) for a,b in zip(value,initial))
+        raise TypeError(f"Unsupported RNN hidden type {type(value)}")
+    def reset_indices(self,indices):
+        ids=list(map(int,indices));self.counters[ids]=0
+        if self.hidden is not None:
+            initial=self.rollout.policy.nets["policy"].get_rnn_init_state(batch_size=self.num_envs,device=self.rollout.policy.device);self.hidden=self._replace_rows(self.hidden,initial,ids)
+        for index in ids:self.open_loop[index]=None
+    @staticmethod
+    def _take_rows(value,indices):
+        if torch.is_tensor(value):return value[:,indices].clone()
+        if isinstance(value,tuple):return tuple(BatchedFrozenRNNProposer._take_rows(item,indices) for item in value)
+        raise TypeError(f"Unsupported RNN hidden type {type(value)}")
+    @staticmethod
+    def _assign_rows(value,part,indices):
+        if torch.is_tensor(value):value=value.clone();value[:,indices]=part;return value
+        if isinstance(value,tuple):return tuple(BatchedFrozenRNNProposer._assign_rows(a,b,indices) for a,b in zip(value,part))
+        raise TypeError(f"Unsupported RNN hidden type {type(value)}")
+    def actions_for(self,indices,observations):
+        ids=list(map(int,indices))
+        if len(ids)!=len(observations):raise ValueError("indices/observations length mismatch")
+        algo=self.rollout.policy;obs=OrderedDict((key,np.stack([np.asarray(item[key]) for item in observations])) for key in KEYS);prepared=self.rollout._prepare_observation(obs,batched_ob=True)
+        if self.hidden is None:self.hidden=algo.nets["policy"].get_rnn_init_state(batch_size=self.num_envs,device=algo.device)
+        horizon=int(algo._rnn_horizon);reset=[i for i in ids if self.counters[i]>0 and self.counters[i]%horizon==0]
+        if len(reset):self.reset_indices(reset)
+        if algo._rnn_is_open_loop:
+            for local,i in enumerate(ids):
+                if self.open_loop[i] is None:self.open_loop[i]={key:value[local:local+1].clone() for key,value in prepared.items()}
+            prepared={key:torch.cat([self.open_loop[i][key] for i in ids],0) for key in prepared}
+        hidden=self._take_rows(self.hidden,ids)
+        with torch.no_grad():action,hidden=algo.nets["policy"].forward_step(prepared,goal_dict=None,rnn_state=hidden)
+        self.hidden=self._assign_rows(self.hidden,hidden,ids);self.counters[ids]+=1;result=action.detach().cpu().numpy().astype(np.float32)
+        if result.shape!=(len(ids),14) or not np.isfinite(result).all():raise RuntimeError(f"Invalid batched BC-RNN proposals {result.shape}")
+        return result
+    def actions(self,observations):return self.actions_for(range(self.num_envs),observations)
+
 def _cpu_copy(value):
     if torch.is_tensor(value):return value.detach().cpu().clone()
     if isinstance(value,tuple):return tuple(_cpu_copy(x) for x in value)

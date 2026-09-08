@@ -46,6 +46,7 @@
   "normalization": "none",
   "handoff": {"enabled": true, "proposer": "bc_rnn", "selector": "target_twin_q_min", "margin": 0.0, "tie_break": "rnn", "rl_proposal_stochastic_train": true, "bootstrap_proposal": true, "lambda_handoff": 1.0},
   "progressive_unfreeze": {"enabled": true, "protected_until_env_steps": 10000, "unfreeze_end_env_steps": 30000, "critic_lr_schedule": "linear", "target_tau_schedule": "linear", "phase_a_actor_objective": "handoff_only", "phase_a_alpha_fixed": 0.01, "train_metrics_interval_updates": 100},
+  "parallel_env": {"num_envs": 16, "env_startup_stagger": true, "env_startup_delay_sec": 0.5, "env_startup_timeout_sec": 120, "multiprocessing_start_method": "spawn"},
   "cql": {"enabled": true, "lambda": 0.1, "num_random_actions": 10, "num_policy_actions": 1, "apply_to_expert": true, "apply_to_online": true, "detach_policy_actions": true, "source_diagnostic_interval_env_steps": 5000, "source_diagnostic_sample_size": 256},
   "anchor": {"enabled": false},
   "sim_error_handling": {"enabled": true, "max_consecutive_fatal_errors": 5, "evaluation_retry_count": 1}

@@ -5,6 +5,7 @@ import numpy as np
 
 FIELDS = ("observations", "actions", "rewards", "next_observations", "terminals")
 HANDOFF_FIELDS=("action_exec","action_rl","action_rnn","rnn_next_actions","selected_source","q_select_rl","q_select_rnn","q_select_margin","is_online")
+IDENTITY_FIELDS=("env_id","episode_id","episode_seed")
 
 class TransitionBuffer:
     def __init__(self, capacity, obs_dim=59, action_dim=14, seed=0):
@@ -12,6 +13,7 @@ class TransitionBuffer:
         self.data = {"observations":np.empty((capacity,obs_dim),np.float32), "actions":np.empty((capacity,action_dim),np.float32),
             "rewards":np.empty((capacity,1),np.float32), "next_observations":np.empty((capacity,obs_dim),np.float32), "terminals":np.empty((capacity,1),np.float32)}
         self.data.update({"action_exec":np.zeros((capacity,action_dim),np.float32),"action_rl":np.zeros((capacity,action_dim),np.float32),"action_rnn":np.zeros((capacity,action_dim),np.float32),"rnn_next_actions":np.zeros((capacity,action_dim),np.float32),"selected_source":np.full((capacity,1),-1,np.float32),"q_select_rl":np.zeros((capacity,1),np.float32),"q_select_rnn":np.zeros((capacity,1),np.float32),"q_select_margin":np.zeros((capacity,1),np.float32),"is_online":np.ones((capacity,1),np.float32)})
+        self.data.update({key:np.full((capacity,1),-1,np.float32) for key in IDENTITY_FIELDS})
         self.top=self.size=0; self.rng=np.random.default_rng(seed); self.insertions=0
     def add(self, observation, action, reward, next_observation, terminal,metadata=None):
         values=(observation,action,[reward],next_observation,[terminal])
@@ -20,6 +22,8 @@ class TransitionBuffer:
             selected=int(np.asarray(metadata["selected_source"]).reshape(-1)[0]);expected=np.asarray(metadata["action_rl"] if selected==1 else metadata["action_rnn"],np.float32)
             if selected not in (0,1) or not np.allclose(np.asarray(action,np.float32),np.asarray(metadata["action_exec"],np.float32),rtol=0,atol=1e-6) or not np.allclose(np.asarray(action,np.float32),expected,rtol=0,atol=1e-6):raise RuntimeError("Handoff replay executed-action/source integrity failure")
             for key in HANDOFF_FIELDS:
+                if key in metadata:self.data[key][self.top]=np.asarray(metadata[key],dtype=np.float32)
+            for key in IDENTITY_FIELDS:
                 if key in metadata:self.data[key][self.top]=np.asarray(metadata[key],dtype=np.float32)
         self.top=(self.top+1)%self.capacity; self.size=min(self.size+1,self.capacity); self.insertions+=1
     def sample(self, count):
