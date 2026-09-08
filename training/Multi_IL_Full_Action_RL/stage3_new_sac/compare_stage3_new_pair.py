@@ -48,10 +48,22 @@ def load_jsonl_last(path):
         with open(path,encoding="utf-8") as f:
             for line in f:last=json.loads(line)
     return last
+def load_jsonl(path):
+    if not path.exists():return []
+    with open(path,encoding="utf-8") as f:return [json.loads(line) for line in f]
+def handoff_milestones(group):
+    wanted={1000,5000,10000,25000,50000,75000,100000,150000,200000,250000,300000};keys=("handoff_loss_raw","handoff_loss_weighted","handoff_mask_fraction","actor_sac_loss","actor_total_loss","bootstrap_rnn_fraction","bootstrap_rl_fraction","q_boot_rnn_mean","q_boot_rl_mean","qmin_mean","critic_loss_total","cql_loss_weighted","random_max_minus_data_q_mean");result={}
+    path=group/"train_metrics.jsonl"
+    if path.exists():
+        with open(path,encoding="utf-8") as f:
+            for line in f:
+                row=json.loads(line);step=int(row.get("env_steps",-1))
+                if step in wanted:result[str(step)]={key:row.get(key) for key in keys}
+    return result
 def compare_pair(pair):
     pair=Path(pair);left,right=pair/"rnn_q",pair/"multi_q";left_steps={p.stem.split("_")[1]:p for p in (left/"probes").glob("step_*.npz")};right_steps={p.stem.split("_")[1]:p for p in (right/"probes").glob("step_*.npz")}
     probes={step:compare_npz(left_steps[step],right_steps[step]) for step in sorted(set(left_steps)&set(right_steps),key=int)};curves={"rnn_q":load_evaluations(left),"multi_q":load_evaluations(right)}
-    output=pair/"pair_comparison";output.mkdir(exist_ok=True);write(output/"critic_washout.json",probes);write(output/"learning_curve_comparison.json",curves);summary={"pair_run_dir":str(pair),"matched_probe_steps":[int(x) for x in probes],"rnn_q_evaluations":len(curves["rnn_q"]),"multi_q_evaluations":len(curves["multi_q"]),"source_diagnostics_final":{"rnn_q":load_source_diagnostics(left),"multi_q":load_source_diagnostics(right)},"anchor_diagnostics_final":{"rnn_q":load_jsonl_last(left/"anchor_diagnostics.jsonl"),"multi_q":load_jsonl_last(right/"anchor_diagnostics.jsonl")},"final_probe_pair_geometry":probes.get("300000")};write(output/"stage3_new_summary.json",summary);return summary
+    output=pair/"pair_comparison";output.mkdir(exist_ok=True);write(output/"critic_washout.json",probes);write(output/"learning_curve_comparison.json",curves);summary={"pair_run_dir":str(pair),"matched_probe_steps":[int(x) for x in probes],"rnn_q_evaluations":len(curves["rnn_q"]),"multi_q_evaluations":len(curves["multi_q"]),"selector_trajectories":{"rnn_q":load_jsonl(left/"selector_diagnostics.jsonl"),"multi_q":load_jsonl(right/"selector_diagnostics.jsonl")},"handoff_training_milestones":{"rnn_q":handoff_milestones(left),"multi_q":handoff_milestones(right)},"source_diagnostics_final":{"rnn_q":load_source_diagnostics(left),"multi_q":load_source_diagnostics(right)},"anchor_diagnostics_final":{"rnn_q":load_jsonl_last(left/"anchor_diagnostics.jsonl"),"multi_q":load_jsonl_last(right/"anchor_diagnostics.jsonl")},"final_probe_pair_geometry":probes.get("300000")};write(output/"stage3_new_summary.json",summary);return summary
 def write(path,value):
     with open(path,"w",encoding="utf-8") as f:json.dump(value,f,indent=2,sort_keys=True);f.write("\n")
 def main():

@@ -8,7 +8,7 @@ from stage3_new_replay import FIELDS
 KEYS=("robot0_eef_pos","robot0_eef_quat","robot0_gripper_qpos","robot1_eef_pos","robot1_eef_quat","robot1_gripper_qpos","object")
 
 class ExpertDataset:
-    def __init__(self,path,seed=0):
+    def __init__(self,path,seed=0,proposal_cache=None):
         self.path=str(Path(path).resolve()); self.rng=np.random.default_rng(seed); rows={k:[] for k in FIELDS}
         with h5py.File(self.path,"r") as f:
             if "episodes" in f: raise RuntimeError("Stage1 IL rollout HDF5 is forbidden as Stage3 expert replay")
@@ -28,6 +28,9 @@ class ExpertDataset:
                 for key,value in zip(FIELDS,(obs,actions,rewards,nxt,dones)): rows[key].append(value)
         self.data={k:np.concatenate(v).astype(np.float32,copy=False) for k,v in rows.items()}; self.size=len(self.data["actions"])
         if self.size==0 or not all(np.isfinite(v).all() for v in self.data.values()): raise RuntimeError("Expert dataset is empty or non-finite")
+        if proposal_cache is not None:
+            from stage3_new_handoff import load_expert_cache
+            cached=load_expert_cache(proposal_cache,self.size);self.data.update(cached);self.data.update({"action_exec":self.data["actions"],"action_rl":np.zeros((self.size,14),np.float32),"action_rnn":cached["rnn_actions"],"selected_source":np.full((self.size,1),-1,np.float32),"q_select_rl":np.zeros((self.size,1),np.float32),"q_select_rnn":np.zeros((self.size,1),np.float32),"q_select_margin":np.zeros((self.size,1),np.float32),"is_online":np.zeros((self.size,1),np.float32)})
     @staticmethod
     def _flatten(group): return np.concatenate([np.asarray(group[k],np.float32).reshape(len(group[k]),-1) for k in KEYS],axis=1)
     def sample(self,count):

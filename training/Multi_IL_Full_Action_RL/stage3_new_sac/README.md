@@ -242,3 +242,32 @@ success-rate denominator.
 ```bash
 python training/Multi_IL_Full_Action_RL/stage3_new_sac/validate_stage3_cqllite_anchor.py
 ```
+
+## Frozen BC-RNN proposal handoff
+
+`stage3_new_rnn_handoff_config.json` defines the separate main experiment that
+tests whether RNN-only versus heterogeneous-IL Stage2 Critic initialization
+improves action arbitration and downstream RL handoff. This is related to
+existing IL-proposal / RL-proposal arbitration approaches; no novelty claim is
+made for the basic proposal mechanism.
+
+The SAC Actor remains the shared random feed-forward policy. A frozen official
+robomimic `RolloutPolicy` loaded from the BC-RNN checkpoint advances exactly
+once per real observation and resets at every episode. Target Twin-Q selects
+between its deterministic proposal and the stochastic SAC proposal during
+training (ties select RNN). Replay stores the executed action plus both proposal
+actions, selector values, source, and the already-computed recurrent proposal
+for the next state. The Bellman bootstrap repeats the proposal arbitration;
+only an RL-winning bootstrap receives the SAC entropy term.
+
+Expert recurrent proposals are precomputed once in temporal demo order into a
+shared cache by pair preparation. The handoff Actor loss uses deterministic
+Actor means only for online replay rows that actually selected RNN. CQL-lite is
+unchanged and the value-geometry anchor is disabled. Phase A is deliberately a
+no-update 20-seed arbitration report and is separate from formal 300k training.
+
+Synthetic validation:
+
+```bash
+python training/Multi_IL_Full_Action_RL/stage3_new_sac/validate_stage3_handoff.py
+```

@@ -9,6 +9,7 @@ for path in (str(S2),str(RLKIT)):
     if path not in sys.path: sys.path.insert(0,path)
 from critic_network import build_critic  # noqa:E402
 from rlkit.torch.sac.policies import TanhGaussianPolicy  # noqa:E402
+from stage3_new_handoff import handoff_imitation,hybrid_bootstrap  # noqa:E402
 
 def build_actor(config,device=None):
     actor=TanhGaussianPolicy(hidden_sizes=list(config["hidden_dims"]),obs_dim=59,action_dim=14,std=None)
@@ -51,6 +52,10 @@ class Stage3SAC:
     def target_components(self,b):
         """Return the exact target terms used by training without updating state."""
         next_action,_,_,next_logp,*_=self.actor(b["next_observations"],reparameterize=True,return_log_prob=True)
+        handoff=bool(self.config.get("handoff",{}).get("enabled",False))
+        if handoff:
+            boot=hybrid_bootstrap(self.target,b["next_observations"],next_action,b["rnn_next_actions"],next_logp,self.alpha);target_qmin=torch.where(boot["rl_wins"],boot["q_rl"],boot["q_rnn"] )[:,None];entropy_bonus=torch.where(boot["rl_wins"][:,None],-self.alpha.detach()*next_logp,torch.zeros_like(next_logp));td_target=b["rewards"]+float(self.config["gamma"])*(1-b["terminals"])*boot["value"]
+            return {"target_qmin":target_qmin,"next_logp":next_logp.detach(),"entropy_bonus":entropy_bonus,"td_target":td_target,"bootstrap":boot}
         with torch.no_grad():
             tq1,tq2=self.target(b["next_observations"],next_action);target_qmin=torch.minimum(tq1,tq2);entropy_bonus=-self.alpha.detach()*next_logp;td_target=b["rewards"]+float(self.config["gamma"])*(1-b["terminals"])*(target_qmin+entropy_bonus)
         return {"target_qmin":target_qmin,"next_logp":next_logp.detach(),"entropy_bonus":entropy_bonus,"td_target":td_target}
@@ -99,7 +104,7 @@ class Stage3SAC:
         self.ensure_finite({f"critic_parameter_{index}":parameter for index,parameter in enumerate(self.critic.parameters())})
         action,_,_,logp,*_=self.actor(b["observations"],reparameterize=True,return_log_prob=True)
         for p in self.critic.parameters(): p.requires_grad_(False)
-        aq1,aq2=self.critic(b["observations"],action); actor_loss=(self.alpha.detach()*logp-torch.minimum(aq1,aq2)).mean();self.actor_optimizer.zero_grad(set_to_none=True);actor_loss.backward();self.actor_optimizer.step()
+        aq1,aq2=self.critic(b["observations"],action); actor_sac_loss=(self.alpha.detach()*logp-torch.minimum(aq1,aq2)).mean();handoff_cfg=self.config.get("handoff",{});handoff_enabled=bool(handoff_cfg.get("enabled",False));handoff_loss,mask_count=handoff_imitation(self.actor,b["observations"],b["action_rnn"],(b["is_online"]>.5)&(b["selected_source"]<.5)) if handoff_enabled else (actor_sac_loss.new_zeros(()),0);handoff_weighted=float(handoff_cfg.get("lambda_handoff",1.0))*handoff_loss;actor_loss=actor_sac_loss+handoff_weighted;self.actor_optimizer.zero_grad(set_to_none=True);actor_loss.backward();self.actor_optimizer.step()
         for p in self.critic.parameters(): p.requires_grad_(True)
         alpha_loss=-(self.log_alpha*(logp.detach()+float(self.config["target_entropy"]))).mean();self.alpha_optimizer.zero_grad(set_to_none=True);alpha_loss.backward();self.alpha_optimizer.step()
         self.ensure_finite({"actor_loss":actor_loss,"alpha_loss":alpha_loss,"alpha":self.alpha,**{f"actor_parameter_{index}":parameter for index,parameter in enumerate(self.actor.parameters())}})
@@ -113,7 +118,9 @@ class Stage3SAC:
             if minimum_maximum:result.update({f"{name}_min":float(value.min().item()),f"{name}_max":float(value.max().item())})
             return result
         policy_entropy=float((-logp).mean().item())
-        metrics={"critic_loss":float(critic_loss.item()),"critic_loss_total":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"anchor_loss_q1_raw":float(anchor_values["loss_q1"].item()) if anchor_enabled else 0.0,"anchor_loss_q2_raw":float(anchor_values["loss_q2"].item()) if anchor_enabled else 0.0,"anchor_loss_raw":float(anchor_raw.item()),"anchor_loss_weighted":float(anchor_weighted.item()),"actor_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        metrics={"critic_loss":float(critic_loss.item()),"critic_loss_total":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"anchor_loss_q1_raw":float(anchor_values["loss_q1"].item()) if anchor_enabled else 0.0,"anchor_loss_q2_raw":float(anchor_values["loss_q2"].item()) if anchor_enabled else 0.0,"anchor_loss_raw":float(anchor_raw.item()),"anchor_loss_weighted":float(anchor_weighted.item()),"actor_loss":float(actor_loss.item()),"actor_sac_loss":float(actor_sac_loss.item()),"handoff_loss_raw":float(handoff_loss.item()),"handoff_loss_weighted":float(handoff_weighted.item()),"handoff_mask_count":mask_count,"handoff_mask_fraction":float(mask_count/len(b["observations"])),"actor_total_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        if handoff_enabled:
+            boot=components["bootstrap"];metrics.update({"bootstrap_rnn_fraction":float((~boot["rl_wins"]).float().mean().item()),"bootstrap_rl_fraction":float(boot["rl_wins"].float().mean().item()),"q_boot_rnn_mean":float(boot["q_rnn"].mean().item()),"q_boot_rl_mean":float(boot["q_rl"].mean().item()),"boot_value_mean":float(boot["value"].mean().item())})
         if anchor_enabled:
             for name in ("teacher_q1_mean","teacher_q1_std","teacher_q2_mean","teacher_q2_std","student_q1_mean","student_q1_std","student_q2_mean","student_q2_std","pearson_q1","pearson_q2","teacher_std_near_zero"):metrics[f"anchor_{name}"]=float(anchor_values[name].item())
             metrics["anchor_teacher_student_pearson_q1"]=metrics["anchor_pearson_q1"];metrics["anchor_teacher_student_pearson_q2"]=metrics["anchor_pearson_q2"]
