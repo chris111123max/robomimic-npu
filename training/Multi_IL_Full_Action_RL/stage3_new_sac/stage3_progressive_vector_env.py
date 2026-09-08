@@ -29,6 +29,25 @@ def _safe_send(conn, message) -> None:
         pass
 
 
+def _action_bounds(env):
+    """Read robosuite action bounds through robomimic wrapper layers."""
+    current = env
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        spec = getattr(current, "action_spec", None)
+        if spec is not None:
+            low, high = spec
+            return (
+                np.asarray(low, dtype=np.float32),
+                np.asarray(high, dtype=np.float32),
+            )
+        current = getattr(current, "env", None)
+    raise RuntimeError(
+        "Cannot obtain robosuite action_spec through environment wrappers"
+    )
+
+
 def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
     """Own exactly one CPU MuJoCo environment."""
     # These values are also injected by the parent before spawn so that they
@@ -47,7 +66,7 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
 
         env = build_env(dataset)
         obs = reset_seed(env, int(initial_seed))
-        low, high = env.action_spec
+        low, high = _action_bounds(env)
         _safe_send(
             conn,
             (
@@ -97,7 +116,7 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
                         close_env(env)
                     env = build_env(dataset)
                     obs = reset_seed(env, seed)
-                    low, high = env.action_spec
+                    low, high = _action_bounds(env)
                     _safe_send(
                         conn,
                         (
