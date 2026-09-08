@@ -1,0 +1,31 @@
+{
+  "candidate_families": [
+    {
+      "ambiguous_within_family": false,
+      "datasets": {
+        "bc_gmm": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+        "bc_rnn": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+        "bc_transformer": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_transformer/transitions.hdf5"
+      },
+      "duplicate_free": true,
+      "exact_episode_count": true,
+      "exact_unique_seed_count": true,
+      "family": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603",
+      "same_seed_sets": true,
+      "score": 3600,
+      "seed_count": 100
+    }
+  ],
+  "datasets": {
+    "bc_gmm": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+    "bc_rnn": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+    "bc_transformer": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_transformer/transitions.hdf5"
+  },
+  "expected_episodes_per_policy": 100,
+  "generated_at": "2026-08-20T18:27:09.812749+08:00",
+  "read_only": true,
+  "reason": "Unique validated 100-seed family",
+  "selected_family": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603",
+  "status": "selected",
+  "training_runs_root": "/data/home/3220251075/lerobot_workspace/training_runs"
+}

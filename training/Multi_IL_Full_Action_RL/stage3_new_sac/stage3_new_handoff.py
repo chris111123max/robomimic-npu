@@ -33,14 +33,34 @@ class FrozenRNNProposer:
 class BatchedFrozenRNNProposer(FrozenRNNProposer):
     """One frozen network with independently reset recurrent rows."""
     def __init__(self,checkpoint,device,num_envs):
-        super().__init__(checkpoint,device);self.num_envs=int(num_envs);self.hidden=None;self.counters=np.zeros(self.num_envs,np.int64);self.open_loop=[None]*self.num_envs
+        super().__init__(checkpoint,device)
+        self.num_envs=int(num_envs)
+        if self.num_envs <= 0:
+            raise ValueError("num_envs must be positive")
+        # Direct batched forward_step is necessary so each environment owns an
+        # independent hidden-state row. This project uses normalized [-1, 1]
+        # actions; fail loudly instead of silently bypassing RolloutPolicy
+        # action de-normalization if a different checkpoint is supplied.
+        if getattr(self.rollout, "action_normalization_stats", None) is not None:
+            raise RuntimeError(
+                "BatchedFrozenRNNProposer currently requires a checkpoint "
+                "without action normalization"
+            )
+        self.hidden=None
+        self.counters=np.zeros(self.num_envs,np.int64)
+        self.open_loop=[None]*self.num_envs
     @staticmethod
     def _replace_rows(value,initial,indices):
         if torch.is_tensor(value):value=value.clone();value[:,indices]=initial[:,indices];return value
         if isinstance(value,tuple):return tuple(BatchedFrozenRNNProposer._replace_rows(a,b,indices) for a,b in zip(value,initial))
         raise TypeError(f"Unsupported RNN hidden type {type(value)}")
     def reset_indices(self,indices):
-        ids=list(map(int,indices));self.counters[ids]=0
+        ids=list(map(int,indices))
+        if len(set(ids)) != len(ids):
+            raise ValueError("Duplicate RNN env indices")
+        if any(i < 0 or i >= self.num_envs for i in ids):
+            raise IndexError("RNN env index out of range")
+        self.counters[ids]=0
         if self.hidden is not None:
             initial=self.rollout.policy.nets["policy"].get_rnn_init_state(batch_size=self.num_envs,device=self.rollout.policy.device);self.hidden=self._replace_rows(self.hidden,initial,ids)
         for index in ids:self.open_loop[index]=None
@@ -56,7 +76,14 @@ class BatchedFrozenRNNProposer(FrozenRNNProposer):
         raise TypeError(f"Unsupported RNN hidden type {type(value)}")
     def actions_for(self,indices,observations):
         ids=list(map(int,indices))
-        if len(ids)!=len(observations):raise ValueError("indices/observations length mismatch")
+        if len(ids)!=len(observations):
+            raise ValueError("indices/observations length mismatch")
+        if len(set(ids)) != len(ids):
+            raise ValueError("Duplicate RNN env indices")
+        if any(i < 0 or i >= self.num_envs for i in ids):
+            raise IndexError("RNN env index out of range")
+        if not ids:
+            return np.empty((0, 14), dtype=np.float32)
         algo=self.rollout.policy;obs=OrderedDict((key,np.stack([np.asarray(item[key]) for item in observations])) for key in KEYS);prepared=self.rollout._prepare_observation(obs,batched_ob=True)
         if self.hidden is None:self.hidden=algo.nets["policy"].get_rnn_init_state(batch_size=self.num_envs,device=algo.device)
         horizon=int(algo._rnn_horizon);reset=[i for i in ids if self.counters[i]>0 and self.counters[i]%horizon==0]

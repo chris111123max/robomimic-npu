@@ -1,10 +1,13 @@
 {
-  "stage": "stage3-new-rnn-handoff-progressive-unfreeze-rnn-q-vs-multi-q",
+  "stage": "stage3-new-rnn-handoff-rnn-q-vs-multi-q",
   "output_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_new_sac",
   "expert_dataset": null,
   "obs_dim": 59,
   "action_dim": 14,
-  "hidden_dims": [256, 256],
+  "hidden_dims": [
+    256,
+    256
+  ],
   "activation": "relu",
   "actor_source": "rlkit/rlkit/torch/sac/policies.py:TanhGaussianPolicy",
   "critic_source": "training/Multi_IL_Full_Action_RL/stage2_new_critic_pretraining/critic_network.py",
@@ -28,13 +31,77 @@
   "online_fraction": 0.5,
   "online_replay_capacity": 1000000,
   "total_env_steps": 300000,
-  "evaluation_env_steps": [0, 25000, 50000, 100000, 150000, 200000, 300000],
-  "probe_env_steps": [0, 1000, 5000, 10000, 15000, 20000, 25000, 30000, 50000, 75000, 100000, 150000, 200000, 250000, 300000],
-  "checkpoint_env_steps": [0, 10000, 15000, 20000, 25000, 30000, 50000, 75000, 100000, 150000, 200000, 250000, 300000],
-  "selector_diagnostic_env_steps": [1000, 5000, 10000, 15000, 20000, 25000, 30000, 50000, 75000, 100000, 150000, 200000, 250000, 300000],
+  "evaluation_env_steps": [
+    0,
+    25000,
+    50000,
+    100000,
+    150000,
+    200000,
+    300000
+  ],
+  "probe_env_steps": [
+    0,
+    1000,
+    5000,
+    10000,
+    25000,
+    50000,
+    75000,
+    100000,
+    150000,
+    200000,
+    250000,
+    300000
+  ],
+  "checkpoint_env_steps": [
+    0,
+    25000,
+    50000,
+    75000,
+    100000,
+    150000,
+    200000,
+    250000,
+    300000
+  ],
+  "selector_diagnostic_env_steps": [
+    1000,
+    5000,
+    10000,
+    25000,
+    50000,
+    75000,
+    100000,
+    150000,
+    200000,
+    250000,
+    300000
+  ],
   "evaluation_episodes": 10,
   "evaluation_seed_start": 20000,
-  "step0_arbitration_seeds": [20000, 20001, 20002, 20003, 20004, 20005, 20006, 20007, 20008, 20009, 20010, 20011, 20012, 20013, 20014, 20015, 20016, 20017, 20018, 20019],
+  "step0_arbitration_seeds": [
+    20000,
+    20001,
+    20002,
+    20003,
+    20004,
+    20005,
+    20006,
+    20007,
+    20008,
+    20009,
+    20010,
+    20011,
+    20012,
+    20013,
+    20014,
+    20015,
+    20016,
+    20017,
+    20018,
+    20019
+  ],
   "train_seed_base": 30000,
   "training_seed": 20260904,
   "horizon": 700,
@@ -44,10 +111,51 @@
   "offline_sampling": "uniform_transition",
   "online_sampling": "uniform_transition",
   "normalization": "none",
-  "handoff": {"enabled": true, "proposer": "bc_rnn", "selector": "target_twin_q_min", "margin": 0.0, "tie_break": "rnn", "rl_proposal_stochastic_train": true, "bootstrap_proposal": true, "lambda_handoff": 1.0},
-  "progressive_unfreeze": {"enabled": true, "protected_until_env_steps": 10000, "unfreeze_end_env_steps": 30000, "critic_lr_schedule": "linear", "target_tau_schedule": "linear", "phase_a_actor_objective": "handoff_only", "phase_a_alpha_fixed": 0.01, "train_metrics_interval_updates": 100},
-  "parallel_env": {"num_envs": 16, "env_startup_stagger": true, "env_startup_delay_sec": 0.5, "env_startup_timeout_sec": 120, "multiprocessing_start_method": "spawn"},
-  "cql": {"enabled": true, "lambda": 0.1, "num_random_actions": 10, "num_policy_actions": 1, "apply_to_expert": true, "apply_to_online": true, "detach_policy_actions": true, "source_diagnostic_interval_env_steps": 5000, "source_diagnostic_sample_size": 256},
-  "anchor": {"enabled": false},
-  "sim_error_handling": {"enabled": true, "max_consecutive_fatal_errors": 5, "evaluation_retry_count": 1}
+  "handoff": {
+    "enabled": true,
+    "proposer": "bc_rnn",
+    "selector": "target_twin_q_min",
+    "margin": 0.0,
+    "tie_break": "rnn",
+    "rl_proposal_stochastic_train": true,
+    "bootstrap_proposal": true,
+    "lambda_handoff": 1.0
+  },
+  "cql": {
+    "enabled": true,
+    "lambda": 0.1,
+    "num_random_actions": 10,
+    "num_policy_actions": 1,
+    "apply_to_expert": true,
+    "apply_to_online": true,
+    "detach_policy_actions": true,
+    "source_diagnostic_interval_env_steps": 5000,
+    "source_diagnostic_sample_size": 256
+  },
+  "anchor": {
+    "enabled": false
+  },
+  "sim_error_handling": {
+    "enabled": true,
+    "max_consecutive_fatal_errors": 5,
+    "evaluation_retry_count": 1
+  },
+  "progressive_unfreeze": {
+    "enabled": true,
+    "protected_until_env_steps": 10000,
+    "unfreeze_end_env_steps": 30000,
+    "critic_lr_schedule": "linear",
+    "target_tau_schedule": "linear",
+    "phase_a_actor_objective": "handoff_only",
+    "phase_a_alpha_fixed": 0.01,
+    "train_metrics_interval_updates": 100
+  },
+  "parallel_env": {
+    "num_envs": 16,
+    "env_startup_stagger": true,
+    "env_startup_delay_sec": 0.5,
+    "env_startup_timeout_sec": 120,
+    "env_command_timeout_sec": 120,
+    "multiprocessing_start_method": "spawn"
+  }
 }

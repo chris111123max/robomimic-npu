@@ -22,12 +22,18 @@ def state_hash(module):
 
 def progressive_schedule(config,env_steps):
     cfg=config.get("progressive_unfreeze",{});base_lr=float(config["critic_lr"]);base_tau=float(config["tau"])
-    if not cfg.get("enabled",False):return {"phase":"full_sac","critic_lr_scale":1.0,"critic_lr_effective":base_lr,"target_tau_scale":1.0,"target_tau_effective":base_tau,"actor_sac_enabled":True,"alpha_tuning_enabled":True,"critic_update_enabled":True}
+    if not cfg.get("enabled",False):
+        return {"phase":"full_sac","critic_lr_scale":1.0,"critic_lr_effective":base_lr,"target_tau_scale":1.0,"target_tau_effective":base_tau,"actor_sac_enabled":True,"alpha_tuning_enabled":True,"critic_update_enabled":True}
     protected=int(cfg["protected_until_env_steps"]);end=int(cfg["unfreeze_end_env_steps"]);step=int(env_steps)
+    if protected < 0 or end <= protected:
+        raise ValueError(f"Invalid progressive schedule: protected={protected}, end={end}")
+    if step < 0:
+        raise ValueError(f"env_steps must be non-negative, got {step}")
     if step<protected:phase="protected_handoff";scale=0.0
     elif step<end:phase="progressive_unfreeze";scale=max(0.0,min(1.0,(step-protected)/float(end-protected)))
     else:phase="full_sac";scale=1.0
     return {"phase":phase,"critic_lr_scale":scale,"critic_lr_effective":base_lr*scale,"target_tau_scale":scale,"target_tau_effective":base_tau*scale,"actor_sac_enabled":step>=protected,"alpha_tuning_enabled":step>=protected,"critic_update_enabled":scale>0.0}
+
 def strict_stage2_load(path,device,config):
     payload=torch.load(path,map_location=device); mc=payload.get("model_config",{})
     expected={"obs_dim":59,"action_dim":14,"hidden_dims":list(config["hidden_dims"]),"activation":"relu","layer_norm":True}

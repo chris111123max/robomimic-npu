@@ -1,0 +1,4 @@
+policy,policy_id,episodes,unique_seeds,success_episodes,failure_episodes,success_rate,total_transitions,mean_episode_length,median_episode_length,min_episode_length,max_episode_length,mean_episode_return,min_episode_return,max_episode_return,action_dimension,observation_dimension,reward_zero_transitions,reward_positive_transitions,reward_negative_transitions,reward_nonzero_transitions,nan_total,inf_total
+RNN,bc_rnn,100,100,77,23,0.77,52474,524.74,481.5,398,700,0.77,0.0,1.0,14,59,52397,77,0,77,0,0
+Transformer,bc_transformer,100,100,40,60,0.4,60824,608.24,700.0,397,700,0.4,0.0,1.0,14,59,60784,40,0,40,0,0
+GMM,bc_gmm,100,100,10,90,0.1,68384,683.84,700.0,436,700,0.1,0.0,1.0,14,59,68374,10,0,10,0,0

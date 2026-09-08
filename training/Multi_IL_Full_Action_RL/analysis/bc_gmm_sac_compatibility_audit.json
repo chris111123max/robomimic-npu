@@ -1,0 +1,435 @@
+{
+  "backbone_comparison": [
+    {
+      "bc_gmm": {
+        "bias_shape": [
+          1024
+        ],
+        "in_features": 59,
+        "name": "_model.0",
+        "out_features": 1024,
+        "weight_shape": [
+          1024,
+          59
+        ]
+      },
+      "directly_compatible": false,
+      "index": 0,
+      "sac": {
+        "bias_shape": [
+          256
+        ],
+        "in_features": 59,
+        "name": "fc0",
+        "out_features": 256,
+        "weight_shape": [
+          256,
+          59
+        ]
+      }
+    },
+    {
+      "bc_gmm": {
+        "bias_shape": [
+          1024
+        ],
+        "in_features": 1024,
+        "name": "_model.2",
+        "out_features": 1024,
+        "weight_shape": [
+          1024,
+          1024
+        ]
+      },
+      "directly_compatible": false,
+      "index": 1,
+      "sac": {
+        "bias_shape": [
+          256
+        ],
+        "in_features": 256,
+        "name": "fc1",
+        "out_features": 256,
+        "weight_shape": [
+          256,
+          256
+        ]
+      }
+    }
+  ],
+  "bc_gmm": {
+    "action_dim": 14,
+    "action_range_semantics": "Component means are tanh-bounded because use_tanh=False; the subsequent 1e-4 Normal sample is not clipped and can numerically exceed [-1, 1] slightly.",
+    "action_unnormalization_applied_by_rollout_policy": true,
+    "activation": "ReLU",
+    "algo_class": "BC_GMM",
+    "checkpoint_actor_layer_dims": [
+      1024,
+      1024
+    ],
+    "checkpoint_gmm_num_modes": 5,
+    "class": "GMMActorNetwork",
+    "decoder": {
+      "logits": {
+        "bias_shape": [
+          5
+        ],
+        "in_features": 1024,
+        "name": "",
+        "out_features": 5,
+        "weight_shape": [
+          5,
+          1024
+        ]
+      },
+      "mean": {
+        "bias_shape": [
+          70
+        ],
+        "in_features": 1024,
+        "name": "",
+        "out_features": 70,
+        "weight_shape": [
+          70,
+          1024
+        ]
+      },
+      "scale": {
+        "bias_shape": [
+          70
+        ],
+        "in_features": 1024,
+        "name": "",
+        "out_features": 70,
+        "weight_shape": [
+          70,
+          1024
+        ]
+      }
+    },
+    "deterministic_action_convention": "In eval with low_noise_eval=True, forward still calls MixtureSameFamily.sample(): categorical component sampled from logits, then a Normal sample with scale 1e-4. It is not argmax-mode mean or weighted mixture mean; reproducibility requires the Stage1 RNG seed/order.",
+    "dropout_modules": [],
+    "encoder": {
+      "concat_order": [
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos"
+      ],
+      "group_encoder_class": "ObservationGroupEncoder",
+      "has_learned_encoder": false,
+      "keys": [
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "object",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            41
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot0_eef_pos",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            3
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot0_eef_quat",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            4
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot0_gripper_qpos",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            2
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot1_eef_pos",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            3
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot1_eef_quat",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            4
+          ]
+        },
+        {
+          "encoder": null,
+          "encoder_parameter_count": 0,
+          "key": "robot1_gripper_qpos",
+          "randomizers": [
+            null
+          ],
+          "shape": [
+            2
+          ]
+        }
+      ],
+      "observation_encoder_class": "ObservationEncoder",
+      "output_dim": 59
+    },
+    "layer_norm_modules": [],
+    "low_noise_eval": true,
+    "min_std": 0.0001,
+    "mlp_dims": [
+      59,
+      1024,
+      1024
+    ],
+    "mlp_linear_layers": [
+      {
+        "bias_shape": [
+          1024
+        ],
+        "in_features": 59,
+        "name": "_model.0",
+        "out_features": 1024,
+        "weight_shape": [
+          1024,
+          59
+        ]
+      },
+      {
+        "bias_shape": [
+          1024
+        ],
+        "in_features": 1024,
+        "name": "_model.2",
+        "out_features": 1024,
+        "weight_shape": [
+          1024,
+          1024
+        ]
+      }
+    ],
+    "module_repr": "GMMActorNetwork(\n    action_dim=14\n    num_modes=5\n    min_std=0.0001\n    std_activation=softplus\n    low_noise_eval=True\n\n    encoder=ObservationGroupEncoder(\n        group=obs\n        ObservationEncoder(\n            Key(\n                name=object\n                shape=[41]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_eef_pos\n                shape=[3]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_eef_quat\n                shape=[4]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_gripper_qpos\n                shape=[2]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_eef_pos\n                shape=[3]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_eef_quat\n                shape=[4]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_gripper_qpos\n                shape=[2]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            output_shape=[59]\n        )\n    )\n\n    mlp=MLP(\n        input_dim=59\n        output_dim=1024\n        layer_dims=[1024]\n        layer_func=Linear\n        dropout=None\n        act=ReLU\n        output_act=ReLU\n    )\n\n    decoder=ObservationDecoder(\n        Key(\n            name=mean\n            shape=(5, 14)\n            modality=low_dim\n            net=(Linear(in_features=1024, out_features=70, bias=True))\n        )\n        Key(\n            name=scale\n            shape=(5, 14)\n            modality=low_dim\n            net=(Linear(in_features=1024, out_features=70, bias=True))\n        )\n        Key(\n            name=logits\n            shape=(5,)\n            modality=low_dim\n            net=(Linear(in_features=1024, out_features=5, bias=True))\n        )\n    )\n)",
+    "num_modes": 5,
+    "observation_input_dim": 59,
+    "observation_normalization_applied": false,
+    "std_activation": "softplus",
+    "use_tanh_distribution": false
+  },
+  "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_gmm_official_ph_low_dim/models/model_epoch_1850_low_dim_v15_success_0.3.pth",
+  "compatibility_verdict": "NOT PRACTICALLY COMPATIBLE",
+  "dataset": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+  "device": "npu:0",
+  "direct_copy_layers": [],
+  "forward_sanity": {
+    "component_means_shape": [
+      5,
+      14
+    ],
+    "component_scale_range_eval": [
+      9.999999747378752e-05,
+      9.999999747378752e-05
+    ],
+    "component_scales_shape": [
+      5,
+      14
+    ],
+    "episode": "episode_000000",
+    "exact_match": true,
+    "highest_probability_mode": 0,
+    "initial_seed": 10000,
+    "mae": 0.0,
+    "max_abs_error": 0.0,
+    "mixture_probabilities": [
+      0.9838860034942627,
+      0.014101211912930012,
+      0.0015845710877329111,
+      1.0411144103272818e-05,
+      0.00041773795965127647
+    ],
+    "mse": 0.0,
+    "nearest_component_mean_to_sample": 0,
+    "pass": true,
+    "predicted_action_range": [
+      -1.0000566244125366,
+      0.2826845943927765
+    ],
+    "restored_policy_action": [
+      0.06689535826444626,
+      -0.08950428664684296,
+      0.2826845943927765,
+      -0.08988753706216812,
+      -0.006933196913450956,
+      0.0029763325583189726,
+      -0.9999929070472717,
+      -0.007185982074588537,
+      0.003825429128482938,
+      0.03715596720576286,
+      0.002581679495051503,
+      -0.0012161436025053263,
+      0.00703092198818922,
+      -1.0000566244125366
+    ],
+    "saved_action": [
+      0.06689535826444626,
+      -0.08950428664684296,
+      0.2826845943927765,
+      -0.08988753706216812,
+      -0.006933196913450956,
+      0.0029763325583189726,
+      -0.9999929070472717,
+      -0.007185982074588537,
+      0.003825429128482938,
+      0.03715596720576286,
+      0.002581679495051503,
+      -0.0012161436025053263,
+      0.00703092198818922,
+      -1.0000566244125366
+    ],
+    "saved_action_range": [
+      -1.0000566244125366,
+      0.2826845943927765
+    ],
+    "timestep": 0
+  },
+  "output": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3c_bc_gmm_direct_distillation/20260901_101113/bc_gmm_sac_compatibility_audit.json",
+  "recommendation": "B. direct BC-GMM -> current SAC Actor action distillation",
+  "sac_actor": {
+    "action_dim": 14,
+    "activation": "torch.nn.functional.relu",
+    "backbone_linear_layers": [
+      {
+        "bias_shape": [
+          256
+        ],
+        "in_features": 59,
+        "name": "fc0",
+        "out_features": 256,
+        "weight_shape": [
+          256,
+          59
+        ]
+      },
+      {
+        "bias_shape": [
+          256
+        ],
+        "in_features": 256,
+        "name": "fc1",
+        "out_features": 256,
+        "weight_shape": [
+          256,
+          256
+        ]
+      }
+    ],
+    "builder_file": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_actor_initialization/actor_network.py",
+    "class": "TanhGaussianPolicy",
+    "deterministic_action": "tanh(mu)",
+    "dropout": false,
+    "layer_norm": false,
+    "log_std_head": {
+      "bias_shape": [
+        14
+      ],
+      "clamp": [
+        -20,
+        2
+      ],
+      "frozen_in_current_distillation": true,
+      "initialized_bias": -3.0,
+      "name": "last_fc_log_std",
+      "type": "network output from nn.Linear; its weights/bias are parameters",
+      "weight_shape": [
+        14,
+        256
+      ]
+    },
+    "mlp_dims": [
+      59,
+      256,
+      256
+    ],
+    "mu_head": {
+      "bias_shape": [
+        14
+      ],
+      "name": "last_fc",
+      "weight_shape": [
+        14,
+        256
+      ]
+    },
+    "residual": false,
+    "shared_backbone": true,
+    "stochastic_action": "tanh(Normal(mu, exp(log_std)))"
+  },
+  "stage4_modified": false,
+  "state_ordering": {
+    "canonical_shapes_match": true,
+    "checkpoint_encoder_order": [
+      "object",
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "robot1_eef_pos",
+      "robot1_eef_quat",
+      "robot1_gripper_qpos"
+    ],
+    "checkpoint_order_matches_required_canonical": false,
+    "checkpoint_uses_same_observation_fields": true,
+    "dataset_order_matches_checkpoint": false,
+    "dataset_uses_required_canonical_order": true,
+    "direct_backbone_transfer_input_order_compatible": false,
+    "equivalent_59d_input": false,
+    "interpretation": "BC-GMM and SAC use the same seven observation fields but may flatten them in different orders. Different internal flatten order blocks direct backbone weight transfer, but does not block supervised distillation from Stage1 saved actions when the Student uses the required canonical HDF5 order and forward sanity reproduces the saved action.",
+    "required_canonical_order": [
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "robot1_eef_pos",
+      "robot1_eef_quat",
+      "robot1_gripper_qpos",
+      "object"
+    ],
+    "saved_action_direct_distillation_compatible": true,
+    "stage1_dataset_canonical_order": [
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "robot1_eef_pos",
+      "robot1_eef_quat",
+      "robot1_gripper_qpos",
+      "object"
+    ]
+  },
+  "training_started": false
+}

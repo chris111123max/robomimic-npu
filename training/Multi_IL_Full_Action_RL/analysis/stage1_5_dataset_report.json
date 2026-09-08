@@ -1,0 +1,2040 @@
+{
+  "generated_at": "2026-08-20T18:42:40.378270+08:00",
+  "key_patterns": {
+    "100_rnn_only_success": 36,
+    "101_rnn_gmm_success": 4,
+    "110_rnn_transformer_success": 32
+  },
+  "policies": {
+    "bc_gmm": {
+      "action_dimension": 14,
+      "display_name": "GMM",
+      "duplicate_seeds": [],
+      "episode_return_consistency_anomalies": [],
+      "episodes": 100,
+      "failure_episodes": 90,
+      "failure_episodes_all_reward_zero": 90,
+      "failure_episodes_with_nonzero_reward": 0,
+      "failure_final_progress_counts": {
+        "payload=0,trash=0": 30,
+        "payload=0,trash=1": 60
+      },
+      "inf_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "inf_total": 0,
+      "max_episode_length": 700,
+      "max_episode_return": 1.0,
+      "mean_episode_length": 683.84,
+      "mean_episode_return": 0.1,
+      "median_episode_length": 700.0,
+      "min_episode_length": 436,
+      "min_episode_return": 0.0,
+      "missing_fields": [],
+      "missing_seed_episodes": 0,
+      "missing_success_episodes": 0,
+      "nan_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "nan_total": 0,
+      "observation_dimension": 59,
+      "observation_keys": [
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos"
+      ],
+      "observation_schema": {
+        "next_obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        },
+        "obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        }
+      },
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+      "policy": "bc_gmm",
+      "progress_consistency_anomalies": [],
+      "progress_mapping": {
+        "payload_in_target_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 27,
+          "mode": "embedded",
+          "observation_key": "object"
+        },
+        "trash_in_trash_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 28,
+          "mode": "embedded",
+          "observation_key": "object"
+        }
+      },
+      "reward_negative_transition_count": 0,
+      "reward_nonzero_transition_count": 10,
+      "reward_positive_transition_count": 10,
+      "reward_unique_values": [
+        0.0,
+        1.0
+      ],
+      "reward_unique_values_truncated": false,
+      "reward_zero_transition_count": 68374,
+      "root_attributes": {
+        "action_shape": "[14]",
+        "canonical_observation_keys": "[\"robot0_eef_pos\", \"robot0_eef_quat\", \"robot0_gripper_qpos\", \"robot1_eef_pos\", \"robot1_eef_quat\", \"robot1_gripper_qpos\", \"object\"]",
+        "canonical_observation_shapes": "{\"object\": [41], \"robot0_eef_pos\": [3], \"robot0_eef_quat\": [4], \"robot0_gripper_qpos\": [2], \"robot1_eef_pos\": [3], \"robot1_eef_quat\": [4], \"robot1_gripper_qpos\": [2]}",
+        "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_gmm_official_ph_low_dim/models/model_epoch_1850_low_dim_v15_success_0.3.pth",
+        "environment_metadata": "{\"env_kwargs\": {\"camera_depths\": false, \"camera_heights\": 84, \"camera_widths\": 84, \"control_freq\": 20, \"controller_configs\": {\"body_parts\": {\"right\": {\"control_delta\": true, \"damping\": 1, \"damping_limits\": [0, 10], \"gripper\": {\"type\": \"GRIP\"}, \"impedance_mode\": \"fixed\", \"input_max\": 1, \"input_min\": -1, \"input_ref_frame\": \"world\", \"interpolation\": null, \"kp\": 150, \"kp_limits\": [0, 300], \"orientation_limits\": null, \"output_max\": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5], \"output_min\": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5], \"position_limits\": null, \"ramp_ratio\": 0.2, \"type\": \"OSC_POSE\", \"uncouple_pos_ori\": true}}, \"type\": \"BASIC\"}, \"env_configuration\": \"single-arm-opposed\", \"env_name\": \"TwoArmTransport\", \"has_offscreen_renderer\": false, \"has_renderer\": false, \"ignore_done\": true, \"lite_physics\": false, \"reward_shaping\": false, \"robots\": [\"Panda\", \"Panda\"], \"use_camera_obs\": false, \"use_object_obs\": true}, \"env_name\": \"TwoArmTransport\", \"env_version\": \"1.5.1\", \"lang\": \"dummy\", \"type\": 1}",
+        "mc_return_gamma": "none",
+        "num_episodes": 100,
+        "observation_representation": "raw_canonical_low_dim_current_frame",
+        "parallel_num_workers": 4,
+        "parallel_physical_npu_ids": "[\"0\", \"1\", \"2\", \"3\"]",
+        "policy_id": "bc_gmm",
+        "policy_input_representation": "official_checkpoint_wrapper; may include frame-stack and normalization",
+        "progress_observation_schema": "{\"affects_reward\": false, \"affects_rollout\": false, \"analysis_only\": true, \"duplicate_transition_datasets\": false, \"fields\": {\"payload_in_target_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 27, \"source_observable\": \"payload_in_target_bin\", \"width\": 1}, \"trash_in_trash_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 28, \"source_observable\": \"trash_in_trash_bin\", \"width\": 1}}, \"object_flatten_order\": \"installed robosuite active object-observable order\", \"storage\": \"embedded_in_canonical_observation\"}",
+        "schema_version": "multi_il_full_action_rl.stage1.v2",
+        "success_and_failure_saved": true,
+        "total_transitions": 68384
+      },
+      "seeds": [
+        10000,
+        10001,
+        10002,
+        10003,
+        10004,
+        10005,
+        10006,
+        10007,
+        10008,
+        10009,
+        10010,
+        10011,
+        10012,
+        10013,
+        10014,
+        10015,
+        10016,
+        10017,
+        10018,
+        10019,
+        10020,
+        10021,
+        10022,
+        10023,
+        10024,
+        10025,
+        10026,
+        10027,
+        10028,
+        10029,
+        10030,
+        10031,
+        10032,
+        10033,
+        10034,
+        10035,
+        10036,
+        10037,
+        10038,
+        10039,
+        10040,
+        10041,
+        10042,
+        10043,
+        10044,
+        10045,
+        10046,
+        10047,
+        10048,
+        10049,
+        10050,
+        10051,
+        10052,
+        10053,
+        10054,
+        10055,
+        10056,
+        10057,
+        10058,
+        10059,
+        10060,
+        10061,
+        10062,
+        10063,
+        10064,
+        10065,
+        10066,
+        10067,
+        10068,
+        10069,
+        10070,
+        10071,
+        10072,
+        10073,
+        10074,
+        10075,
+        10076,
+        10077,
+        10078,
+        10079,
+        10080,
+        10081,
+        10082,
+        10083,
+        10084,
+        10085,
+        10086,
+        10087,
+        10088,
+        10089,
+        10090,
+        10091,
+        10092,
+        10093,
+        10094,
+        10095,
+        10096,
+        10097,
+        10098,
+        10099
+      ],
+      "success_episode_nonzero_reward_timesteps": [
+        {
+          "episode": "episodes/episode_000002",
+          "seed": 10002,
+          "timesteps": [
+            435
+          ]
+        },
+        {
+          "episode": "episodes/episode_000011",
+          "seed": 10011,
+          "timesteps": [
+            546
+          ]
+        },
+        {
+          "episode": "episodes/episode_000014",
+          "seed": 10014,
+          "timesteps": [
+            582
+          ]
+        },
+        {
+          "episode": "episodes/episode_000041",
+          "seed": 10041,
+          "timesteps": [
+            490
+          ]
+        },
+        {
+          "episode": "episodes/episode_000042",
+          "seed": 10042,
+          "timesteps": [
+            562
+          ]
+        },
+        {
+          "episode": "episodes/episode_000045",
+          "seed": 10045,
+          "timesteps": [
+            473
+          ]
+        },
+        {
+          "episode": "episodes/episode_000074",
+          "seed": 10074,
+          "timesteps": [
+            660
+          ]
+        },
+        {
+          "episode": "episodes/episode_000077",
+          "seed": 10077,
+          "timesteps": [
+            451
+          ]
+        },
+        {
+          "episode": "episodes/episode_000084",
+          "seed": 10084,
+          "timesteps": [
+            490
+          ]
+        },
+        {
+          "episode": "episodes/episode_000094",
+          "seed": 10094,
+          "timesteps": [
+            685
+          ]
+        }
+      ],
+      "success_episodes": 10,
+      "success_rate": 0.1,
+      "total_transitions": 68384,
+      "unique_seeds": 100
+    },
+    "bc_rnn": {
+      "action_dimension": 14,
+      "display_name": "RNN",
+      "duplicate_seeds": [],
+      "episode_return_consistency_anomalies": [],
+      "episodes": 100,
+      "failure_episodes": 23,
+      "failure_episodes_all_reward_zero": 23,
+      "failure_episodes_with_nonzero_reward": 0,
+      "failure_final_progress_counts": {
+        "payload=0,trash=0": 4,
+        "payload=0,trash=1": 19
+      },
+      "inf_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "inf_total": 0,
+      "max_episode_length": 700,
+      "max_episode_return": 1.0,
+      "mean_episode_length": 524.74,
+      "mean_episode_return": 0.77,
+      "median_episode_length": 481.5,
+      "min_episode_length": 398,
+      "min_episode_return": 0.0,
+      "missing_fields": [],
+      "missing_seed_episodes": 0,
+      "missing_success_episodes": 0,
+      "nan_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "nan_total": 0,
+      "observation_dimension": 59,
+      "observation_keys": [
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos"
+      ],
+      "observation_schema": {
+        "next_obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        },
+        "obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        }
+      },
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+      "policy": "bc_rnn",
+      "progress_consistency_anomalies": [],
+      "progress_mapping": {
+        "payload_in_target_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 27,
+          "mode": "embedded",
+          "observation_key": "object"
+        },
+        "trash_in_trash_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 28,
+          "mode": "embedded",
+          "observation_key": "object"
+        }
+      },
+      "reward_negative_transition_count": 0,
+      "reward_nonzero_transition_count": 77,
+      "reward_positive_transition_count": 77,
+      "reward_unique_values": [
+        0.0,
+        1.0
+      ],
+      "reward_unique_values_truncated": false,
+      "reward_zero_transition_count": 52397,
+      "root_attributes": {
+        "action_shape": "[14]",
+        "canonical_observation_keys": "[\"robot0_eef_pos\", \"robot0_eef_quat\", \"robot0_gripper_qpos\", \"robot1_eef_pos\", \"robot1_eef_quat\", \"robot1_gripper_qpos\", \"object\"]",
+        "canonical_observation_shapes": "{\"object\": [41], \"robot0_eef_pos\": [3], \"robot0_eef_quat\": [4], \"robot0_gripper_qpos\": [2], \"robot1_eef_pos\": [3], \"robot1_eef_quat\": [4], \"robot1_gripper_qpos\": [2]}",
+        "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_rnn_official_ph_low_dim/two_arm_transport_bc_rnn_official_ph_low_dim/20260811151701/models/model_epoch_1000_low_dim_v15_success_0.9.pth",
+        "environment_metadata": "{\"env_kwargs\": {\"camera_depths\": false, \"camera_heights\": 84, \"camera_widths\": 84, \"control_freq\": 20, \"controller_configs\": {\"body_parts\": {\"right\": {\"control_delta\": true, \"damping\": 1, \"damping_limits\": [0, 10], \"gripper\": {\"type\": \"GRIP\"}, \"impedance_mode\": \"fixed\", \"input_max\": 1, \"input_min\": -1, \"input_ref_frame\": \"world\", \"interpolation\": null, \"kp\": 150, \"kp_limits\": [0, 300], \"orientation_limits\": null, \"output_max\": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5], \"output_min\": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5], \"position_limits\": null, \"ramp_ratio\": 0.2, \"type\": \"OSC_POSE\", \"uncouple_pos_ori\": true}}, \"type\": \"BASIC\"}, \"env_configuration\": \"single-arm-opposed\", \"env_name\": \"TwoArmTransport\", \"has_offscreen_renderer\": false, \"has_renderer\": false, \"ignore_done\": true, \"lite_physics\": false, \"reward_shaping\": false, \"robots\": [\"Panda\", \"Panda\"], \"use_camera_obs\": false, \"use_object_obs\": true}, \"env_name\": \"TwoArmTransport\", \"env_version\": \"1.5.1\", \"lang\": \"dummy\", \"type\": 1}",
+        "mc_return_gamma": "none",
+        "num_episodes": 100,
+        "observation_representation": "raw_canonical_low_dim_current_frame",
+        "parallel_num_workers": 4,
+        "parallel_physical_npu_ids": "[\"0\", \"1\", \"2\", \"3\"]",
+        "policy_id": "bc_rnn",
+        "policy_input_representation": "official_checkpoint_wrapper; may include frame-stack and normalization",
+        "progress_observation_schema": "{\"affects_reward\": false, \"affects_rollout\": false, \"analysis_only\": true, \"duplicate_transition_datasets\": false, \"fields\": {\"payload_in_target_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 27, \"source_observable\": \"payload_in_target_bin\", \"width\": 1}, \"trash_in_trash_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 28, \"source_observable\": \"trash_in_trash_bin\", \"width\": 1}}, \"object_flatten_order\": \"installed robosuite active object-observable order\", \"storage\": \"embedded_in_canonical_observation\"}",
+        "schema_version": "multi_il_full_action_rl.stage1.v2",
+        "success_and_failure_saved": true,
+        "total_transitions": 52474
+      },
+      "seeds": [
+        10000,
+        10001,
+        10002,
+        10003,
+        10004,
+        10005,
+        10006,
+        10007,
+        10008,
+        10009,
+        10010,
+        10011,
+        10012,
+        10013,
+        10014,
+        10015,
+        10016,
+        10017,
+        10018,
+        10019,
+        10020,
+        10021,
+        10022,
+        10023,
+        10024,
+        10025,
+        10026,
+        10027,
+        10028,
+        10029,
+        10030,
+        10031,
+        10032,
+        10033,
+        10034,
+        10035,
+        10036,
+        10037,
+        10038,
+        10039,
+        10040,
+        10041,
+        10042,
+        10043,
+        10044,
+        10045,
+        10046,
+        10047,
+        10048,
+        10049,
+        10050,
+        10051,
+        10052,
+        10053,
+        10054,
+        10055,
+        10056,
+        10057,
+        10058,
+        10059,
+        10060,
+        10061,
+        10062,
+        10063,
+        10064,
+        10065,
+        10066,
+        10067,
+        10068,
+        10069,
+        10070,
+        10071,
+        10072,
+        10073,
+        10074,
+        10075,
+        10076,
+        10077,
+        10078,
+        10079,
+        10080,
+        10081,
+        10082,
+        10083,
+        10084,
+        10085,
+        10086,
+        10087,
+        10088,
+        10089,
+        10090,
+        10091,
+        10092,
+        10093,
+        10094,
+        10095,
+        10096,
+        10097,
+        10098,
+        10099
+      ],
+      "success_episode_nonzero_reward_timesteps": [
+        {
+          "episode": "episodes/episode_000000",
+          "seed": 10000,
+          "timesteps": [
+            576
+          ]
+        },
+        {
+          "episode": "episodes/episode_000001",
+          "seed": 10001,
+          "timesteps": [
+            422
+          ]
+        },
+        {
+          "episode": "episodes/episode_000002",
+          "seed": 10002,
+          "timesteps": [
+            450
+          ]
+        },
+        {
+          "episode": "episodes/episode_000004",
+          "seed": 10004,
+          "timesteps": [
+            466
+          ]
+        },
+        {
+          "episode": "episodes/episode_000005",
+          "seed": 10005,
+          "timesteps": [
+            450
+          ]
+        },
+        {
+          "episode": "episodes/episode_000006",
+          "seed": 10006,
+          "timesteps": [
+            539
+          ]
+        },
+        {
+          "episode": "episodes/episode_000008",
+          "seed": 10008,
+          "timesteps": [
+            447
+          ]
+        },
+        {
+          "episode": "episodes/episode_000009",
+          "seed": 10009,
+          "timesteps": [
+            521
+          ]
+        },
+        {
+          "episode": "episodes/episode_000010",
+          "seed": 10010,
+          "timesteps": [
+            627
+          ]
+        },
+        {
+          "episode": "episodes/episode_000011",
+          "seed": 10011,
+          "timesteps": [
+            530
+          ]
+        },
+        {
+          "episode": "episodes/episode_000012",
+          "seed": 10012,
+          "timesteps": [
+            425
+          ]
+        },
+        {
+          "episode": "episodes/episode_000013",
+          "seed": 10013,
+          "timesteps": [
+            564
+          ]
+        },
+        {
+          "episode": "episodes/episode_000014",
+          "seed": 10014,
+          "timesteps": [
+            430
+          ]
+        },
+        {
+          "episode": "episodes/episode_000015",
+          "seed": 10015,
+          "timesteps": [
+            486
+          ]
+        },
+        {
+          "episode": "episodes/episode_000016",
+          "seed": 10016,
+          "timesteps": [
+            441
+          ]
+        },
+        {
+          "episode": "episodes/episode_000019",
+          "seed": 10019,
+          "timesteps": [
+            429
+          ]
+        },
+        {
+          "episode": "episodes/episode_000020",
+          "seed": 10020,
+          "timesteps": [
+            438
+          ]
+        },
+        {
+          "episode": "episodes/episode_000021",
+          "seed": 10021,
+          "timesteps": [
+            457
+          ]
+        },
+        {
+          "episode": "episodes/episode_000023",
+          "seed": 10023,
+          "timesteps": [
+            412
+          ]
+        },
+        {
+          "episode": "episodes/episode_000027",
+          "seed": 10027,
+          "timesteps": [
+            406
+          ]
+        },
+        {
+          "episode": "episodes/episode_000029",
+          "seed": 10029,
+          "timesteps": [
+            507
+          ]
+        },
+        {
+          "episode": "episodes/episode_000030",
+          "seed": 10030,
+          "timesteps": [
+            476
+          ]
+        },
+        {
+          "episode": "episodes/episode_000032",
+          "seed": 10032,
+          "timesteps": [
+            421
+          ]
+        },
+        {
+          "episode": "episodes/episode_000033",
+          "seed": 10033,
+          "timesteps": [
+            636
+          ]
+        },
+        {
+          "episode": "episodes/episode_000034",
+          "seed": 10034,
+          "timesteps": [
+            429
+          ]
+        },
+        {
+          "episode": "episodes/episode_000035",
+          "seed": 10035,
+          "timesteps": [
+            451
+          ]
+        },
+        {
+          "episode": "episodes/episode_000036",
+          "seed": 10036,
+          "timesteps": [
+            441
+          ]
+        },
+        {
+          "episode": "episodes/episode_000038",
+          "seed": 10038,
+          "timesteps": [
+            462
+          ]
+        },
+        {
+          "episode": "episodes/episode_000039",
+          "seed": 10039,
+          "timesteps": [
+            518
+          ]
+        },
+        {
+          "episode": "episodes/episode_000040",
+          "seed": 10040,
+          "timesteps": [
+            562
+          ]
+        },
+        {
+          "episode": "episodes/episode_000041",
+          "seed": 10041,
+          "timesteps": [
+            441
+          ]
+        },
+        {
+          "episode": "episodes/episode_000042",
+          "seed": 10042,
+          "timesteps": [
+            540
+          ]
+        },
+        {
+          "episode": "episodes/episode_000043",
+          "seed": 10043,
+          "timesteps": [
+            515
+          ]
+        },
+        {
+          "episode": "episodes/episode_000044",
+          "seed": 10044,
+          "timesteps": [
+            441
+          ]
+        },
+        {
+          "episode": "episodes/episode_000046",
+          "seed": 10046,
+          "timesteps": [
+            471
+          ]
+        },
+        {
+          "episode": "episodes/episode_000047",
+          "seed": 10047,
+          "timesteps": [
+            406
+          ]
+        },
+        {
+          "episode": "episodes/episode_000048",
+          "seed": 10048,
+          "timesteps": [
+            473
+          ]
+        },
+        {
+          "episode": "episodes/episode_000049",
+          "seed": 10049,
+          "timesteps": [
+            397
+          ]
+        },
+        {
+          "episode": "episodes/episode_000050",
+          "seed": 10050,
+          "timesteps": [
+            475
+          ]
+        },
+        {
+          "episode": "episodes/episode_000052",
+          "seed": 10052,
+          "timesteps": [
+            472
+          ]
+        },
+        {
+          "episode": "episodes/episode_000053",
+          "seed": 10053,
+          "timesteps": [
+            483
+          ]
+        },
+        {
+          "episode": "episodes/episode_000054",
+          "seed": 10054,
+          "timesteps": [
+            536
+          ]
+        },
+        {
+          "episode": "episodes/episode_000055",
+          "seed": 10055,
+          "timesteps": [
+            456
+          ]
+        },
+        {
+          "episode": "episodes/episode_000058",
+          "seed": 10058,
+          "timesteps": [
+            439
+          ]
+        },
+        {
+          "episode": "episodes/episode_000060",
+          "seed": 10060,
+          "timesteps": [
+            468
+          ]
+        },
+        {
+          "episode": "episodes/episode_000061",
+          "seed": 10061,
+          "timesteps": [
+            539
+          ]
+        },
+        {
+          "episode": "episodes/episode_000063",
+          "seed": 10063,
+          "timesteps": [
+            402
+          ]
+        },
+        {
+          "episode": "episodes/episode_000064",
+          "seed": 10064,
+          "timesteps": [
+            464
+          ]
+        },
+        {
+          "episode": "episodes/episode_000065",
+          "seed": 10065,
+          "timesteps": [
+            511
+          ]
+        },
+        {
+          "episode": "episodes/episode_000066",
+          "seed": 10066,
+          "timesteps": [
+            418
+          ]
+        },
+        {
+          "episode": "episodes/episode_000067",
+          "seed": 10067,
+          "timesteps": [
+            436
+          ]
+        },
+        {
+          "episode": "episodes/episode_000068",
+          "seed": 10068,
+          "timesteps": [
+            513
+          ]
+        },
+        {
+          "episode": "episodes/episode_000069",
+          "seed": 10069,
+          "timesteps": [
+            544
+          ]
+        },
+        {
+          "episode": "episodes/episode_000070",
+          "seed": 10070,
+          "timesteps": [
+            460
+          ]
+        },
+        {
+          "episode": "episodes/episode_000071",
+          "seed": 10071,
+          "timesteps": [
+            437
+          ]
+        },
+        {
+          "episode": "episodes/episode_000072",
+          "seed": 10072,
+          "timesteps": [
+            460
+          ]
+        },
+        {
+          "episode": "episodes/episode_000073",
+          "seed": 10073,
+          "timesteps": [
+            489
+          ]
+        },
+        {
+          "episode": "episodes/episode_000074",
+          "seed": 10074,
+          "timesteps": [
+            491
+          ]
+        },
+        {
+          "episode": "episodes/episode_000075",
+          "seed": 10075,
+          "timesteps": [
+            407
+          ]
+        },
+        {
+          "episode": "episodes/episode_000076",
+          "seed": 10076,
+          "timesteps": [
+            410
+          ]
+        },
+        {
+          "episode": "episodes/episode_000077",
+          "seed": 10077,
+          "timesteps": [
+            436
+          ]
+        },
+        {
+          "episode": "episodes/episode_000078",
+          "seed": 10078,
+          "timesteps": [
+            544
+          ]
+        },
+        {
+          "episode": "episodes/episode_000079",
+          "seed": 10079,
+          "timesteps": [
+            405
+          ]
+        },
+        {
+          "episode": "episodes/episode_000080",
+          "seed": 10080,
+          "timesteps": [
+            437
+          ]
+        },
+        {
+          "episode": "episodes/episode_000082",
+          "seed": 10082,
+          "timesteps": [
+            409
+          ]
+        },
+        {
+          "episode": "episodes/episode_000083",
+          "seed": 10083,
+          "timesteps": [
+            458
+          ]
+        },
+        {
+          "episode": "episodes/episode_000084",
+          "seed": 10084,
+          "timesteps": [
+            412
+          ]
+        },
+        {
+          "episode": "episodes/episode_000085",
+          "seed": 10085,
+          "timesteps": [
+            492
+          ]
+        },
+        {
+          "episode": "episodes/episode_000087",
+          "seed": 10087,
+          "timesteps": [
+            431
+          ]
+        },
+        {
+          "episode": "episodes/episode_000088",
+          "seed": 10088,
+          "timesteps": [
+            442
+          ]
+        },
+        {
+          "episode": "episodes/episode_000089",
+          "seed": 10089,
+          "timesteps": [
+            494
+          ]
+        },
+        {
+          "episode": "episodes/episode_000094",
+          "seed": 10094,
+          "timesteps": [
+            480
+          ]
+        },
+        {
+          "episode": "episodes/episode_000095",
+          "seed": 10095,
+          "timesteps": [
+            451
+          ]
+        },
+        {
+          "episode": "episodes/episode_000096",
+          "seed": 10096,
+          "timesteps": [
+            478
+          ]
+        },
+        {
+          "episode": "episodes/episode_000097",
+          "seed": 10097,
+          "timesteps": [
+            512
+          ]
+        },
+        {
+          "episode": "episodes/episode_000098",
+          "seed": 10098,
+          "timesteps": [
+            481
+          ]
+        },
+        {
+          "episode": "episodes/episode_000099",
+          "seed": 10099,
+          "timesteps": [
+            522
+          ]
+        }
+      ],
+      "success_episodes": 77,
+      "success_rate": 0.77,
+      "total_transitions": 52474,
+      "unique_seeds": 100
+    },
+    "bc_transformer": {
+      "action_dimension": 14,
+      "display_name": "Transformer",
+      "duplicate_seeds": [],
+      "episode_return_consistency_anomalies": [],
+      "episodes": 100,
+      "failure_episodes": 60,
+      "failure_episodes_all_reward_zero": 60,
+      "failure_episodes_with_nonzero_reward": 0,
+      "failure_final_progress_counts": {
+        "payload=0,trash=0": 4,
+        "payload=0,trash=1": 56
+      },
+      "inf_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "inf_total": 0,
+      "max_episode_length": 700,
+      "max_episode_return": 1.0,
+      "mean_episode_length": 608.24,
+      "mean_episode_return": 0.4,
+      "median_episode_length": 700.0,
+      "min_episode_length": 397,
+      "min_episode_return": 0.0,
+      "missing_fields": [],
+      "missing_seed_episodes": 0,
+      "missing_success_episodes": 0,
+      "nan_count": {
+        "actions": 0,
+        "next_obs": 0,
+        "obs": 0,
+        "rewards": 0
+      },
+      "nan_total": 0,
+      "observation_dimension": 59,
+      "observation_keys": [
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos"
+      ],
+      "observation_schema": {
+        "next_obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        },
+        "obs": {
+          "object": {
+            "dtype": "float64",
+            "shape": [
+              41
+            ]
+          },
+          "robot0_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot0_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot0_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          },
+          "robot1_eef_pos": {
+            "dtype": "float64",
+            "shape": [
+              3
+            ]
+          },
+          "robot1_eef_quat": {
+            "dtype": "float64",
+            "shape": [
+              4
+            ]
+          },
+          "robot1_gripper_qpos": {
+            "dtype": "float64",
+            "shape": [
+              2
+            ]
+          }
+        }
+      },
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_transformer/transitions.hdf5",
+      "policy": "bc_transformer",
+      "progress_consistency_anomalies": [],
+      "progress_mapping": {
+        "payload_in_target_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 27,
+          "mode": "embedded",
+          "observation_key": "object"
+        },
+        "trash_in_trash_bin": {
+          "evidence": "HDF5 root progress_observation_schema",
+          "flat_index": 28,
+          "mode": "embedded",
+          "observation_key": "object"
+        }
+      },
+      "reward_negative_transition_count": 0,
+      "reward_nonzero_transition_count": 40,
+      "reward_positive_transition_count": 40,
+      "reward_unique_values": [
+        0.0,
+        1.0
+      ],
+      "reward_unique_values_truncated": false,
+      "reward_zero_transition_count": 60784,
+      "root_attributes": {
+        "action_shape": "[14]",
+        "canonical_observation_keys": "[\"robot0_eef_pos\", \"robot0_eef_quat\", \"robot0_gripper_qpos\", \"robot1_eef_pos\", \"robot1_eef_quat\", \"robot1_gripper_qpos\", \"object\"]",
+        "canonical_observation_shapes": "{\"object\": [41], \"robot0_eef_pos\": [3], \"robot0_eef_quat\": [4], \"robot0_gripper_qpos\": [2], \"robot1_eef_pos\": [3], \"robot1_eef_quat\": [4], \"robot1_gripper_qpos\": [2]}",
+        "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_transformer_official_ph_low_dim/two_arm_transport_bc_transformer_official_ph_low_dim/20260810152955/models/model_epoch_1200_low_dim_v15_success_0.8.pth",
+        "environment_metadata": "{\"env_kwargs\": {\"camera_depths\": false, \"camera_heights\": 84, \"camera_widths\": 84, \"control_freq\": 20, \"controller_configs\": {\"body_parts\": {\"right\": {\"control_delta\": true, \"damping\": 1, \"damping_limits\": [0, 10], \"gripper\": {\"type\": \"GRIP\"}, \"impedance_mode\": \"fixed\", \"input_max\": 1, \"input_min\": -1, \"input_ref_frame\": \"world\", \"interpolation\": null, \"kp\": 150, \"kp_limits\": [0, 300], \"orientation_limits\": null, \"output_max\": [0.05, 0.05, 0.05, 0.5, 0.5, 0.5], \"output_min\": [-0.05, -0.05, -0.05, -0.5, -0.5, -0.5], \"position_limits\": null, \"ramp_ratio\": 0.2, \"type\": \"OSC_POSE\", \"uncouple_pos_ori\": true}}, \"type\": \"BASIC\"}, \"env_configuration\": \"single-arm-opposed\", \"env_name\": \"TwoArmTransport\", \"has_offscreen_renderer\": false, \"has_renderer\": false, \"ignore_done\": true, \"lite_physics\": false, \"reward_shaping\": false, \"robots\": [\"Panda\", \"Panda\"], \"use_camera_obs\": false, \"use_object_obs\": true}, \"env_name\": \"TwoArmTransport\", \"env_version\": \"1.5.1\", \"lang\": \"dummy\", \"type\": 1}",
+        "mc_return_gamma": "none",
+        "num_episodes": 100,
+        "observation_representation": "raw_canonical_low_dim_current_frame",
+        "parallel_num_workers": 4,
+        "parallel_physical_npu_ids": "[\"0\", \"1\", \"2\", \"3\"]",
+        "policy_id": "bc_transformer",
+        "policy_input_representation": "official_checkpoint_wrapper; may include frame-stack and normalization",
+        "progress_observation_schema": "{\"affects_reward\": false, \"affects_rollout\": false, \"analysis_only\": true, \"duplicate_transition_datasets\": false, \"fields\": {\"payload_in_target_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 27, \"source_observable\": \"payload_in_target_bin\", \"width\": 1}, \"trash_in_trash_bin\": {\"canonical_key\": \"object\", \"dtype_semantics\": \"boolean encoded as 0.0 or 1.0\", \"flat_index\": 28, \"source_observable\": \"trash_in_trash_bin\", \"width\": 1}}, \"object_flatten_order\": \"installed robosuite active object-observable order\", \"storage\": \"embedded_in_canonical_observation\"}",
+        "schema_version": "multi_il_full_action_rl.stage1.v2",
+        "success_and_failure_saved": true,
+        "total_transitions": 60824
+      },
+      "seeds": [
+        10000,
+        10001,
+        10002,
+        10003,
+        10004,
+        10005,
+        10006,
+        10007,
+        10008,
+        10009,
+        10010,
+        10011,
+        10012,
+        10013,
+        10014,
+        10015,
+        10016,
+        10017,
+        10018,
+        10019,
+        10020,
+        10021,
+        10022,
+        10023,
+        10024,
+        10025,
+        10026,
+        10027,
+        10028,
+        10029,
+        10030,
+        10031,
+        10032,
+        10033,
+        10034,
+        10035,
+        10036,
+        10037,
+        10038,
+        10039,
+        10040,
+        10041,
+        10042,
+        10043,
+        10044,
+        10045,
+        10046,
+        10047,
+        10048,
+        10049,
+        10050,
+        10051,
+        10052,
+        10053,
+        10054,
+        10055,
+        10056,
+        10057,
+        10058,
+        10059,
+        10060,
+        10061,
+        10062,
+        10063,
+        10064,
+        10065,
+        10066,
+        10067,
+        10068,
+        10069,
+        10070,
+        10071,
+        10072,
+        10073,
+        10074,
+        10075,
+        10076,
+        10077,
+        10078,
+        10079,
+        10080,
+        10081,
+        10082,
+        10083,
+        10084,
+        10085,
+        10086,
+        10087,
+        10088,
+        10089,
+        10090,
+        10091,
+        10092,
+        10093,
+        10094,
+        10095,
+        10096,
+        10097,
+        10098,
+        10099
+      ],
+      "success_episode_nonzero_reward_timesteps": [
+        {
+          "episode": "episodes/episode_000002",
+          "seed": 10002,
+          "timesteps": [
+            484
+          ]
+        },
+        {
+          "episode": "episodes/episode_000005",
+          "seed": 10005,
+          "timesteps": [
+            578
+          ]
+        },
+        {
+          "episode": "episodes/episode_000008",
+          "seed": 10008,
+          "timesteps": [
+            584
+          ]
+        },
+        {
+          "episode": "episodes/episode_000011",
+          "seed": 10011,
+          "timesteps": [
+            442
+          ]
+        },
+        {
+          "episode": "episodes/episode_000013",
+          "seed": 10013,
+          "timesteps": [
+            435
+          ]
+        },
+        {
+          "episode": "episodes/episode_000015",
+          "seed": 10015,
+          "timesteps": [
+            509
+          ]
+        },
+        {
+          "episode": "episodes/episode_000024",
+          "seed": 10024,
+          "timesteps": [
+            441
+          ]
+        },
+        {
+          "episode": "episodes/episode_000027",
+          "seed": 10027,
+          "timesteps": [
+            411
+          ]
+        },
+        {
+          "episode": "episodes/episode_000029",
+          "seed": 10029,
+          "timesteps": [
+            440
+          ]
+        },
+        {
+          "episode": "episodes/episode_000030",
+          "seed": 10030,
+          "timesteps": [
+            416
+          ]
+        },
+        {
+          "episode": "episodes/episode_000032",
+          "seed": 10032,
+          "timesteps": [
+            401
+          ]
+        },
+        {
+          "episode": "episodes/episode_000033",
+          "seed": 10033,
+          "timesteps": [
+            549
+          ]
+        },
+        {
+          "episode": "episodes/episode_000038",
+          "seed": 10038,
+          "timesteps": [
+            437
+          ]
+        },
+        {
+          "episode": "episodes/episode_000041",
+          "seed": 10041,
+          "timesteps": [
+            443
+          ]
+        },
+        {
+          "episode": "episodes/episode_000043",
+          "seed": 10043,
+          "timesteps": [
+            531
+          ]
+        },
+        {
+          "episode": "episodes/episode_000046",
+          "seed": 10046,
+          "timesteps": [
+            499
+          ]
+        },
+        {
+          "episode": "episodes/episode_000047",
+          "seed": 10047,
+          "timesteps": [
+            477
+          ]
+        },
+        {
+          "episode": "episodes/episode_000048",
+          "seed": 10048,
+          "timesteps": [
+            460
+          ]
+        },
+        {
+          "episode": "episodes/episode_000052",
+          "seed": 10052,
+          "timesteps": [
+            424
+          ]
+        },
+        {
+          "episode": "episodes/episode_000055",
+          "seed": 10055,
+          "timesteps": [
+            489
+          ]
+        },
+        {
+          "episode": "episodes/episode_000057",
+          "seed": 10057,
+          "timesteps": [
+            429
+          ]
+        },
+        {
+          "episode": "episodes/episode_000059",
+          "seed": 10059,
+          "timesteps": [
+            396
+          ]
+        },
+        {
+          "episode": "episodes/episode_000064",
+          "seed": 10064,
+          "timesteps": [
+            435
+          ]
+        },
+        {
+          "episode": "episodes/episode_000066",
+          "seed": 10066,
+          "timesteps": [
+            467
+          ]
+        },
+        {
+          "episode": "episodes/episode_000067",
+          "seed": 10067,
+          "timesteps": [
+            442
+          ]
+        },
+        {
+          "episode": "episodes/episode_000068",
+          "seed": 10068,
+          "timesteps": [
+            446
+          ]
+        },
+        {
+          "episode": "episodes/episode_000070",
+          "seed": 10070,
+          "timesteps": [
+            448
+          ]
+        },
+        {
+          "episode": "episodes/episode_000072",
+          "seed": 10072,
+          "timesteps": [
+            467
+          ]
+        },
+        {
+          "episode": "episodes/episode_000073",
+          "seed": 10073,
+          "timesteps": [
+            546
+          ]
+        },
+        {
+          "episode": "episodes/episode_000075",
+          "seed": 10075,
+          "timesteps": [
+            401
+          ]
+        },
+        {
+          "episode": "episodes/episode_000077",
+          "seed": 10077,
+          "timesteps": [
+            440
+          ]
+        },
+        {
+          "episode": "episodes/episode_000082",
+          "seed": 10082,
+          "timesteps": [
+            437
+          ]
+        },
+        {
+          "episode": "episodes/episode_000083",
+          "seed": 10083,
+          "timesteps": [
+            445
+          ]
+        },
+        {
+          "episode": "episodes/episode_000084",
+          "seed": 10084,
+          "timesteps": [
+            496
+          ]
+        },
+        {
+          "episode": "episodes/episode_000085",
+          "seed": 10085,
+          "timesteps": [
+            481
+          ]
+        },
+        {
+          "episode": "episodes/episode_000087",
+          "seed": 10087,
+          "timesteps": [
+            448
+          ]
+        },
+        {
+          "episode": "episodes/episode_000088",
+          "seed": 10088,
+          "timesteps": [
+            463
+          ]
+        },
+        {
+          "episode": "episodes/episode_000095",
+          "seed": 10095,
+          "timesteps": [
+            673
+          ]
+        },
+        {
+          "episode": "episodes/episode_000096",
+          "seed": 10096,
+          "timesteps": [
+            480
+          ]
+        },
+        {
+          "episode": "episodes/episode_000098",
+          "seed": 10098,
+          "timesteps": [
+            494
+          ]
+        }
+      ],
+      "success_episodes": 40,
+      "success_rate": 0.4,
+      "total_transitions": 60824,
+      "unique_seeds": 100
+    }
+  },
+  "same_initial_state_check": {
+    "auxiliary_hash_mismatches": {
+      "initial_observation_hash": [],
+      "initial_state_hash": []
+    },
+    "common_seed_count": 100,
+    "common_seeds": [
+      10000,
+      10001,
+      10002,
+      10003,
+      10004,
+      10005,
+      10006,
+      10007,
+      10008,
+      10009,
+      10010,
+      10011,
+      10012,
+      10013,
+      10014,
+      10015,
+      10016,
+      10017,
+      10018,
+      10019,
+      10020,
+      10021,
+      10022,
+      10023,
+      10024,
+      10025,
+      10026,
+      10027,
+      10028,
+      10029,
+      10030,
+      10031,
+      10032,
+      10033,
+      10034,
+      10035,
+      10036,
+      10037,
+      10038,
+      10039,
+      10040,
+      10041,
+      10042,
+      10043,
+      10044,
+      10045,
+      10046,
+      10047,
+      10048,
+      10049,
+      10050,
+      10051,
+      10052,
+      10053,
+      10054,
+      10055,
+      10056,
+      10057,
+      10058,
+      10059,
+      10060,
+      10061,
+      10062,
+      10063,
+      10064,
+      10065,
+      10066,
+      10067,
+      10068,
+      10069,
+      10070,
+      10071,
+      10072,
+      10073,
+      10074,
+      10075,
+      10076,
+      10077,
+      10078,
+      10079,
+      10080,
+      10081,
+      10082,
+      10083,
+      10084,
+      10085,
+      10086,
+      10087,
+      10088,
+      10089,
+      10090,
+      10091,
+      10092,
+      10093,
+      10094,
+      10095,
+      10096,
+      10097,
+      10098,
+      10099
+    ],
+    "duplicate_seeds": {
+      "bc_gmm": [],
+      "bc_rnn": [],
+      "bc_transformer": []
+    },
+    "expected_seed_count": 100,
+    "expected_seed_end": 10099,
+    "expected_seed_start": 10000,
+    "matched_seed_count": 100,
+    "mismatch_hashes": [],
+    "mismatched_seed_count": 0,
+    "mismatched_seeds": [],
+    "missing_expected_seeds": {
+      "bc_gmm": [],
+      "bc_rnn": [],
+      "bc_transformer": []
+    },
+    "primary_hash_field": "initial_state_vector_hash",
+    "status": "PASS",
+    "unexpected_common_seeds": []
+  },
+  "same_seed_check": {
+    "duplicate_seeds": {
+      "bc_gmm": [],
+      "bc_rnn": [],
+      "bc_transformer": []
+    },
+    "expected_seed_count": 100,
+    "gmm_only_seeds": [],
+    "intersection_seed_count": 100,
+    "intersection_seeds": [
+      10000,
+      10001,
+      10002,
+      10003,
+      10004,
+      10005,
+      10006,
+      10007,
+      10008,
+      10009,
+      10010,
+      10011,
+      10012,
+      10013,
+      10014,
+      10015,
+      10016,
+      10017,
+      10018,
+      10019,
+      10020,
+      10021,
+      10022,
+      10023,
+      10024,
+      10025,
+      10026,
+      10027,
+      10028,
+      10029,
+      10030,
+      10031,
+      10032,
+      10033,
+      10034,
+      10035,
+      10036,
+      10037,
+      10038,
+      10039,
+      10040,
+      10041,
+      10042,
+      10043,
+      10044,
+      10045,
+      10046,
+      10047,
+      10048,
+      10049,
+      10050,
+      10051,
+      10052,
+      10053,
+      10054,
+      10055,
+      10056,
+      10057,
+      10058,
+      10059,
+      10060,
+      10061,
+      10062,
+      10063,
+      10064,
+      10065,
+      10066,
+      10067,
+      10068,
+      10069,
+      10070,
+      10071,
+      10072,
+      10073,
+      10074,
+      10075,
+      10076,
+      10077,
+      10078,
+      10079,
+      10080,
+      10081,
+      10082,
+      10083,
+      10084,
+      10085,
+      10086,
+      10087,
+      10088,
+      10089,
+      10090,
+      10091,
+      10092,
+      10093,
+      10094,
+      10095,
+      10096,
+      10097,
+      10098,
+      10099
+    ],
+    "missing_seeds": {
+      "bc_gmm": [],
+      "bc_rnn": [],
+      "bc_transformer": []
+    },
+    "rnn_only_seeds": [],
+    "seed_counts": {
+      "bc_gmm": 100,
+      "bc_rnn": 100,
+      "bc_transformer": 100
+    },
+    "set_equality": true,
+    "status": "PASS",
+    "transformer_only_seeds": [],
+    "union_seed_count": 100
+  },
+  "same_seed_pattern_summary": {
+    "000": 19,
+    "001": 1,
+    "010": 3,
+    "011": 0,
+    "100": 36,
+    "101": 4,
+    "110": 32,
+    "111": 5
+  },
+  "selected_family": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603",
+  "selected_manifest": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/analysis/stage1_5_selected_datasets.json",
+  "stage": "1.5_dataset_audit",
+  "stage2_started": false,
+  "training_runs_read_only": true
+}

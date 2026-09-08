@@ -1,0 +1,114 @@
+{
+  "all_parameters_frozen": true,
+  "behavior_target_distance": {
+    "bc_gmm": {
+      "behavior_target_l2_max": 3.414108376474605,
+      "behavior_target_l2_mean": 1.0703257591974475,
+      "behavior_target_l2_rms": 1.4141991061066743
+    },
+    "bc_rnn": {
+      "behavior_target_l2_max": 0.0,
+      "behavior_target_l2_mean": 0.0,
+      "behavior_target_l2_rms": 0.0
+    },
+    "bc_transformer": {
+      "behavior_target_l2_max": 3.395996368229696,
+      "behavior_target_l2_mean": 0.6682177765259075,
+      "behavior_target_l2_rms": 1.0048505642318781
+    }
+  },
+  "critic_training_started": false,
+  "device": "npu:0",
+  "final_status": "PASS",
+  "frame_stack": 1,
+  "frozen_parameter_count": 2078945,
+  "manifest": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/analysis/stage1_5_selected_datasets.json",
+  "model_eval": true,
+  "off_policy_history": {
+    "bc_gmm": {
+      "action_abs_mean": 0.24681953803774623,
+      "action_l2_max": 2.1851702144010123,
+      "action_l2_mean": 1.5982046238413459,
+      "action_max": 1.0003844499588013,
+      "action_min": -1.0003576278686523,
+      "behavior_target_l2_max": 3.414108376474605,
+      "behavior_target_l2_mean": 1.0703257591974475,
+      "behavior_target_l2_rms": 1.4141991061066743,
+      "episodes": 5,
+      "inf_count": 0,
+      "nan_count": 0,
+      "num_transitions": 3236,
+      "saturation_fraction": 0.14839749249514392,
+      "seeds": [
+        10000,
+        10001,
+        10002,
+        10003,
+        10004
+      ],
+      "status": "PASS"
+    },
+    "bc_transformer": {
+      "action_abs_mean": 0.23744209236305094,
+      "action_l2_max": 2.308591067510779,
+      "action_l2_mean": 1.5634964710502466,
+      "action_max": 1.0003844499588013,
+      "action_min": -1.0003278255462646,
+      "behavior_target_l2_max": 3.395996368229696,
+      "behavior_target_l2_mean": 0.6682177765259075,
+      "behavior_target_l2_rms": 1.0048505642318781,
+      "episodes": 5,
+      "inf_count": 0,
+      "nan_count": 0,
+      "num_transitions": 3285,
+      "saturation_fraction": 0.14635790389215048,
+      "seeds": [
+        10000,
+        10001,
+        10002,
+        10003,
+        10004
+      ],
+      "status": "PASS"
+    },
+    "status": "PASS"
+  },
+  "rnn_checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_rnn_official_ph_low_dim/two_arm_transport_bc_rnn_official_ph_low_dim/20260811151701/models/model_epoch_1000_low_dim_v15_success_0.9.pth",
+  "rnn_self_replay": {
+    "action_abs_mean": 0.22910578522546785,
+    "action_l2_max": 2.327573102546046,
+    "action_l2_mean": 1.5655074591615905,
+    "action_mae": 0.0,
+    "action_max": 1.00044584274292,
+    "action_min": -1.0003268718719482,
+    "action_mse": 0.0,
+    "behavior_target_l2_max": 0.0,
+    "behavior_target_l2_mean": 0.0,
+    "behavior_target_l2_rms": 0.0,
+    "episodes": 5,
+    "exact_action_reproduction": true,
+    "inf_count": 0,
+    "max_abs_error": 0.0,
+    "nan_count": 0,
+    "num_transitions": 2618,
+    "saturation_fraction": 0.1486958419731529,
+    "seeds": [
+      10000,
+      10001,
+      10002,
+      10003,
+      10004
+    ],
+    "status": "PASS",
+    "status_reason": "stored actions reproduced exactly",
+    "stochastic_policy": true
+  },
+  "sac_started": false,
+  "selected_datasets": {
+    "bc_gmm": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+    "bc_rnn": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+    "bc_transformer": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_transformer/transitions.hdf5"
+  },
+  "stage": "2.0_frozen_rnn_target_validation",
+  "stage1_data_read_only": true
+}

@@ -1,0 +1,627 @@
+{
+  "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Pure IL/two_arm_transport_bc_rnn_official_ph_low_dim/two_arm_transport_bc_rnn_official_ph_low_dim/20260811151701/models/model_epoch_1000_low_dim_v15_success_0.9.pth",
+  "dataset": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+  "device": "npu:0",
+  "bc_rnn": {
+    "algorithm_class": "BC_RNN_GMM",
+    "policy_class": "RNNGMMActorNetwork",
+    "actor_network_class": "RNNGMMActorNetwork",
+    "module_repr": "RNNGMMActorNetwork(\n    action_dim=14, std_activation=softplus, low_noise_eval=True, num_nodes=5, min_std=0.0001\n\n    encoder=ObservationGroupEncoder(\n        group=obs\n        ObservationEncoder(\n            Key(\n                name=object\n                shape=[41]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_eef_pos\n                shape=[3]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_eef_quat\n                shape=[4]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot0_gripper_qpos\n                shape=[2]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_eef_pos\n                shape=[3]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_eef_quat\n                shape=[4]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            Key(\n                name=robot1_gripper_qpos\n                shape=[2]\n                modality=low_dim\n                randomizer=ModuleList(\n                  (0): None\n                )\n                net=None\n                sharing_from=None\n            )\n            output_shape=[59]\n        )\n    )\n\n    rnn=RNN_Base(\n      (per_step_net): ObservationDecoder(\n          Key(\n              name=mean\n              shape=(5, 14)\n              modality=low_dim\n              net=(Linear(in_features=400, out_features=70, bias=True))\n          )\n          Key(\n              name=scale\n              shape=(5, 14)\n              modality=low_dim\n              net=(Linear(in_features=400, out_features=70, bias=True))\n          )\n          Key(\n              name=logits\n              shape=(5,)\n              modality=low_dim\n              net=(Linear(in_features=400, out_features=5, bias=True))\n          )\n      )\n      (nets): LSTM(59, 400, num_layers=2, batch_first=True)\n    )\n)",
+    "module_tree": [
+      {
+        "name": "<root>",
+        "class": "RNNGMMActorNetwork"
+      },
+      {
+        "name": "nets",
+        "class": "ModuleDict"
+      },
+      {
+        "name": "nets.encoder",
+        "class": "ObservationGroupEncoder"
+      },
+      {
+        "name": "nets.encoder.nets",
+        "class": "ModuleDict"
+      },
+      {
+        "name": "nets.encoder.nets.obs",
+        "class": "ObservationEncoder"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_nets",
+        "class": "ModuleDict"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers",
+        "class": "ModuleDict"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.object",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot0_eef_pos",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot0_eef_quat",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot0_gripper_qpos",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot1_eef_pos",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot1_eef_quat",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.obs_randomizers.robot1_gripper_qpos",
+        "class": "ModuleList"
+      },
+      {
+        "name": "nets.encoder.nets.obs.activation",
+        "class": "ReLU"
+      },
+      {
+        "name": "nets.decoder",
+        "class": "ObservationDecoder"
+      },
+      {
+        "name": "nets.decoder.nets",
+        "class": "ModuleDict"
+      },
+      {
+        "name": "nets.decoder.nets.mean",
+        "class": "Linear"
+      },
+      {
+        "name": "nets.decoder.nets.scale",
+        "class": "Linear"
+      },
+      {
+        "name": "nets.decoder.nets.logits",
+        "class": "Linear"
+      },
+      {
+        "name": "nets.rnn",
+        "class": "RNN_Base"
+      },
+      {
+        "name": "nets.rnn.nets",
+        "class": "LSTM"
+      }
+    ],
+    "named_parameters": [
+      {
+        "name": "nets.decoder.nets.mean.weight",
+        "shape": [
+          70,
+          400
+        ],
+        "numel": 28000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.decoder.nets.mean.bias",
+        "shape": [
+          70
+        ],
+        "numel": 70,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.decoder.nets.scale.weight",
+        "shape": [
+          70,
+          400
+        ],
+        "numel": 28000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.decoder.nets.scale.bias",
+        "shape": [
+          70
+        ],
+        "numel": 70,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.decoder.nets.logits.weight",
+        "shape": [
+          5,
+          400
+        ],
+        "numel": 2000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.decoder.nets.logits.bias",
+        "shape": [
+          5
+        ],
+        "numel": 5,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.weight_ih_l0",
+        "shape": [
+          1600,
+          59
+        ],
+        "numel": 94400,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.weight_hh_l0",
+        "shape": [
+          1600,
+          400
+        ],
+        "numel": 640000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.bias_ih_l0",
+        "shape": [
+          1600
+        ],
+        "numel": 1600,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.bias_hh_l0",
+        "shape": [
+          1600
+        ],
+        "numel": 1600,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.weight_ih_l1",
+        "shape": [
+          1600,
+          400
+        ],
+        "numel": 640000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.weight_hh_l1",
+        "shape": [
+          1600,
+          400
+        ],
+        "numel": 640000,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.bias_ih_l1",
+        "shape": [
+          1600
+        ],
+        "numel": 1600,
+        "requires_grad": true
+      },
+      {
+        "name": "nets.rnn.nets.bias_hh_l1",
+        "shape": [
+          1600
+        ],
+        "numel": 1600,
+        "requires_grad": true
+      }
+    ],
+    "observation_encoder": {
+      "class": "ObservationEncoder",
+      "concat_order": [
+        "object",
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos"
+      ],
+      "fields": [
+        {
+          "key": "object",
+          "shape": [
+            41
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot0_eef_pos",
+          "shape": [
+            3
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot0_eef_quat",
+          "shape": [
+            4
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot0_gripper_qpos",
+          "shape": [
+            2
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot1_eef_pos",
+          "shape": [
+            3
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot1_eef_quat",
+          "shape": [
+            4
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        },
+        {
+          "key": "robot1_gripper_qpos",
+          "shape": [
+            2
+          ],
+          "encoder": null,
+          "parameter_count": 0
+        }
+      ],
+      "output_dim": 59,
+      "direct_concat": true
+    },
+    "pre_rnn_mlp": null,
+    "post_rnn_mlp": null,
+    "recurrent_core": {
+      "wrapper_class": "RNN_Base",
+      "type": "LSTM",
+      "input_size": 59,
+      "hidden_size": 400,
+      "num_layers": 2,
+      "bidirectional": false,
+      "dropout": 0.0,
+      "output_shape": [
+        "batch",
+        "time",
+        400
+      ],
+      "hidden_state_convention": "(h_t, c_t), each [2, batch, 400]"
+    },
+    "action_head": {
+      "classification": "B. GMM",
+      "action_dim": 14,
+      "num_modes": 5,
+      "mean": {
+        "module": "Linear(in_features=400, out_features=70, bias=True)",
+        "output_shape": [
+          "batch",
+          "time",
+          5,
+          14
+        ]
+      },
+      "scale": {
+        "module": "Linear(in_features=400, out_features=70, bias=True)",
+        "output_shape": [
+          "batch",
+          "time",
+          5,
+          14
+        ]
+      },
+      "logits": {
+        "module": "Linear(in_features=400, out_features=5, bias=True)",
+        "output_shape": [
+          "batch",
+          "time",
+          5
+        ]
+      },
+      "min_std": 0.0001,
+      "std_activation": "softplus",
+      "low_noise_eval": true,
+      "deterministic_evaluation_convention": "Not mathematically deterministic: eval forces every component scale to 1e-4, then samples a categorical component from logits and a Normal action. Exact reproduction requires the same episode seed and sampling order.",
+      "action_semantics": "use_tanh=False; component means are tanh-bounded, but the final low-noise Normal sample is not clipped and can slightly exceed [-1, 1]."
+    },
+    "checkpoint_config": {
+      "actor_layer_dims": [],
+      "rnn_horizon_reset_interval": 10,
+      "open_loop": false
+    }
+  },
+  "transfer_to_recurrent_sac": {
+    "directly_copy": [
+      "observation encoder (parameter-free canonical concatenation)",
+      "pre-RNN path (identity; no parameters)",
+      "all LSTM weights and biases",
+      "post-RNN path (identity; no parameters)"
+    ],
+    "new_parameters": [
+      "mu head: Linear(400, 14)",
+      "log_std head: Linear(400, 14), followed by SAC log-std clamp"
+    ],
+    "head_connection": "At every timestep, feed the LSTM output [B,T,400] to separate 400->14 mu and log_std heads; sample with reparameterization and tanh squash.",
+    "gmm_heads_directly_reusable_as_standard_sac_head": false
+  },
+  "sequential_replay": {
+    "dataset_canonical_keys": [
+      "robot0_eef_pos",
+      "robot0_eef_quat",
+      "robot0_gripper_qpos",
+      "robot1_eef_pos",
+      "robot1_eef_quat",
+      "robot1_gripper_qpos",
+      "object"
+    ],
+    "episodes": [
+      {
+        "episode": "episode_000000",
+        "initial_seed": 10000,
+        "length": 577,
+        "mse": 0.0,
+        "mae": 0.0,
+        "max_abs_error": 0.0,
+        "allclose_atol_1e-6": true
+      },
+      {
+        "episode": "episode_000001",
+        "initial_seed": 10001,
+        "length": 423,
+        "mse": 0.0,
+        "mae": 0.0,
+        "max_abs_error": 0.0,
+        "allclose_atol_1e-6": true
+      }
+    ],
+    "total_transitions": 1000,
+    "aggregate_mse": 0.0,
+    "aggregate_mae": 0.0,
+    "aggregate_max_abs_error": 0.0,
+    "all_episodes_allclose_atol_1e-6": true,
+    "method": "For each complete episode: RolloutPolicy.start_episode(), reseed with initial_seed, then call the restored policy once per stored observation in temporal order."
+  },
+  "stage2_critics": {
+    "random": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_1_critic_pretraining/20260826_163642/random_critic/model_init.pth",
+      "strict_load": true,
+      "class": "TwinCritic",
+      "architecture": {
+        "state_dim": 59,
+        "action_dim": 14,
+        "input_dim": 73,
+        "hidden_dims": [
+          256,
+          256
+        ],
+        "twin_q": true,
+        "q_output_shapes": [
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            1
+          ]
+        ]
+      },
+      "current_state_action_only": true,
+      "recurrent_parameter_keys": [],
+      "parameter_shapes": {
+        "q1.network.0.weight": [
+          256,
+          73
+        ],
+        "q1.network.0.bias": [
+          256
+        ],
+        "q1.network.2.weight": [
+          256,
+          256
+        ],
+        "q1.network.2.bias": [
+          256
+        ],
+        "q1.network.4.weight": [
+          1,
+          256
+        ],
+        "q1.network.4.bias": [
+          1
+        ],
+        "q2.network.0.weight": [
+          256,
+          73
+        ],
+        "q2.network.0.bias": [
+          256
+        ],
+        "q2.network.2.weight": [
+          256,
+          256
+        ],
+        "q2.network.2.bias": [
+          256
+        ],
+        "q2.network.4.weight": [
+          1,
+          256
+        ],
+        "q2.network.4.bias": [
+          1
+        ]
+      },
+      "reusable_with_recurrent_actor": true
+    },
+    "rnn_only": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_1_critic_pretraining/20260826_163642/rnn_only_critic/checkpoints/best.pth",
+      "strict_load": true,
+      "class": "TwinCritic",
+      "architecture": {
+        "state_dim": 59,
+        "action_dim": 14,
+        "input_dim": 73,
+        "hidden_dims": [
+          256,
+          256
+        ],
+        "twin_q": true,
+        "q_output_shapes": [
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            1
+          ]
+        ]
+      },
+      "current_state_action_only": true,
+      "recurrent_parameter_keys": [],
+      "parameter_shapes": {
+        "q1.network.0.weight": [
+          256,
+          73
+        ],
+        "q1.network.0.bias": [
+          256
+        ],
+        "q1.network.2.weight": [
+          256,
+          256
+        ],
+        "q1.network.2.bias": [
+          256
+        ],
+        "q1.network.4.weight": [
+          1,
+          256
+        ],
+        "q1.network.4.bias": [
+          1
+        ],
+        "q2.network.0.weight": [
+          256,
+          73
+        ],
+        "q2.network.0.bias": [
+          256
+        ],
+        "q2.network.2.weight": [
+          256,
+          256
+        ],
+        "q2.network.2.bias": [
+          256
+        ],
+        "q2.network.4.weight": [
+          1,
+          256
+        ],
+        "q2.network.4.bias": [
+          1
+        ]
+      },
+      "reusable_with_recurrent_actor": true
+    },
+    "multi_il": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_1_critic_pretraining/20260826_163642/multi_il_critic/checkpoints/best.pth",
+      "strict_load": true,
+      "class": "TwinCritic",
+      "architecture": {
+        "state_dim": 59,
+        "action_dim": 14,
+        "input_dim": 73,
+        "hidden_dims": [
+          256,
+          256
+        ],
+        "twin_q": true,
+        "q_output_shapes": [
+          [
+            2,
+            1
+          ],
+          [
+            2,
+            1
+          ]
+        ]
+      },
+      "current_state_action_only": true,
+      "recurrent_parameter_keys": [],
+      "parameter_shapes": {
+        "q1.network.0.weight": [
+          256,
+          73
+        ],
+        "q1.network.0.bias": [
+          256
+        ],
+        "q1.network.2.weight": [
+          256,
+          256
+        ],
+        "q1.network.2.bias": [
+          256
+        ],
+        "q1.network.4.weight": [
+          1,
+          256
+        ],
+        "q1.network.4.bias": [
+          1
+        ],
+        "q2.network.0.weight": [
+          256,
+          73
+        ],
+        "q2.network.0.bias": [
+          256
+        ],
+        "q2.network.2.weight": [
+          256,
+          256
+        ],
+        "q2.network.2.bias": [
+          256
+        ],
+        "q2.network.4.weight": [
+          1,
+          256
+        ],
+        "q2.network.4.bias": [
+          1
+        ]
+      },
+      "reusable_with_recurrent_actor": true
+    }
+  },
+  "stage2_critic_interpretation": "Each checkpoint strictly loads into TwinCritic: two independent 73->256->256->1 networks. It consumes only the current canonical 59D state and current 14D action; recurrent actor hidden state is not a critic input.",
+  "verdict": "RECURRENT CORE + NEW HEAD",
+  "training_started": false,
+  "stage2_modified": false,
+  "stage4_started_or_modified": false,
+  "output": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/analysis/bc_rnn_recurrent_sac_compatibility_audit.json"
+}
