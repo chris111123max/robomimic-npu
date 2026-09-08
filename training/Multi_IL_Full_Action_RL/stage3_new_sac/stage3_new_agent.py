@@ -19,6 +19,15 @@ def state_hash(module):
     digest=hashlib.sha256()
     for key,value in module.state_dict().items(): digest.update(key.encode());digest.update(value.detach().cpu().numpy().tobytes())
     return digest.hexdigest()
+
+def progressive_schedule(config,env_steps):
+    cfg=config.get("progressive_unfreeze",{});base_lr=float(config["critic_lr"]);base_tau=float(config["tau"])
+    if not cfg.get("enabled",False):return {"phase":"full_sac","critic_lr_scale":1.0,"critic_lr_effective":base_lr,"target_tau_scale":1.0,"target_tau_effective":base_tau,"actor_sac_enabled":True,"alpha_tuning_enabled":True,"critic_update_enabled":True}
+    protected=int(cfg["protected_until_env_steps"]);end=int(cfg["unfreeze_end_env_steps"]);step=int(env_steps)
+    if step<protected:phase="protected_handoff";scale=0.0
+    elif step<end:phase="progressive_unfreeze";scale=max(0.0,min(1.0,(step-protected)/float(end-protected)))
+    else:phase="full_sac";scale=1.0
+    return {"phase":phase,"critic_lr_scale":scale,"critic_lr_effective":base_lr*scale,"target_tau_scale":scale,"target_tau_effective":base_tau*scale,"actor_sac_enabled":step>=protected,"alpha_tuning_enabled":step>=protected,"critic_update_enabled":scale>0.0}
 def strict_stage2_load(path,device,config):
     payload=torch.load(path,map_location=device); mc=payload.get("model_config",{})
     expected={"obs_dim":59,"action_dim":14,"hidden_dims":list(config["hidden_dims"]),"activation":"relu","layer_norm":True}
@@ -92,23 +101,32 @@ class Stage3SAC:
             q1,q2=self.critic(b["observations"],b["actions"]);cql=self.cql_components(b["observations"],q1,q2);target=self.target_components(b);gap=cql["q_policy"]-cql["q_data"];random_gap=cql["q_random_max"]-cql["q_data"]
         values={"q_data_mean":cql["q_data"].mean(),"q_policy_mean":cql["q_policy"].mean(),"q_random_max_mean":cql["q_random_max"].mean(),"policy_minus_data_q_mean":gap.mean(),"policy_gt_data_fraction":(gap>0).float().mean(),"random_max_minus_data_q_mean":random_gap.mean(),"random_max_gt_data_fraction":(random_gap>0).float().mean(),"target_qmin_mean":target["target_qmin"].mean(),"entropy_bonus_mean":target["entropy_bonus"].mean(),"td_target_mean":target["td_target"].mean(),"reward_mean":b["rewards"].mean()}
         self.ensure_finite(values);return {key:float(value.item()) for key,value in values.items()}
-    def update(self,batch,anchor_batch=None):
-        b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()};components=self.target_components(b);target_qmin=components["target_qmin"];entropy_bonus=components["entropy_bonus"];target=components["td_target"]
+    def update(self,batch,anchor_batch=None,env_steps=None):
+        schedule=progressive_schedule(self.config,self.updates if env_steps is None else env_steps);b={k:torch.as_tensor(v,dtype=torch.float32,device=self.device) for k,v in batch.items()};handoff_cfg=self.config.get("handoff",{});handoff_enabled=bool(handoff_cfg.get("enabled",False))
+        if schedule["phase"]=="protected_handoff":
+            handoff_loss,mask_count=handoff_imitation(self.actor,b["observations"],b["action_rnn"],(b["is_online"]>.5)&(b["selected_source"]<.5));handoff_weighted=float(handoff_cfg.get("lambda_handoff",1.0))*handoff_loss
+            if mask_count:
+                self.actor_optimizer.zero_grad(set_to_none=True);handoff_weighted.backward();self.actor_optimizer.step()
+            self.updates+=1
+            return {**schedule,"critic_loss":None,"critic_loss_total":None,"critic_td_loss":None,"cql_loss_raw":0.0,"cql_loss_weighted":0.0,"actor_loss":float(handoff_weighted.item()),"actor_sac_loss":0.0,"handoff_loss_raw":float(handoff_loss.item()),"handoff_loss_weighted":float(handoff_weighted.item()),"handoff_mask_count":mask_count,"handoff_mask_fraction":float(mask_count/len(b["observations"])),"actor_total_loss":float(handoff_weighted.item()),"alpha":float(self.alpha.item()),"alpha_loss":0.0,"policy_entropy":None,"qmin_mean":None,"target_qmin_mean":None,"td_target_mean":None,"td_error":None,"q_boot_rl_mean":None,"q_boot_rnn_mean":None,"bootstrap_rl_fraction":None,"bootstrap_rnn_fraction":None,"policy_minus_data_q_mean":None,"random_max_minus_data_q_mean":None}
+        for group in self.critic_optimizer.param_groups:group["lr"]=schedule["critic_lr_effective"]
+        components=self.target_components(b);target_qmin=components["target_qmin"];entropy_bonus=components["entropy_bonus"];target=components["td_target"]
         q1,q2=self.critic(b["observations"],b["actions"]);l1=torch.nn.functional.mse_loss(q1,target);l2=torch.nn.functional.mse_loss(q2,target);critic_td_loss=l1+l2;cql_cfg=self.config.get("cql",{});cql_enabled=bool(cql_cfg.get("enabled",False))
         cql_values=self.cql_components(b["observations"],q1,q2) if cql_enabled else None;cql_raw=cql_values["loss"] if cql_enabled else critic_td_loss.new_zeros(());cql_weighted=float(cql_cfg.get("lambda",.1))*cql_raw
         anchor_cfg=self.config.get("anchor",{});anchor_enabled=bool(anchor_cfg.get("enabled",False))
         if anchor_enabled and anchor_batch is None:raise RuntimeError("Every anchored Critic update requires an independent anchor batch")
         anchor_values=self.anchor_components(anchor_batch) if anchor_enabled else None;anchor_raw=anchor_values["loss"] if anchor_enabled else critic_td_loss.new_zeros(());anchor_weighted=float(anchor_cfg.get("lambda",.1))*anchor_raw;critic_loss=critic_td_loss+cql_weighted+anchor_weighted
         self.ensure_finite({"critic_td_loss":critic_td_loss,"cql_loss":cql_raw,"anchor_loss":anchor_raw,"critic_loss":critic_loss,"q1":q1,"q2":q2,"target_qmin":target_qmin,"td_target":target,"alpha":self.alpha})
-        self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward();self.critic_optimizer.step()
+        if schedule["critic_update_enabled"]:
+            self.critic_optimizer.zero_grad(set_to_none=True);critic_loss.backward();self.critic_optimizer.step()
         self.ensure_finite({f"critic_parameter_{index}":parameter for index,parameter in enumerate(self.critic.parameters())})
         action,_,_,logp,*_=self.actor(b["observations"],reparameterize=True,return_log_prob=True)
         for p in self.critic.parameters(): p.requires_grad_(False)
-        aq1,aq2=self.critic(b["observations"],action); actor_sac_loss=(self.alpha.detach()*logp-torch.minimum(aq1,aq2)).mean();handoff_cfg=self.config.get("handoff",{});handoff_enabled=bool(handoff_cfg.get("enabled",False));handoff_loss,mask_count=handoff_imitation(self.actor,b["observations"],b["action_rnn"],(b["is_online"]>.5)&(b["selected_source"]<.5)) if handoff_enabled else (actor_sac_loss.new_zeros(()),0);handoff_weighted=float(handoff_cfg.get("lambda_handoff",1.0))*handoff_loss;actor_loss=actor_sac_loss+handoff_weighted;self.actor_optimizer.zero_grad(set_to_none=True);actor_loss.backward();self.actor_optimizer.step()
+        aq1,aq2=self.critic(b["observations"],action); actor_sac_loss=(self.alpha.detach()*logp-torch.minimum(aq1,aq2)).mean();handoff_loss,mask_count=handoff_imitation(self.actor,b["observations"],b["action_rnn"],(b["is_online"]>.5)&(b["selected_source"]<.5)) if handoff_enabled else (actor_sac_loss.new_zeros(()),0);handoff_weighted=float(handoff_cfg.get("lambda_handoff",1.0))*handoff_loss;actor_loss=actor_sac_loss+handoff_weighted;self.actor_optimizer.zero_grad(set_to_none=True);actor_loss.backward();self.actor_optimizer.step()
         for p in self.critic.parameters(): p.requires_grad_(True)
         alpha_loss=-(self.log_alpha*(logp.detach()+float(self.config["target_entropy"]))).mean();self.alpha_optimizer.zero_grad(set_to_none=True);alpha_loss.backward();self.alpha_optimizer.step()
         self.ensure_finite({"actor_loss":actor_loss,"alpha_loss":alpha_loss,"alpha":self.alpha,**{f"actor_parameter_{index}":parameter for index,parameter in enumerate(self.actor.parameters())}})
-        tau=float(self.config["tau"])
+        tau=schedule["target_tau_effective"]
         with torch.no_grad():
             for source,dest in zip(self.critic.parameters(),self.target.parameters()): dest.mul_(1-tau).add_(source,alpha=tau)
         self.updates+=1; td=torch.cat((q1-target,q2-target));qmin=torch.minimum(q1,q2)
@@ -118,7 +136,7 @@ class Stage3SAC:
             if minimum_maximum:result.update({f"{name}_min":float(value.min().item()),f"{name}_max":float(value.max().item())})
             return result
         policy_entropy=float((-logp).mean().item())
-        metrics={"critic_loss":float(critic_loss.item()),"critic_loss_total":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"anchor_loss_q1_raw":float(anchor_values["loss_q1"].item()) if anchor_enabled else 0.0,"anchor_loss_q2_raw":float(anchor_values["loss_q2"].item()) if anchor_enabled else 0.0,"anchor_loss_raw":float(anchor_raw.item()),"anchor_loss_weighted":float(anchor_weighted.item()),"actor_loss":float(actor_loss.item()),"actor_sac_loss":float(actor_sac_loss.item()),"handoff_loss_raw":float(handoff_loss.item()),"handoff_loss_weighted":float(handoff_weighted.item()),"handoff_mask_count":mask_count,"handoff_mask_fraction":float(mask_count/len(b["observations"])),"actor_total_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
+        metrics={**schedule,"critic_loss":float(critic_loss.item()),"critic_loss_total":float(critic_loss.item()),"critic_td_loss":float(critic_td_loss.item()),"q1_loss":float(l1.item()),"q2_loss":float(l2.item()),"cql_loss_q1_raw":float(cql_values["loss_q1"].item()) if cql_enabled else 0.0,"cql_loss_q2_raw":float(cql_values["loss_q2"].item()) if cql_enabled else 0.0,"cql_loss_raw":float(cql_raw.item()),"cql_loss_weighted":float(cql_weighted.item()),"anchor_loss_q1_raw":float(anchor_values["loss_q1"].item()) if anchor_enabled else 0.0,"anchor_loss_q2_raw":float(anchor_values["loss_q2"].item()) if anchor_enabled else 0.0,"anchor_loss_raw":float(anchor_raw.item()),"anchor_loss_weighted":float(anchor_weighted.item()),"actor_loss":float(actor_loss.item()),"actor_sac_loss":float(actor_sac_loss.item()),"handoff_loss_raw":float(handoff_loss.item()),"handoff_loss_weighted":float(handoff_weighted.item()),"handoff_mask_count":mask_count,"handoff_mask_fraction":float(mask_count/len(b["observations"])),"actor_total_loss":float(actor_loss.item()),"alpha":float(self.alpha.item()),"log_alpha":float(self.log_alpha.item()),"alpha_loss":float(alpha_loss.item()),"target_entropy":float(self.config["target_entropy"]),"policy_entropy":policy_entropy,"entropy":policy_entropy,"mean_q1":float(q1.mean().item()),"mean_q2":float(q2.mean().item()),"target_q":float(target.mean().item()),"td_error":float(td.abs().mean().item()),"action_mean":sampled.mean(dim=0).cpu().tolist(),"action_std":sampled.std(dim=0,unbiased=False).cpu().tolist(),"action_saturation_rate":(sampled.abs()>0.99).float().mean(dim=0).cpu().tolist()}
         if handoff_enabled:
             boot=components["bootstrap"];metrics.update({"bootstrap_rnn_fraction":float((~boot["rl_wins"]).float().mean().item()),"bootstrap_rl_fraction":float(boot["rl_wins"].float().mean().item()),"q_boot_rnn_mean":float(boot["q_rnn"].mean().item()),"q_boot_rl_mean":float(boot["q_rl"].mean().item()),"boot_value_mean":float(boot["value"].mean().item())})
         if anchor_enabled:

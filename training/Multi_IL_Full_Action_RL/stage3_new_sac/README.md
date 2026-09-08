@@ -271,3 +271,14 @@ Synthetic validation:
 ```bash
 python training/Multi_IL_Full_Action_RL/stage3_new_sac/validate_stage3_handoff.py
 ```
+
+## Critic-protected progressive unfreezing
+
+`stage3_new_rnn_handoff_progressive_config.json` keeps both Stage2 online and
+target Critics bit-exactly frozen before 10k valid environment steps. In that
+protected phase the Actor receives only stored-proposal handoff imitation and
+alpha stays fixed at 0.01. From 10k through 30k, Critic LR and target Polyak tau
+increase linearly from zero to their unchanged base values. Standard SAC Actor
+updates, automatic entropy tuning, CQL-lite, handoff imitation, and the existing
+hybrid bootstrap run from 10k onward. Detailed milestone diagnostics remain;
+`train_metrics.jsonl` writes one scalar aggregate per 100 update attempts.
