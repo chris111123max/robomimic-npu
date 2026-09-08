@@ -240,7 +240,7 @@ def main():
         )
 
     group_dir = pair / args.group
-    for name in ("checkpoints", "evaluations"):
+    for name in ("checkpoints", "evaluations", "probes"):
         (group_dir / name).mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -297,11 +297,18 @@ def main():
             select_actions,
         )
         from stage3_new_replay import SymmetricSampler, TransitionBuffer
+        from stage3_new_probe import load_fixed_probes, record_probe
         from train_stage3_new import (
             aggregate_metrics,
+            contract_hash,
             device,
             file_hash,
+            fixed_diagnostic_batch,
             log,
+            preserved_handoff_evaluation,
+            restore_rng,
+            rng_state,
+            seed_all,
             write,
         )
 
@@ -338,6 +345,10 @@ def main():
                 )
 
         dev = device(args.device)
+        # Worker seeding is isolated in subprocesses. Seed the training-side
+        # Actor / replay / CQL streams explicitly so paired rnn_q and multi_q
+        # runs begin from the same parent RNG state.
+        seed_all(cfg["training_seed"])
         expert = ExpertDataset(
             cfg["expert_dataset"],
             cfg["training_seed"],
@@ -380,6 +391,18 @@ def main():
             dev,
             num_envs,
         )
+        initial_critic_hash = state_hash(agent.critic)
+        initial_target_hash = state_hash(agent.target)
+        initial_actor_hash = state_hash(agent.actor)
+        protected_asserted = False
+        expected_alpha = float(progressive["phase_a_alpha_fixed"])
+        if not np.isclose(float(agent.alpha.item()), expected_alpha):
+            raise RuntimeError(
+                "alpha step-0 sanity check failed: "
+                f"{float(agent.alpha.item())} != {expected_alpha}"
+            )
+
+        probes, _probe_manifest = load_fixed_probes(cfg["stage2_run_dir"])
 
         observations = list(vector.initial_observations)
         rnn_actions = proposer.actions(observations)
@@ -426,6 +449,7 @@ def main():
             )
         }
         metric_window = []
+        latest_metrics = None
         env_steps = 0
         last_timing_step = 0
         last_timing_time = started
@@ -447,18 +471,34 @@ def main():
             map(int, cfg["selector_diagnostic_env_steps"])
         )
         selector_steps.add(total_env_steps)
+        probe_steps = set(map(int, cfg.get("probe_env_steps", [])))
+        probe_steps.add(total_env_steps)
+        cql_cfg = cfg.get("cql", {})
+        diagnostic_interval = int(
+            cql_cfg.get("source_diagnostic_interval_env_steps", 0)
+        )
+        diagnostic_steps = (
+            set(range(diagnostic_interval, total_env_steps + 1, diagnostic_interval))
+            if cql_cfg.get("enabled", False) and diagnostic_interval > 0
+            else set()
+        )
+        diagnostic_steps.add(total_env_steps)
 
         write(
             group_dir / "runtime_audit.json",
             {
                 "group": args.group,
                 "device": str(dev),
+                "pair_contract_hash": contract_hash(cfg),
                 "num_envs": num_envs,
                 "vector_backend": (
                     "spawn subprocess pipes; sequential STARTING/READY handshake"
                 ),
                 "actor_sha256": file_hash(
                     pair / "shared" / "actor_init.pth"
+                ),
+                "seed_manifest_sha256": file_hash(
+                    pair / "shared" / "seed_manifest.json"
                 ),
                 "stage2_checkpoint": actual,
                 "aggregate_env_steps": True,
@@ -498,7 +538,7 @@ def main():
                 generations,
             )
         if 0 in evaluation_steps:
-            report = evaluate_handoff(
+            report = preserved_handoff_evaluation(
                 actor,
                 agent.target,
                 eval_proposer,
@@ -511,6 +551,22 @@ def main():
             write(
                 group_dir / "evaluations" / "step_000000.json",
                 report,
+            )
+        if 0 in probe_steps:
+            summary = record_probe(
+                actor,
+                agent.critic,
+                probes,
+                dev,
+                group_dir / "probes" / "step_000000.npz",
+                vector.action_low,
+                vector.action_high,
+                int(cql_cfg.get("num_random_actions", 0)),
+                cfg["training_seed"],
+            )
+            write(
+                group_dir / "probes" / "step_000000.json",
+                summary,
             )
 
         phase_before = progressive_schedule(cfg, 0)["phase"]
@@ -728,6 +784,33 @@ def main():
                 env_steps += 1
                 timing["replay"] += time.monotonic() - tick
 
+                # Assert the complete protected interval before the first
+                # env_steps=10000 update enables Phase-B SAC / alpha logic.
+                if (
+                    not protected_asserted
+                    and env_steps
+                    == int(progressive["protected_until_env_steps"])
+                ):
+                    if (
+                        state_hash(agent.critic) != initial_critic_hash
+                        or state_hash(agent.target) != initial_target_hash
+                    ):
+                        raise RuntimeError(
+                            "Phase A changed protected online or target Critic"
+                        )
+                    if not np.isclose(
+                        float(agent.alpha.item()),
+                        expected_alpha,
+                        rtol=1e-6,
+                        atol=1e-8,
+                    ):
+                        raise RuntimeError("Phase A changed fixed alpha")
+                    if state_hash(agent.actor) == initial_actor_hash:
+                        raise RuntimeError(
+                            "Phase A Actor did not change under handoff imitation"
+                        )
+                    protected_asserted = True
+
                 if online.size >= int(cfg["min_online_replay_size"]):
                     tick = time.monotonic()
                     metrics = agent.update(
@@ -755,6 +838,7 @@ def main():
                             ),
                         }
                     )
+                    latest_metrics = metrics
                     metric_window.append(metrics)
                     if len(metric_window) >= int(
                         progressive["train_metrics_interval_updates"]
@@ -824,16 +908,87 @@ def main():
                     phase_before = schedule_now["phase"]
 
                 if env_steps in selector_steps:
+                    selector_row = selector_report(
+                        selector_window,
+                        selector_counts,
+                        env_steps,
+                        schedule_now,
+                    )
                     log(
                         group_dir / "selector_diagnostics.jsonl",
-                        selector_report(
-                            selector_window,
-                            selector_counts,
-                            env_steps,
-                            schedule_now,
-                        ),
+                        selector_row,
+                    )
+                    log(
+                        group_dir / "milestone_diagnostics.jsonl",
+                        {**selector_row, "training": latest_metrics},
                     )
                     clear_selector_window(selector_window)
+
+                if env_steps in probe_steps:
+                    summary = record_probe(
+                        actor,
+                        agent.critic,
+                        probes,
+                        dev,
+                        group_dir / "probes" / f"step_{env_steps:06d}.npz",
+                        vector.action_low,
+                        vector.action_high,
+                        int(cql_cfg.get("num_random_actions", 0)),
+                        cfg["training_seed"] + env_steps,
+                    )
+                    write(
+                        group_dir / "probes" / f"step_{env_steps:06d}.json",
+                        summary,
+                    )
+
+                if env_steps in diagnostic_steps and cql_cfg.get(
+                    "enabled", False
+                ):
+                    saved_rng = rng_state()
+                    seed_all(int(cfg["training_seed"]) + env_steps)
+                    try:
+                        count = int(cql_cfg["source_diagnostic_sample_size"])
+                        expert_diag = agent.source_diagnostics(
+                            fixed_diagnostic_batch(
+                                expert,
+                                count,
+                                int(cfg["training_seed"]) + env_steps,
+                            )
+                        )
+                        online_diag = agent.source_diagnostics(
+                            fixed_diagnostic_batch(
+                                online,
+                                count,
+                                int(cfg["training_seed"]) + env_steps,
+                            )
+                        )
+                        online_diag.update(
+                            {
+                                "q_behavior_mean": online_diag["q_data_mean"],
+                                "policy_minus_behavior_q_mean": online_diag[
+                                    "policy_minus_data_q_mean"
+                                ],
+                                "random_max_minus_behavior_q_mean": online_diag[
+                                    "random_max_minus_data_q_mean"
+                                ],
+                                "policy_gt_behavior_fraction": online_diag[
+                                    "policy_gt_data_fraction"
+                                ],
+                                "random_max_gt_behavior_fraction": online_diag[
+                                    "random_max_gt_data_fraction"
+                                ],
+                            }
+                        )
+                        log(
+                            group_dir / "source_diagnostics.jsonl",
+                            {
+                                "env_steps": env_steps,
+                                "expert": expert_diag,
+                                "online": online_diag,
+                            },
+                        )
+                    finally:
+                        restore_rng(saved_rng)
 
                 if env_steps in checkpoint_steps:
                     save_checkpoint(
@@ -854,7 +1009,7 @@ def main():
                     )
 
                 if env_steps in evaluation_steps:
-                    report = evaluate_handoff(
+                    report = preserved_handoff_evaluation(
                         actor,
                         agent.target,
                         eval_proposer,

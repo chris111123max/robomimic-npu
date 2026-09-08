@@ -282,3 +282,26 @@ increase linearly from zero to their unchanged base values. Standard SAC Actor
 updates, automatic entropy tuning, CQL-lite, handoff imitation, and the existing
 hybrid bootstrap run from 10k onward. Detailed milestone diagnostics remain;
 `train_metrics.jsonl` writes one scalar aggregate per 100 update attempts.
+
+### Progressive handoff: 16-environment rollout
+
+Only `stage3_new_rnn_handoff_progressive_config.json` uses the dedicated
+`train_stage3_progressive_vector.py` entry point. Each run owns 16 spawned CPU
+MuJoCo workers and keeps Actor, BC-RNN, online/target Critics, replay sampling,
+and optimization in the single NPU trainer process. Workers are created one at
+a time; the next worker is not started until the previous worker reports READY,
+with the configured 0.5 second inter-worker delay and 120 second startup
+timeout.
+
+`env_steps` is the number of valid transitions across all workers. Therefore
+300000 remains 300000 transitions (approximately 18750 full vector rounds), and
+the 10k/30k progressive boundaries use that aggregate count. One update call is
+made per valid transition after replay warmup, preserving UTD=1. Each worker has
+an independent episode identity and deterministic seed stream, while the
+batched frozen BC-RNN keeps one recurrent-state row per environment. A terminal,
+timeout, or locally recovered MuJoCo fatal error resets only that row.
+
+Low-frequency timing data is written to `throughput_metrics.jsonl`; per-episode
+identity is retained in `episode_metrics.jsonl` and the online replay. Start the
+RNN-Q run first and wait for `[ENV STARTUP] all 16 environments ready` before
+starting Multi-Q, avoiding a 32-environment initialization burst.
