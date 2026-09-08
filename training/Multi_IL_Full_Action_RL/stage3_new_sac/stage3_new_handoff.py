@@ -1,6 +1,6 @@
 """Frozen robomimic BC-RNN proposals and target-Q handoff primitives."""
 from __future__ import annotations
-import hashlib,json
+import hashlib,json,random
 from collections import OrderedDict
 from pathlib import Path
 import h5py,numpy as np,torch
@@ -40,6 +40,12 @@ def _device_copy(value,device):
     if isinstance(value,dict):return {k:_device_copy(v,device) for k,v in value.items()}
     return value
 
+def _rng_state():
+    return {"python":random.getstate(),"numpy":np.random.get_state(),"torch":torch.random.get_rng_state()}
+
+def _set_rng_state(state):
+    random.setstate(state["python"]);np.random.set_state(state["numpy"]);torch.random.set_rng_state(state["torch"])
+
 def select_actions(target,states,rl_actions,rnn_actions):
     with torch.no_grad():
         q1rl,q2rl=target(states,rl_actions);q1rnn,q2rnn=target(states,rnn_actions);qrl=torch.minimum(q1rl,q2rl).reshape(-1);qrnn=torch.minimum(q1rnn,q2rnn).reshape(-1);rl_wins=qrl>qrnn;chosen=torch.where(rl_wins[:,None],rl_actions,rnn_actions)
@@ -64,10 +70,13 @@ def build_expert_cache(dataset_path,checkpoint,output,device="cpu"):
         for name in sorted(f["data"]):
             demo=f["data"][name];length=len(demo["actions"])
             if length<=0 or "obs" not in demo or "next_obs" not in demo:raise RuntimeError(f"Incomplete expert trajectory {demo.name}")
-            proposer.start_episode();episode_actions=[]
+            proposer.start_episode();episode_actions=[];first_rng=_rng_state()
             for t in range(length):episode_actions.append(proposer.action({key:demo["obs"][key][t] for key in KEYS}))
             final_next=proposer.action({key:demo["next_obs"][key][length-1] for key in KEYS});episode_actions=np.stack(episode_actions);episode_next=np.concatenate((episode_actions[1:],final_next[None]),axis=0);actions.append(episode_actions);next_actions.append(episode_next)
-            proposer.start_episode();first_again=proposer.action({key:demo["obs"][key][0] for key in KEYS})
+            # A loaded rollout policy may consume RNG internally. Reproduce the
+            # original first-action RNG state so this check isolates recurrent
+            # reset semantics, then restore the uninterrupted cache RNG stream.
+            continued_rng=_rng_state();_set_rng_state(first_rng);proposer.start_episode();first_again=proposer.action({key:demo["obs"][key][0] for key in KEYS});_set_rng_state(continued_rng)
             if not np.allclose(first_again,episode_actions[0],rtol=0,atol=1e-6):raise RuntimeError(f"BC-RNN hidden reset integrity failed for {name}")
             episodes.append({"name":name,"length":length,"offset":sum(x["length"] for x in episodes),"first_action_reset_max_abs_diff":float(np.max(np.abs(first_again-episode_actions[0])))})
     action=np.concatenate(actions).astype(np.float32);nxt=np.concatenate(next_actions).astype(np.float32);output=Path(output);np.savez_compressed(output,rnn_actions=action,rnn_next_actions=nxt)
