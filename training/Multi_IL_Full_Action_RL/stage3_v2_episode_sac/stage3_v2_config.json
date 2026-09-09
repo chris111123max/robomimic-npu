@@ -1,0 +1,81 @@
+{
+  "stage": "stage3-v2-episode-behavior-standard-sac",
+  "output_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v2_episode_sac",
+  "obs_dim": 59,
+  "action_dim": 14,
+  "hidden_dims": [256, 256],
+  "activation": "relu",
+  "critic_layer_norm": true,
+  "actor_lr": 0.0003,
+  "critic_lr": 0.0003,
+  "alpha_lr": 0.0003,
+  "critic_weight_decay": 0.0001,
+  "actor_weight_decay": 0.0,
+  "alpha_weight_decay": 0.0,
+  "gamma": 0.99,
+  "tau": 0.005,
+  "target_update_interval": 1,
+  "target_entropy": -14.0,
+  "alpha_init": 0.01,
+  "automatic_entropy_tuning": true,
+  "batch_size": 256,
+  "utd": 1,
+  "offline_fraction": 0.5,
+  "online_fraction": 0.5,
+  "min_online_replay_size": 1000,
+  "online_replay_capacity": 1000000,
+  "total_env_steps": 3000000,
+  "horizon": 700,
+  "terminate_on_success": true,
+  "evaluation_episodes": 10,
+  "evaluation_env_steps": [0, 25000, 50000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "checkpoint_env_steps": [0, 25000, 50000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "probe_env_steps": [0, 10000, 25000, 50000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "actor_rnn_diagnostic_env_steps": [0, 10000, 30000, 65000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "behavior_metrics_interval_env_steps": 5000,
+  "train_metrics_interval_updates": 100,
+  "episode_behavior_schedule": [
+    {"name": "phase_a_rnn_only", "start": 0, "end": 10000, "rnn_fraction": 1.0},
+    {"name": "phase_b_half_rnn", "start": 10000, "end": 30000, "rnn_fraction": 0.5},
+    {"name": "phase_c_quarter_rnn", "start": 30000, "end": 100000, "rnn_fraction": 0.25},
+    {"name": "phase_d_rl_only", "start": 100000, "end": null, "rnn_fraction": 0.0}
+  ],
+  "progressive_critic_unfreeze": {
+    "protected_until_env_steps": 10000,
+    "unfreeze_end_env_steps": 30000,
+    "critic_lr_schedule": "linear",
+    "target_tau_schedule": "linear"
+  },
+  "bc_regularization_schedule": {
+    "bc_only_until_env_steps": 10000,
+    "decay_start_env_steps": 30000,
+    "decay_end_env_steps": 100000,
+    "lambda_bc": 1.0,
+    "teacher": "frozen_bc_rnn",
+    "q_filter": false
+  },
+  "cql": {
+    "enabled": true,
+    "lambda": 0.1,
+    "num_random_actions": 10,
+    "num_policy_actions": 1,
+    "apply_to_expert": true,
+    "apply_to_online": true,
+    "detach_policy_actions": true,
+    "source_diagnostic_interval_env_steps": 5000,
+    "source_diagnostic_sample_size": 256
+  },
+  "parallel_env": {
+    "num_envs": 16,
+    "env_startup_stagger": true,
+    "env_startup_delay_sec": 0.5,
+    "env_startup_timeout_sec": 120,
+    "env_command_timeout_sec": 120,
+    "multiprocessing_start_method": "spawn"
+  },
+  "sim_error_handling": {
+    "enabled": true,
+    "max_consecutive_fatal_errors": 5,
+    "evaluation_retry_count": 1
+  }
+}
