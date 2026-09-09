@@ -45,6 +45,19 @@ def write_json(path: Path, value) -> None:
         handle.write("\n")
 
 
+def resolve_device(name: str) -> torch.device:
+    """Resolve Ascend NPU devices using the same path as Stage3 training."""
+    if name.startswith("npu"):
+        try:
+            import torch_npu  # noqa: F401
+        except ImportError as error:
+            raise RuntimeError("NPU requested but torch_npu is unavailable") from error
+        if not torch.npu.is_available():
+            raise RuntimeError("NPU requested but torch.npu is unavailable")
+        torch.npu.set_device(name)
+    return torch.device(name)
+
+
 def arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Read-only Stage3 RNN-Q Actor/target-Critic cross-checkpoint test"
@@ -181,7 +194,7 @@ def main() -> None:
 
     seeds = validate_seed_protocol(pair, config)
     eval_seeds = seeds[:1] if args.smoke else seeds
-    device = torch.device(args.device)
+    device = resolve_device(args.device)
     label = f"actor{args.actor_step // 1000}k_targetq{args.target_critic_step // 1000}k_test"
     output_root = pair / ("test_cross_checkpoint_smoke" if args.smoke else "test_cross_checkpoint") / label
     result_path = output_root / "result.json"
