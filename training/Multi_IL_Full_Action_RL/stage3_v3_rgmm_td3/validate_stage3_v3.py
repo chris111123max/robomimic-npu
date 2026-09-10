@@ -69,6 +69,17 @@ def main():
         "episode_steps": np.tile(np.arange(20, dtype=np.int64), (4, 1)),
         "is_offline": np.asarray([1, 1, 0, 0], np.float32),
     }
+    # Use valid actions from the transferred GMM for the synthetic NLL update;
+    # arbitrary all-zero actions can be many standard deviations off-support
+    # and obscure the finite-gradient invariant with an artificial 1e8 loss.
+    with torch.no_grad():
+        synthetic_dists, _ = recurrent_distributions(
+            agent.actor, observations, steps, 10)
+        for time_index, distribution in enumerate(synthetic_dists):
+            normalized = distribution_tensors(distribution)["means_normalized"][:, 0]
+            batch["actions"][:, time_index] = (
+                normalized * scale.reshape(1, 14) + offset.reshape(1, 14)
+            ).detach().cpu().numpy()
     before = module_hash(agent.actor)
     metrics = agent.actor_update(batch, 10000)
     actor_changed = module_hash(agent.actor) != before
@@ -79,8 +90,10 @@ def main():
         "frozen_before_10k": frozen, "gate_latched_at_10k": latched,
         "actor_update_changes_actor": actor_changed,
         "actor_loss_finite": all(np.isfinite(value) for value in metrics.values()),
-        "bc_schedule": [bc_lambda(config["bc_lambda_schedule"], step)
-                        for step in (10000, 100000, 300000, 500000)] == [1.0, 1.0, 0.2, 0.0],
+        "bc_schedule": bool(np.allclose(
+            [bc_lambda(config["bc_lambda_schedule"], step)
+             for step in (10000, 100000, 300000, 500000)],
+            [1.0, 1.0, 0.2, 0.0], atol=1e-6, rtol=0.0)),
         "no_online_cql": config["online_cql"]["enabled"] is False,
         "no_sac_alpha": "alpha_lr" not in config and "target_entropy" not in config,
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
@@ -95,4 +108,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
