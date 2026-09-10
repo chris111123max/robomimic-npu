@@ -1,0 +1,91 @@
+{
+  "stage": "stage3-v3-rgmm-td3",
+  "output_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v3_rgmm_td3",
+  "total_env_steps": 3000000,
+  "obs_dim": 59,
+  "action_dim": 14,
+  "hidden_dims": [256, 256],
+  "activation": "relu",
+  "critic_layer_norm": true,
+  "gamma": 0.99,
+  "tau": 0.005,
+  "critic_lr": 0.0003,
+  "critic_weight_decay": 0.0001,
+  "critic_max_grad_norm": 100.0,
+  "actor_lr": 0.00001,
+  "actor_max_grad_norm": 10.0,
+  "batch_size": 256,
+  "offline_fraction": 0.5,
+  "online_fraction": 0.5,
+  "utd": 1,
+  "policy_delay": 2,
+  "min_online_replay_size": 1000,
+  "online_replay_capacity": 1000000,
+  "online_sequence_capacity": 250000,
+  "horizon": 700,
+  "terminate_on_success": true,
+  "actor_source_contract": {
+    "checkpoint_sha256": "95d3b599103a9c53e95b962ef0136816865b601b9a50fbc2261f97c1b294e414",
+    "class": "RNNGMMActorNetwork",
+    "rnn_type": "LSTM",
+    "rnn_hidden_dim": 400,
+    "rnn_num_layers": 2,
+    "rnn_horizon": 10,
+    "open_loop": false,
+    "num_modes": 5,
+    "min_std": 0.0001,
+    "std_activation": "softplus",
+    "low_noise_eval": true,
+    "use_tanh": false,
+    "parameter_count": 2078945,
+    "state_dict_entries": 20
+  },
+  "recurrent_replay": {
+    "burn_in": 10,
+    "train_seq_len": 10,
+    "actor_sequence_batch_size": 32,
+    "critic_context_length": 11,
+    "boundary_policy": "same_episode_only",
+    "burn_in_gradient": false
+  },
+  "actor_gate": {
+    "equivalence_tolerance": 0.00001,
+    "competence_episodes": 20,
+    "competence_min_successes": 10,
+    "warmup_env_steps": 10000,
+    "latched": true
+  },
+  "bc_lambda_schedule": [
+    {"step": 10000, "value": 1.0},
+    {"step": 100000, "value": 1.0},
+    {"step": 300000, "value": 0.2},
+    {"step": 500000, "value": 0.0},
+    {"step": 3000000, "value": 0.0}
+  ],
+  "exploration": {
+    "execution": "checkpoint_gmm_categorical_plus_component_sample",
+    "external_action_noise_std": 0.0,
+    "clip_to_env_bounds": false,
+    "evaluation_external_noise_std": 0.0
+  },
+  "evaluation_env_steps": [0, 10000, 25000, 50000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "checkpoint_env_steps": [10000, 25000, 50000, 100000, 150000, 200000, 300000, 500000, 1000000, 2000000, 3000000],
+  "train_metrics_interval_updates": 100,
+  "training_seed": 20260910,
+  "train_seed_base": 30000,
+  "evaluation_seeds": [20000, 20001, 20002, 20003, 20004, 20005, 20006, 20007, 20008, 20009, 20010, 20011, 20012, 20013, 20014, 20015, 20016, 20017, 20018, 20019],
+  "parallel_env": {
+    "num_envs": 16,
+    "env_startup_stagger": true,
+    "env_startup_delay_sec": 0.5,
+    "env_startup_timeout_sec": 120,
+    "env_command_timeout_sec": 120,
+    "multiprocessing_start_method": "spawn"
+  },
+  "sim_error_handling": {
+    "evaluation_retry_count": 1,
+    "max_consecutive_fatal_errors": 3
+  },
+  "online_cql": {"enabled": false, "reason": "keep Stage3-v3 variable isolation; Stage2 weights are retained"},
+  "forbidden_mechanisms": ["sac_entropy", "alpha_tuning", "target_policy_smoothing", "q_filter", "awac", "handoff_selector", "hybrid_bootstrap", "expert_rnn_proposal_cache", "recurrent_critic"]
+}
