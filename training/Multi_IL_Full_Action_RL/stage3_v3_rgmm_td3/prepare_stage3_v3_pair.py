@@ -57,7 +57,7 @@ def validate_config(config):
         "activation": "relu", "critic_layer_norm": True, "gamma": 0.99,
         "tau": 0.005, "critic_lr": 3e-4, "critic_weight_decay": 1e-4,
         "batch_size": 256, "offline_fraction": 0.5, "online_fraction": 0.5,
-        "utd": 1, "policy_delay": 2,
+        "utd": 1, "policy_delay": 8,
     }
     for key, value in fixed.items():
         if config.get(key) != value:

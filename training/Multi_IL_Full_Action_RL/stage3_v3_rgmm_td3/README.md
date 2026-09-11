@@ -37,6 +37,12 @@ L_actor = -mean(sum_k p[k] * Q1(s, mu[k]))
 The RL term updates component means and mixture logits. The offline GMM NLL also
 maintains the scale head. Online CQL, SAC entropy/alpha, Q filters, AWAC,
 recurrent Critics, fallback policies, and handoff selectors are disabled.
+The delayed Actor update uses `policy_delay=8`, meaning one Actor update after
+every eight Critic updates once the 10k competence gate is open.
+
+Rollout Actor inference is vectorized across all active environments: recurrent
+hidden states are packed into one batch and actions are copied from the NPU to
+the host once per vector step.
 
 Each Critic update uses 128 offline and 128 online boundary-safe sequences. The
 last transition is the memoryless Critic sample; the preceding recurrent

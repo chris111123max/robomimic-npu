@@ -18,7 +18,7 @@
   "offline_fraction": 0.5,
   "online_fraction": 0.5,
   "utd": 1,
-  "policy_delay": 2,
+  "policy_delay": 8,
   "min_online_replay_size": 1000,
   "online_replay_capacity": 1000000,
   "online_sequence_capacity": 250000,

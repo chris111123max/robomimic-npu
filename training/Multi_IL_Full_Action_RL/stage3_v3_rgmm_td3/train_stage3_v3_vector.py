@@ -275,6 +275,7 @@ def main():
             "stage": "stage3-v3", "group": args.group, "run_type": config["run_type"],
             "device": str(device), "num_envs": num_envs,
             "env_steps_semantics": "aggregate environment transitions", "utd": 1,
+            "policy_delay": int(config["policy_delay"]),
             "critic_batch": "128 offline sequences + 128 online sequences; final transition",
             "actor": metadata, "execution": config["exploration"]["execution"],
             "td_target": "r + gamma*(1-terminal)*sum_k p'_k*min(Q1',Q2')(s',mu'_k)",
@@ -326,7 +327,8 @@ def main():
                 run_evaluation(0)
 
         print(f"[STAGE3-V3] group={args.group} num_envs={num_envs} "
-              f"total_aggregate_env_steps={total} UTD=1 mode={config['run_type']}", flush=True)
+              f"total_aggregate_env_steps={total} UTD=1 "
+              f"policy_delay={int(config['policy_delay'])} mode={config['run_type']}", flush=True)
         metric_rows = []
         active_cursor = 0
         fatal_counts = [0] * num_envs
@@ -398,8 +400,13 @@ def main():
                         and online.can_sample(context_length)):
                     critic_sequences = symmetric_sequence_batch(
                         offline, online, 256, context_length)
-                    metrics = agent.critic_update(final_transition(critic_sequences),
-                                                  critic_sequences)
+                    collect_metrics = (
+                        (agent.critic_updates + 1)
+                        % int(config["train_metrics_interval_updates"]) == 0
+                    )
+                    metrics = agent.critic_update(
+                        final_transition(critic_sequences), critic_sequences,
+                        collect_metrics=collect_metrics)
                     actor_metrics = {}
                     actor_length = (int(config["recurrent_replay"]["burn_in"])
                                     + int(config["recurrent_replay"]["train_seq_len"]))

@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from stage3_v3_actor import (distribution_tensors, load_exact_actor, module_hash,
+from stage3_v3_actor import (BatchedGMMExecutor, distribution_tensors,
+                             flat_to_obs, load_exact_actor, module_hash,
                              recurrent_distributions)
 from stage3_v3_agent import RecurrentGMMTD3, bc_lambda
 
@@ -53,7 +54,26 @@ def main():
     scale = torch.as_tensor(rollout.action_normalization_stats["actions"]["scale"],
                             dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
     offset = torch.as_tensor(rollout.action_normalization_stats["actions"]["offset"],
-                             dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
+                            dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
+    # Exercise the same batched rollout path used by the 16-env trainer. This
+    # catches hidden-state packing and action-shape regressions without
+    # starting MuJoCo environments.
+    batched_obs = flat_to_obs(observations[:, 0])
+    observation_rows = [
+        {key: value[index].detach().cpu().numpy() for key, value in batched_obs.items()}
+        for index in range(4)
+    ]
+    executor = BatchedGMMExecutor(clone.eval(), scale, offset, 4, horizon=10)
+    batched_actions = executor.actions_for(range(4), observation_rows)
+    executor.reset_indices([1])
+    reset_actions = executor.actions_for(range(4), observation_rows)
+    batched_executor_ok = (
+        len(batched_actions) == 4
+        and all(np.asarray(action).shape == (14,) for action in batched_actions)
+        and all(np.isfinite(action).all() for action in batched_actions)
+        and len(reset_actions) == 4
+        and all(np.asarray(action).shape == (14,) for action in reset_actions)
+    )
     agent = RecurrentGMMTD3(clone.train(), critic, config, device, scale, offset)
     frozen_hash = module_hash(agent.actor)
     gate_9999 = agent.maybe_open_gate(9999, True, True)
@@ -98,6 +118,8 @@ def main():
         "no_sac_alpha": "alpha_lr" not in config and "target_entropy" not in config,
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
         "utd_one": config["utd"] == 1,
+        "policy_delay_eight": config["policy_delay"] == 8,
+        "batched_executor": batched_executor_ok,
     }
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks,

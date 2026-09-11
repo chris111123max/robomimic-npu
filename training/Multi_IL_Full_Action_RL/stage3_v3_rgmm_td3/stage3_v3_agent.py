@@ -103,7 +103,7 @@ class RecurrentGMMTD3:
         expected = (tensors["probs"] * selected).sum(-1)
         return expected, q1, q2, tensors, means
 
-    def critic_update(self, batch, target_sequence):
+    def critic_update(self, batch, target_sequence, collect_metrics=True):
         b = self._tensor_batch(batch)
         target = self._tensor_batch(target_sequence)
         burn = int(self.config["recurrent_replay"]["burn_in"])
@@ -126,10 +126,15 @@ class RecurrentGMMTD3:
             raise FloatingPointError("Non-finite Stage3-v3 Critic loss")
         self.critic_optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        critic_grad = grad_norm(self.critic.parameters())
+        critic_grad = grad_norm(self.critic.parameters()) if collect_metrics else None
         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.config["critic_max_grad_norm"]))
         self.critic_optimizer.step()
         self.critic_updates += 1
+        if not collect_metrics:
+            # Avoid synchronizing several NPU scalar tensors back to the host
+            # on every transition. The trainer only needs detailed Critic
+            # diagnostics at train_metrics_interval_updates boundaries.
+            return {}
         return {
             "critic_loss_q1": float(loss_q1.item()),
             "critic_loss_q2": float(loss_q2.item()),

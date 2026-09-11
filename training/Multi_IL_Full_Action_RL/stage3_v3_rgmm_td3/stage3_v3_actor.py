@@ -176,15 +176,66 @@ def recurrent_distributions(actor, observations, episode_steps, horizon=10,
 
 
 class BatchedGMMExecutor:
-    """Per-environment hidden slots with the checkpoint's sampled GMM semantics."""
+    """Batched recurrent execution with per-environment hidden slots.
+
+    The previous implementation called ``forward_train_step`` once per
+    environment and copied every action from the NPU separately.  That made a
+    16-environment rollout launch the recurrent network 16 times per vector
+    step and forced 16 synchronization points.  Hidden states are now packed
+    into one batch, the actor is evaluated once, and the complete action batch
+    is copied back to the host once.
+    """
     def __init__(self, actor, action_scale, action_offset, num_envs, horizon=10):
         self.actor = actor
-        self.scale = action_scale.reshape(1, -1)
-        self.offset = action_offset.reshape(1, -1)
+        self.device = next(actor.parameters()).device
+        self.scale = action_scale.reshape(1, -1).to(self.device)
+        self.offset = action_offset.reshape(1, -1).to(self.device)
         self.num_envs = int(num_envs)
         self.horizon = int(horizon)
         self.hidden = [None] * self.num_envs
         self.counters = [0] * self.num_envs
+        self._low = None
+        self._high = None
+
+    @staticmethod
+    def _pack_hidden(states, reset):
+        """Pack [layer, 1, hidden] per-env states into one batch state."""
+        template = next((state for state in states if state is not None), None)
+        if template is None:
+            return None
+
+        def pack_tensor(component, component_index=None):
+            pieces = []
+            for state in states:
+                if state is None:
+                    pieces.append(torch.zeros_like(component[:, :1, :]))
+                else:
+                    value = (state[component_index]
+                             if component_index is not None else state)
+                    pieces.append(value[:, :1, :].detach())
+            return torch.cat(pieces, dim=1)
+
+        if isinstance(template, tuple):
+            packed = tuple(
+                pack_tensor(template[index], index) for index in range(len(template))
+            )
+        else:
+            packed = pack_tensor(template)
+        return _zero_rows(packed, reset)
+
+    @staticmethod
+    def _unpack_hidden(state, count):
+        """Split a batched recurrent state back into one slot per env."""
+        if state is None:
+            return [None] * count
+
+        def split_tensor(component, index):
+            return component[:, index:index + 1, :].detach()
+
+        if isinstance(state, tuple):
+            return [tuple(split_tensor(component, index) for component in state)
+                    for index in range(count)]
+        return [split_tensor(state, index) for index in range(count)]
 
     def reset_indices(self, indices):
         for index in indices:
@@ -193,33 +244,51 @@ class BatchedGMMExecutor:
 
     def actions_for(self, indices, observations, external_noise_std=0.0,
                     action_low=None, action_high=None):
-        result = []
+        indices = [int(index) for index in indices]
+        if len(indices) != len(observations):
+            raise ValueError("indices and observations must have equal length")
+        if not indices:
+            return []
+        if len(set(indices)) != len(indices):
+            raise ValueError("indices contains duplicates")
+
         was_training = self.actor.training
         self.actor.eval()
         try:
-            for env_id, observation in zip(indices, observations):
-                env_id = int(env_id)
-                if self.counters[env_id] % self.horizon == 0:
-                    self.hidden[env_id] = None
-                flat = torch.as_tensor(
-                    obs_to_flat(observation)[None], dtype=torch.float32,
-                    device=next(self.actor.parameters()).device,
+            reset = torch.as_tensor(
+                [self.counters[env_id] % self.horizon == 0 for env_id in indices],
+                dtype=torch.bool, device=self.device,
+            )
+            state = self._pack_hidden([self.hidden[env_id] for env_id in indices], reset)
+            flat = torch.as_tensor(
+                np.stack([obs_to_flat(observation) for observation in observations], axis=0),
+                dtype=torch.float32, device=self.device,
+            )
+            with torch.no_grad():
+                distribution, state = self.actor.forward_train_step(
+                    flat_to_obs(flat), rnn_state=state,
                 )
-                with torch.no_grad():
-                    dist, hidden = self.actor.forward_train_step(
-                        flat_to_obs(flat), rnn_state=self.hidden[env_id],
-                    )
-                    normalized = dist.sample()
-                    action = normalized * self.scale + self.offset
-                    if float(external_noise_std) > 0:
-                        action = action + torch.randn_like(action) * float(external_noise_std)
-                    if action_low is not None:
-                        low = torch.as_tensor(action_low, device=action.device)
-                        high = torch.as_tensor(action_high, device=action.device)
-                        action = torch.maximum(torch.minimum(action, high), low)
-                self.hidden[env_id] = hidden
+                normalized = distribution.sample()
+                action = normalized * self.scale + self.offset
+                if float(external_noise_std) > 0:
+                    action = action + torch.randn_like(action) * float(external_noise_std)
+                if action_low is not None:
+                    if self._low is None or self._low.shape[-1] != len(action_low):
+                        self._low = torch.as_tensor(
+                            action_low, dtype=torch.float32, device=self.device
+                        ).reshape(1, -1)
+                        self._high = torch.as_tensor(
+                            action_high, dtype=torch.float32, device=self.device
+                        ).reshape(1, -1)
+                    action = torch.maximum(torch.minimum(action, self._high), self._low)
+
+            slots = self._unpack_hidden(state, len(indices))
+            for position, env_id in enumerate(indices):
+                self.hidden[env_id] = slots[position]
                 self.counters[env_id] += 1
-                result.append(action[0].cpu().numpy().astype(np.float32, copy=False))
+            # One synchronization/copy for the whole vector action batch.
+            host_actions = action.detach().cpu().numpy().astype(np.float32, copy=False)
+            result = [host_actions[position] for position in range(len(indices))]
         finally:
             self.actor.train(was_training)
         return result
