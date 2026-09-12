@@ -99,9 +99,12 @@ def rng_state(torch):
 
 def restore_rng(state, torch):
     random.setstate(state["python"]); np.random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch"])
+    # Checkpoints are loaded with map_location=agent.device for model and
+    # optimizer tensors. CPU RNG state must nevertheless remain a CPU byte
+    # tensor when passed to PyTorch (same for torch_npu RNG state).
+    torch.set_rng_state(state["torch"].cpu())
     if "npu" in state:
-        torch.npu.set_rng_state(state["npu"])
+        torch.npu.set_rng_state(state["npu"].cpu())
 
 
 def new_context(config, num_envs, env_id, generation):
