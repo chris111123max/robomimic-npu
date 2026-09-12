@@ -102,6 +102,15 @@ def main():
         and all(np.asarray(action).shape == (14,) for action in reset_actions)
     )
     agent = RecurrentGMMTD3(clone.train(), critic, config, device, scale, offset)
+    with torch.no_grad():
+        expected_actor_q, actor_q1, actor_q2, actor_tensors, actor_means = (
+            agent._expected_q(agent.critic, observations[:, -1], left[-1], twin_min=False))
+        manual_q1 = agent.critic.q1(
+            observations[:, -1].unsqueeze(1).expand(-1, actor_means.shape[-2], -1).reshape(-1, 59),
+            actor_means.reshape(-1, 14)).reshape_as(actor_q1)
+        actor_q1_only = (actor_q2 is None and torch.equal(actor_q1, manual_q1)
+                         and torch.allclose(expected_actor_q,
+                                            (actor_tensors["probs"] * manual_q1).sum(-1)))
     frozen_hash = module_hash(agent.actor)
     gate_9999 = agent.maybe_open_gate(9999, True, True)
     frozen = module_hash(agent.actor) == frozen_hash and not gate_9999
@@ -149,6 +158,7 @@ def main():
         "batched_executor": batched_executor_ok,
         "hidden_reset_exact": hidden_reset_exact,
         "target_final_equivalence": target_maximum <= 1e-5,
+        "actor_q1_only_equivalence": actor_q1_only,
     }
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks,

@@ -96,10 +96,18 @@ class RecurrentGMMTD3:
         batch_shape = means.shape[:-2]
         modes = means.shape[-2]
         flat_states = states.unsqueeze(-2).expand(*batch_shape, modes, 59).reshape(-1, 59)
-        q1, q2 = critic(flat_states, means.reshape(-1, 14))
-        q1 = q1.reshape(*batch_shape, modes)
-        q2 = q2.reshape(*batch_shape, modes)
-        selected = torch.minimum(q1, q2) if twin_min else q1
+        flat_means = means.reshape(-1, 14)
+        if twin_min:
+            q1, q2 = critic(flat_states, flat_means)
+            q1 = q1.reshape(*batch_shape, modes)
+            q2 = q2.reshape(*batch_shape, modes)
+            selected = torch.minimum(q1, q2)
+        else:
+            # The Actor objective is defined using Q1 alone. Running Q2 here
+            # builds an unused network graph at every recurrent train step.
+            q1 = critic.q1(flat_states, flat_means).reshape(*batch_shape, modes)
+            q2 = None
+            selected = q1
         expected = (tensors["probs"] * selected).sum(-1)
         return expected, q1, q2, tensors, means
 
