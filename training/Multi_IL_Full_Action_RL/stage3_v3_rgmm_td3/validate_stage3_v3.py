@@ -13,7 +13,7 @@ import torch
 
 from stage3_v3_actor import (BatchedGMMExecutor, _zero_rows, distribution_tensors,
                              flat_to_obs, load_exact_actor, module_hash,
-                             recurrent_distributions)
+                             recurrent_distributions, target_final_distribution)
 from stage3_v3_agent import RecurrentGMMTD3, bc_lambda
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +58,24 @@ def main():
     hidden_actual = _zero_rows(hidden_probe, reset_mask)
     hidden_reset_exact = all(torch.equal(actual, expected)
                              for actual, expected in zip(hidden_actual, hidden_expected))
+    # Compare the optimized Critic-target path with the original native
+    # step-by-step GMM path for several horizon alignments and per-row resets.
+    target_maximum = 0.0
+    for start in (0, 3, 9):
+        target_steps = torch.arange(start, start + 11, device=device).repeat(4, 1)
+        target_steps[1] += 2
+        target_steps[2] += 5
+        with torch.no_grad():
+            original, original_state = recurrent_distributions(
+                actor.eval(), observations[:, :11], target_steps, 10)
+            optimized, optimized_state = target_final_distribution(
+                actor, observations[:, :11], target_steps, 10)
+        target_maximum = max(target_maximum, *(
+            float((distribution_tensors(original[-1])[key]
+                   - distribution_tensors(optimized)[key]).abs().max())
+            for key in keys), *(
+            float((a - b).abs().max())
+            for a, b in zip(original_state, optimized_state)))
 
     critic = build_critic(59, 14, [256, 256], "relu", True, device)
     scale = torch.as_tensor(rollout.action_normalization_stats["actions"]["scale"],
@@ -130,10 +148,12 @@ def main():
         "policy_delay_four": config["policy_delay"] == 4,
         "batched_executor": batched_executor_ok,
         "hidden_reset_exact": hidden_reset_exact,
+        "target_final_equivalence": target_maximum <= 1e-5,
     }
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks,
                       "equivalence_max_abs_diff": maximum,
+                      "target_final_max_abs_diff": target_maximum,
                       "actor_metrics": metrics}, indent=2))
     raise SystemExit(0 if status == "PASS" else 1)
 

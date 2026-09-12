@@ -460,7 +460,9 @@ def main():
                             profile["actor_replay_ms"] = 1000 * (
                                 profile_clock(torch, device) - profile_started)
                             profile_started = profile_clock(torch, device)
-                        actor_metrics = agent.actor_update(actor_sequences, env_steps)
+                        actor_metrics = agent.actor_update(
+                            actor_sequences, env_steps,
+                            collect_metrics=collect_metrics)
                         if profile_actor:
                             profile["actor_update_ms"] = 1000 * (
                                 profile_clock(torch, device) - profile_started)

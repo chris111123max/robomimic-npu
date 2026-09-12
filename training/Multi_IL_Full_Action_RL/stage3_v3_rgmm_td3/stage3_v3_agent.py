@@ -11,7 +11,7 @@ import torch
 
 from stage3_v3_actor import (distribution_tensors, environment_means,
                              module_hash, normalize_actions,
-                             recurrent_distributions)
+                             recurrent_distributions, target_final_distribution)
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -106,14 +106,11 @@ class RecurrentGMMTD3:
     def critic_update(self, batch, target_sequence, collect_metrics=True):
         b = self._tensor_batch(batch)
         target = self._tensor_batch(target_sequence)
-        burn = int(self.config["recurrent_replay"]["burn_in"])
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         with torch.no_grad():
-            distributions, _ = recurrent_distributions(
+            distribution, _ = target_final_distribution(
                 self.target_actor, target["next_observations"],
-                target["episode_steps"] + 1, horizon=horizon,
-                no_grad_prefix=burn)
-            distribution = distributions[-1]
+                target["episode_steps"] + 1, horizon=horizon)
             expected_next, _, _, _, _ = self._expected_q(
                 self.target_critic, target["next_observations"][:, -1], distribution)
             td_target = b["rewards"] + float(self.config["gamma"]) * (
@@ -144,7 +141,7 @@ class RecurrentGMMTD3:
             "critic_grad_norm": critic_grad,
         }
 
-    def actor_update(self, sequences, env_steps):
+    def actor_update(self, sequences, env_steps, collect_metrics=True):
         if not self.actor_gate_open:
             raise RuntimeError("Actor update attempted while competence gate is closed")
         self.actor.train()
@@ -157,8 +154,11 @@ class RecurrentGMMTD3:
         learn_distributions = distributions[burn:]
         for parameter in self.critic.parameters():
             parameter.requires_grad_(False)
-        rl_terms, nll_terms, entropies, max_probs, pairwise = [], [], [], [], []
-        component_q_values = []
+        rl_terms, nll_terms = [], []
+        entropies, max_probs, pairwise, component_q_values = [], [], [], []
+        offline = b["is_offline"].bool()
+        if not np.any(sequences["is_offline"]):
+            raise RuntimeError("Actor BC-GMM NLL requires offline demonstrations")
         for local, distribution in enumerate(learn_distributions):
             index = burn + local
             expected, q1, _, tensors, means = self._expected_q(
@@ -168,18 +168,16 @@ class RecurrentGMMTD3:
             normalized_actions = normalize_actions(
                 b["actions"][:, index:index + 1], self.action_scale,
                 self.action_offset)[:, 0]
-            offline = b["is_offline"].bool()
-            if not bool(offline.any()):
-                raise RuntimeError("Actor BC-GMM NLL requires offline demonstrations")
             nll_terms.append(-distribution.log_prob(normalized_actions)[offline].mean())
-            probabilities = tensors["probs"]
-            entropies.append((-(probabilities * probabilities.clamp_min(1e-8).log()).sum(-1)).mean())
-            max_probs.append(probabilities.max(-1).values.mean())
-            component_q_values.append(q1.mean())
-            distances = torch.cdist(means, means)
-            modes = means.shape[-2]
-            mask = ~torch.eye(modes, dtype=torch.bool, device=means.device)
-            pairwise.append(distances[..., mask].mean())
+            if collect_metrics:
+                probabilities = tensors["probs"]
+                entropies.append((-(probabilities * probabilities.clamp_min(1e-8).log()).sum(-1)).mean())
+                max_probs.append(probabilities.max(-1).values.mean())
+                component_q_values.append(q1.mean())
+                distances = torch.cdist(means, means)
+                modes = means.shape[-2]
+                mask = ~torch.eye(modes, dtype=torch.bool, device=means.device)
+                pairwise.append(distances[..., mask].mean())
         actor_rl = torch.stack(rl_terms).mean()
         actor_bc = torch.stack(nll_terms).mean()
         weight = bc_lambda(self.config["bc_lambda_schedule"], env_steps)
@@ -188,12 +186,14 @@ class RecurrentGMMTD3:
             raise FloatingPointError("Non-finite Stage3-v3 Actor loss")
         self.actor_optimizer.zero_grad(set_to_none=True)
         total.backward()
-        actor_grad = grad_norm(self.actor.parameters())
+        actor_grad = grad_norm(self.actor.parameters()) if collect_metrics else None
         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.config["actor_max_grad_norm"]))
         self.actor_optimizer.step()
         for parameter in self.critic.parameters():
             parameter.requires_grad_(True)
         self.actor_updates += 1
+        if not collect_metrics:
+            return {}
         return {
             "actor_rl_loss": float(actor_rl.item()),
             "actor_bc_loss_raw": float(actor_bc.item()),

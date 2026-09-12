@@ -176,6 +176,33 @@ def recurrent_distributions(actor, observations, episode_steps, horizon=10,
     return outputs, state
 
 
+@torch.no_grad()
+def target_final_distribution(actor, observations, episode_steps, horizon=10):
+    """Reconstruct target RNN state without decoding unused burn-in GMM heads.
+
+    The Critic target consumes only the final distribution. Keep the native
+    ``forward_train_step`` for that final step and use the very same encoder
+    and LSTM modules for the preceding steps, including horizon resets.
+    """
+    if observations.ndim != 3 or observations.shape[-1] != 59:
+        raise ValueError("Recurrent observations must have shape [B,T,59]")
+    if episode_steps.shape != observations.shape[:2]:
+        raise ValueError("episode_steps must have shape [B,T]")
+    if observations.shape[1] < 1:
+        raise ValueError("Target sequence must contain at least one observation")
+    state = None
+    for index in range(observations.shape[1] - 1):
+        reset = episode_steps[:, index].remainder(int(horizon)).eq(0)
+        state = _zero_rows(state, reset)
+        encoded = actor.nets["encoder"](obs=flat_to_obs(observations[:, index]))
+        if state is None:
+            state = actor.get_rnn_init_state(encoded.shape[0], encoded.device)
+        _, state = actor.nets["rnn"].nets(encoded.unsqueeze(1), state)
+    last = observations.shape[1] - 1
+    state = _zero_rows(state, episode_steps[:, last].remainder(int(horizon)).eq(0))
+    return actor.forward_train_step(flat_to_obs(observations[:, last]), rnn_state=state)
+
+
 class BatchedGMMExecutor:
     """Batched recurrent execution with per-environment hidden slots.
 
