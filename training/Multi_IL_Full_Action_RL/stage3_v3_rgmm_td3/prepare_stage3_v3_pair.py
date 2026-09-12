@@ -13,6 +13,7 @@ import torch
 
 from stage3_v3_actor import load_exact_actor, module_hash
 from stage3_v3_agent import strict_stage2_load
+from stage3_v3_phase0_reuse import PHASE0_FILES, validate_phase0_reuse
 
 HERE = Path(__file__).resolve().parent
 
@@ -48,6 +49,7 @@ def arguments():
     parser.add_argument("--rnn-q-checkpoint", required=True)
     parser.add_argument("--multi-q-checkpoint", required=True)
     parser.add_argument("--total-env-steps", type=int)
+    parser.add_argument("--reuse-phase0-from", help="completed compatible Stage3-v3 pair")
     return parser.parse_args()
 
 
@@ -116,6 +118,9 @@ def main():
     config["bc_rnn_checkpoint_sha256"] = checkpoint_sha
     config["expert_dataset"] = str(expert_dataset)
     config["expert_dataset_sha256"] = sha256(expert_dataset)
+    actor_hash = module_hash(actor)
+    phase0_reuse = (validate_phase0_reuse(args.reuse_phase0_from, config, actor_hash)
+                    if args.reuse_phase0_from else None)
     run_id = args.run_id or datetime.now().strftime("stage3v3_%Y%m%d_%H%M%S")
     run = Path(config["output_root"]) / run_id
     if run.exists():
@@ -131,7 +136,7 @@ def main():
         "stage": "stage3-v3", "source_checkpoint": str(bc_checkpoint),
         "source_checkpoint_sha256": config["bc_rnn_checkpoint_sha256"],
         "actor_state_dict": {key: value.detach().cpu() for key, value in actor.state_dict().items()},
-        "actor_hash": module_hash(actor), "metadata": actor_metadata,
+        "actor_hash": actor_hash, "metadata": actor_metadata,
         "action_normalization_stats": rollout.action_normalization_stats,
     }
     torch.save(actor_payload, shared / "actor_init.pth")
@@ -147,7 +152,7 @@ def main():
         "stage": "stage3-v3", "status": "PREPARED",
         "only_primary_variable": "Stage2 Critic initialization checkpoint",
         "branches": ["rnn_q", "multi_q"], "actor_hashes_identical": True,
-        "actor_hash": module_hash(actor), "actor_checkpoint_sha256": sha256(immutable_bc),
+        "actor_hash": actor_hash, "actor_checkpoint_sha256": sha256(immutable_bc),
         "actor_optimizer": {"type": "Adam", "lr": config["actor_lr"], "weight_decay": 0.0},
         "critic_optimizer": {"type": "AdamW", "lr": config["critic_lr"],
                              "weight_decay": config["critic_weight_decay"]},
@@ -161,9 +166,19 @@ def main():
     write_json(shared / "stage2_source_manifest.json", critic_sources)
     write_json(shared / "seed_manifest.json", seed_manifest)
     write_json(shared / "pair_fairness.json", fairness)
+    if phase0_reuse is not None:
+        source_shared = Path(phase0_reuse["source_pair_run_dir"]) / "shared"
+        for name in PHASE0_FILES:
+            destination = shared / name
+            shutil.copyfile(source_shared / name, destination)
+            if sha256(destination) != phase0_reuse["artifact_sha256"][name]:
+                destination.unlink()
+                raise RuntimeError(f"Phase-0 artifact changed while copying: {name}")
+        write_json(shared / "phase0_reuse_manifest.json", phase0_reuse)
     print(json.dumps({"status": "PREPARED", "pair_run_dir": str(run.resolve()),
-                      "actor_hash": module_hash(actor),
-                      "next": "run_phase0_stage3_v3.py"}, indent=2))
+                      "actor_hash": actor_hash, "phase0_reused": phase0_reuse is not None,
+                      "next": ("train_stage3_v3_vector.py" if phase0_reuse
+                               else "run_phase0_stage3_v3.py")}, indent=2))
 
 
 if __name__ == "__main__":

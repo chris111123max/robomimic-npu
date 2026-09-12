@@ -136,13 +136,14 @@ def normalize_actions(actions, action_scale, action_offset):
 
 
 def _zero_rows(state, reset):
-    if state is None or not bool(reset.any()):
+    if state is None:
         return state
     if isinstance(state, tuple):
         return tuple(_zero_rows(item, reset) for item in state)
-    state = state.clone()
-    state[:, reset, :] = 0
-    return state
+    # Keep the reset mask on the device. Converting reset.any() to a Python
+    # bool forced an NPU/CPU synchronization at every recurrent timestep;
+    # the target Actor runs this path for every Critic update.
+    return torch.where(reset.reshape(1, -1, 1), torch.zeros_like(state), state)
 
 
 def recurrent_distributions(actor, observations, episode_steps, horizon=10,

@@ -43,6 +43,8 @@ every four Critic updates once the 10k competence gate is open.
 Rollout Actor inference is vectorized across all active environments: recurrent
 hidden states are packed into one batch and actions are copied from the NPU to
 the host once per vector step.
+Recurrent hidden-state resets use a device-side mask, avoiding a host/device
+sync at each timestep of the Critic target Actor's context reconstruction.
 
 Each Critic update uses 128 offline and 128 online boundary-safe sequences. The
 last transition is the memoryless Critic sample; the preceding recurrent
@@ -84,10 +86,12 @@ python "$SCRIPT_DIR/prepare_stage3_v3_pair.py" \
 `--expert-dataset` is optional. By default the authoritative path embedded in
 the checkpoint is used.
 
-## 3. Mandatory Phase 0
+## 3. Phase 0 or validated reuse
 
 This performs exact transfer validation and 20 closed-loop episodes. It makes
 no RL update and fails unless at least 10 of 20 episodes succeed.
+If the same pair already has a complete passing Phase 0, rerunning this
+command returns the recorded result without repeating the episodes.
 
 ```bash
 python "$SCRIPT_DIR/run_phase0_stage3_v3.py" \
@@ -102,6 +106,27 @@ cat "$PAIR_RUN_DIR/shared/transfer_validation.json"
 cat "$PAIR_RUN_DIR/shared/step0_competence.json"
 cat "$PAIR_RUN_DIR/shared/phase0_gate.json"
 ```
+
+For a new pair with the same BC checkpoint, expert dataset, Actor structure,
+evaluation seeds, horizon, and gate requirements, pass an existing completed
+Stage3-v3 pair to `prepare_stage3_v3_pair.py`:
+
+```bash
+REFERENCE_PHASE0_PAIR=/path/to/completed/stage3_v3_pair
+python "$SCRIPT_DIR/prepare_stage3_v3_pair.py" \
+  --run-id "$PAIR_ID" \
+  --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" \
+  --rnn-q-checkpoint "$RNN_Q_CHECKPOINT" \
+  --multi-q-checkpoint "$MULTI_Q_CHECKPOINT" \
+  --reuse-phase0-from "$REFERENCE_PHASE0_PAIR"
+```
+
+The prepare command verifies the original episode-level evidence, Actor hash,
+checkpoint and dataset hashes, and evaluation contract before copying the three
+Phase-0 artifacts. Its output contains `"phase0_reused": true`; the new pair
+also records `shared/phase0_reuse_manifest.json`. Training settings such as
+`policy_delay` may change without repeating Phase 0. Skip the Phase-0 command
+for this new pair and launch training directly.
 
 ## 4. Smoke
 
@@ -123,8 +148,8 @@ python -u "$SCRIPT_DIR/train_stage3_v3_vector.py" \
 
 ## 5. Formal paired launch
 
-Only run these after the validator, Phase 0, and smoke pass. Prepare a new pair
-for formal training. The commands below do not run automatically.
+Run these after the validator and a passing Phase 0 (fresh or reused). Prepare
+a new pair for formal training. The commands below do not run automatically.
 
 ```bash
 export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True

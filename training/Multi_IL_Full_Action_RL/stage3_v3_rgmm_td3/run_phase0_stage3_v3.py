@@ -15,6 +15,7 @@ from stage3_v3_actor import (distribution_tensors, environment_means,
                              flat_to_obs, load_exact_actor, module_hash,
                              recurrent_distributions)
 from stage3_v3_evaluation import build_env, close_env, evaluate_actor
+from stage3_v3_phase0_reuse import PHASE0_FILES, validate_phase0_reuse
 from stage3_v3_replay import OfflineDemonstrations
 
 
@@ -68,6 +69,13 @@ def main():
     args = parser.parse_args()
     pair = Path(args.pair_run_dir).resolve()
     config = read_json(pair / "shared" / "config_resolved.json")
+    if all((pair / "shared" / name).is_file() for name in PHASE0_FILES):
+        fairness = read_json(pair / "shared" / "pair_fairness.json")
+        reuse = validate_phase0_reuse(pair, config, fairness["actor_hash"])
+        print(json.dumps({"status": "PASS", "phase0_already_complete": True,
+                          "success_count": reuse["success_count"],
+                          "success_rate": reuse["success_rate"]}, indent=2))
+        return
     device = resolve_device(args.device)
     seed_all(config["training_seed"])
     source, rollout, metadata = load_exact_actor(config["bc_rnn_checkpoint"], device)

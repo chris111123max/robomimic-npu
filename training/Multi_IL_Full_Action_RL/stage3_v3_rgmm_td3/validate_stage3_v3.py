@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from stage3_v3_actor import (BatchedGMMExecutor, distribution_tensors,
+from stage3_v3_actor import (BatchedGMMExecutor, _zero_rows, distribution_tensors,
                              flat_to_obs, load_exact_actor, module_hash,
                              recurrent_distributions)
 from stage3_v3_agent import RecurrentGMMTD3, bc_lambda
@@ -49,6 +49,15 @@ def main():
                   for a, b in zip(left, right) for key in keys)
     maximum = max(maximum, *(float((a - b).abs().max())
                                for a, b in zip(hidden_left, hidden_right)))
+    reset_mask = torch.tensor([False, True, False, True], device=device)
+    hidden_probe = (torch.randn(2, 4, 7, device=device),
+                    torch.randn(2, 4, 7, device=device))
+    hidden_expected = tuple(value.clone() for value in hidden_probe)
+    for value in hidden_expected:
+        value[:, reset_mask, :] = 0
+    hidden_actual = _zero_rows(hidden_probe, reset_mask)
+    hidden_reset_exact = all(torch.equal(actual, expected)
+                             for actual, expected in zip(hidden_actual, hidden_expected))
 
     critic = build_critic(59, 14, [256, 256], "relu", True, device)
     scale = torch.as_tensor(rollout.action_normalization_stats["actions"]["scale"],
@@ -120,6 +129,7 @@ def main():
         "utd_one": config["utd"] == 1,
         "policy_delay_four": config["policy_delay"] == 4,
         "batched_executor": batched_executor_ok,
+        "hidden_reset_exact": hidden_reset_exact,
     }
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks,
