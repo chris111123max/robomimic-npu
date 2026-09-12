@@ -53,6 +53,19 @@ def log_jsonl(path, value):
         handle.write(json.dumps(value, sort_keys=True) + "\n")
 
 
+def profile_clock(torch, device):
+    """Return a wall clock after pending device work has completed.
+
+    Only use this in a sampled profiling round. Synchronizing on every
+    transition would itself reduce training throughput.
+    """
+    if device.type == "npu":
+        torch.npu.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize(device)
+    return time.perf_counter()
+
+
 def file_hash(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -339,15 +352,27 @@ def main():
                           if step > env_steps]
             boundary = min(boundaries) if boundaries else total
             count = min(num_envs, total - env_steps, boundary - env_steps)
+            profile_round = env_steps // 1000 != (env_steps + count) // 1000
+            profile = {}
             active = [(active_cursor + index) % num_envs for index in range(count)]
             active_cursor = (active_cursor + count) % num_envs
+            if profile_round:
+                profile_started = profile_clock(torch, device)
             actions = executor.actions_for(
                 active, [observations[index] for index in active],
                 config["exploration"]["external_action_noise_std"],
                 vector.action_low if config["exploration"]["clip_to_env_bounds"] else None,
                 vector.action_high if config["exploration"]["clip_to_env_bounds"] else None)
+            if profile_round:
+                profile["actor_inference_ms"] = 1000 * (
+                    profile_clock(torch, device) - profile_started)
             states = {env_id: obs_to_flat(observations[env_id]) for env_id in active}
+            if profile_round:
+                profile_started = time.perf_counter()
             results = vector.step(actions, active)
+            if profile_round:
+                profile["vector_env_step_ms"] = 1000 * (
+                    time.perf_counter() - profile_started)
             action_by_env = dict(zip(active, actions))
             for env_id, message in results:
                 context = contexts[env_id]
@@ -398,27 +423,54 @@ def main():
                 context_length = int(config["recurrent_replay"]["critic_context_length"])
                 if (env_steps >= config["min_online_replay_size"]
                         and online.can_sample(context_length)):
+                    profile_critic = profile_round and "critic_update_ms" not in profile
+                    if profile_critic:
+                        profile_started = profile_clock(torch, device)
                     critic_sequences = symmetric_sequence_batch(
                         offline, online, 256, context_length)
+                    critic_batch = final_transition(critic_sequences)
+                    if profile_critic:
+                        profile["critic_replay_ms"] = 1000 * (
+                            profile_clock(torch, device) - profile_started)
+                        profile_started = profile_clock(torch, device)
                     collect_metrics = (
                         (agent.critic_updates + 1)
                         % int(config["train_metrics_interval_updates"]) == 0
                     )
                     metrics = agent.critic_update(
-                        final_transition(critic_sequences), critic_sequences,
+                        critic_batch, critic_sequences,
                         collect_metrics=collect_metrics)
+                    if profile_critic:
+                        profile["critic_update_ms"] = 1000 * (
+                            profile_clock(torch, device) - profile_started)
                     actor_metrics = {}
                     actor_length = (int(config["recurrent_replay"]["burn_in"])
                                     + int(config["recurrent_replay"]["train_seq_len"]))
                     if (agent.actor_gate_open
                             and agent.critic_updates % int(config["policy_delay"]) == 0
                             and online.can_sample(actor_length)):
+                        profile_actor = profile_round and "actor_update_ms" not in profile
+                        if profile_actor:
+                            profile_started = profile_clock(torch, device)
                         actor_sequences = symmetric_sequence_batch(
                             offline, online,
                             int(config["recurrent_replay"]["actor_sequence_batch_size"]),
                             actor_length)
+                        if profile_actor:
+                            profile["actor_replay_ms"] = 1000 * (
+                                profile_clock(torch, device) - profile_started)
+                            profile_started = profile_clock(torch, device)
                         actor_metrics = agent.actor_update(actor_sequences, env_steps)
+                        if profile_actor:
+                            profile["actor_update_ms"] = 1000 * (
+                                profile_clock(torch, device) - profile_started)
+                    profile_polyak = profile_critic
+                    if profile_polyak:
+                        profile_started = profile_clock(torch, device)
                     agent.polyak_update()
+                    if profile_polyak:
+                        profile["polyak_update_ms"] = 1000 * (
+                            profile_clock(torch, device) - profile_started)
                     metrics.update(actor_metrics)
                     metrics.update({"env_steps": env_steps, "updates": agent.critic_updates,
                                     "actor_updates": agent.actor_updates,
@@ -455,6 +507,16 @@ def main():
                 if env_steps in evaluation_steps:
                     run_evaluation(env_steps)
 
+            if profile_round:
+                log_jsonl(group_dir / "stage_timing.jsonl", {
+                    "env_steps": env_steps, "group": args.group,
+                    "policy_delay": int(config["policy_delay"]),
+                    "sampled_vector_envs": count,
+                    "sampled_critic_updates": int("critic_update_ms" in profile),
+                    "sampled_actor_updates": int("actor_update_ms" in profile),
+                    "timing_semantics": "one sampled vector round; device synchronized at measured boundaries",
+                    **profile,
+                })
             if env_steps - last_report_step >= 1000:
                 now = time.monotonic()
                 speed = (env_steps - last_report_step) / max(now - last_report_time, 1e-9)

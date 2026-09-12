@@ -118,7 +118,7 @@ def main():
         "no_sac_alpha": "alpha_lr" not in config and "target_entropy" not in config,
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
         "utd_one": config["utd"] == 1,
-        "policy_delay_eight": config["policy_delay"] == 8,
+        "policy_delay_four": config["policy_delay"] == 4,
         "batched_executor": batched_executor_ok,
     }
     status = "PASS" if all(checks.values()) else "FAIL"

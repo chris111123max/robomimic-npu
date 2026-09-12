@@ -37,8 +37,8 @@ L_actor = -mean(sum_k p[k] * Q1(s, mu[k]))
 The RL term updates component means and mixture logits. The offline GMM NLL also
 maintains the scale head. Online CQL, SAC entropy/alpha, Q filters, AWAC,
 recurrent Critics, fallback policies, and handoff selectors are disabled.
-The delayed Actor update uses `policy_delay=8`, meaning one Actor update after
-every eight Critic updates once the 10k competence gate is open.
+The delayed Actor update uses `policy_delay=4`, meaning one Actor update after
+every four Critic updates once the 10k competence gate is open.
 
 Rollout Actor inference is vectorized across all active environments: recurrent
 hidden states are packed into one batch and actions are copied from the NPU to
@@ -166,6 +166,14 @@ echo "PAIR_RUN_DIR=$PAIR_RUN_DIR"
 Shared gate artifacts are under `shared/`. Each branch contains
 `train_metrics.jsonl`, `episode_metrics.jsonl`, `gate_metrics.jsonl`,
 `throughput_metrics.jsonl`, `evaluations/`, `diagnostics/`, and `checkpoints/`.
+
+`stage_timing.jsonl` records one synchronized profiling round approximately
+every 1000 aggregate environment steps. It separates batched Actor inference,
+vector environment stepping, replay sampling, one Critic update, one Actor
+update when the gate is open, and one target-network Polyak update. The
+Critic and Actor times are for one sampled update, not the whole vector round;
+the profiler does not change UTD or policy delay. Inspect recent samples with
+`tail -n 5 "$PAIR_RUN_DIR/multi_q/stage_timing.jsonl"`.
 Checkpoints include `step0_transfer.pth`, `gate_open.pth`, `best_success.pth`,
 milestone checkpoints, `latest.pth`, and `last.pth`. Resume with
 `--resume /path/to/last.pth`; partial simulator episodes are deliberately reset.
