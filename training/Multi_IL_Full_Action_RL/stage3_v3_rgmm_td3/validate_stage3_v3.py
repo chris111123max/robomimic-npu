@@ -180,6 +180,8 @@ def main():
         "target_final_equivalence": target_maximum <= 1e-5,
         "actor_q1_only_equivalence": actor_q1_only,
     }
+    # NumPy comparisons return np.bool_, which json.dumps cannot serialize.
+    checks = {name: bool(value) for name, value in checks.items()}
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks,
                       "equivalence_max_abs_diff": maximum,
