@@ -75,6 +75,46 @@ class RecurrentGMMTD3:
                               for key, value in actor.state_dict().items()}
         self.reference_actor = copy.deepcopy(actor).to(device).eval()
         self.reference_actor.requires_grad_(False)
+        adaptive = config["adaptive_bc"]
+        self.bc_weight = float(adaptive["initial_weight"])
+        self.bc_ema_success = None
+        self.bc_last_success = None
+        self.bc_feedback_count = 0
+
+    def update_bc_feedback(self, success_rate):
+        """PD-style BC feedback, applied only after a valid fixed-seed evaluation."""
+        if success_rate is None:
+            return self.bc_weight
+        value = float(success_rate)
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError("Evaluation success rate must be finite and in [0, 1]")
+        cfg = self.config["adaptive_bc"]
+        previous_ema = self.bc_ema_success
+        ema = value if previous_ema is None else (
+            float(cfg["ema_rate"]) * value
+            + (1.0 - float(cfg["ema_rate"])) * previous_ema)
+        if previous_ema is not None:
+            change = (float(cfg["kp"]) * (ema - float(cfg["target_success_rate"]))
+                      + float(cfg["kd"]) * max(0.0, previous_ema - value))
+            self.bc_weight = min(float(cfg["max_weight"]), max(
+                float(cfg["min_weight"]), self.bc_weight + change))
+        self.bc_ema_success = ema
+        self.bc_last_success = value
+        self.bc_feedback_count += 1
+        return self.bc_weight
+
+    def bc_state(self):
+        return {"weight": self.bc_weight, "ema_success": self.bc_ema_success,
+                "last_success": self.bc_last_success,
+                "feedback_count": self.bc_feedback_count}
+
+    def load_bc_state(self, state):
+        if state is None:
+            raise RuntimeError("Adaptive BC state missing from resume checkpoint")
+        self.bc_weight = float(state["weight"])
+        self.bc_ema_success = state["ema_success"]
+        self.bc_last_success = state["last_success"]
+        self.bc_feedback_count = int(state["feedback_count"])
 
     def maybe_open_gate(self, env_steps, equivalence_pass, competence_pass):
         if (not self.actor_gate_open and equivalence_pass and competence_pass
@@ -162,7 +202,7 @@ class RecurrentGMMTD3:
         learn_distributions = distributions[burn:]
         for parameter in self.critic.parameters():
             parameter.requires_grad_(False)
-        rl_terms, nll_terms = [], []
+        rl_terms, nll_terms, q_data_scales = [], [], []
         entropies, max_probs, pairwise, component_q_values = [], [], [], []
         offline = b["is_offline"].bool()
         if not np.any(sequences["is_offline"]):
@@ -173,6 +213,10 @@ class RecurrentGMMTD3:
                 self.critic, b["observations"][:, index], distribution,
                 twin_min=False)
             rl_terms.append(-expected.mean())
+            with torch.no_grad():
+                data_q = self.critic.q1(
+                    b["observations"][:, index], b["actions"][:, index])
+                q_data_scales.append(data_q.abs().mean())
             normalized_actions = normalize_actions(
                 b["actions"][:, index:index + 1], self.action_scale,
                 self.action_offset)[:, 0]
@@ -188,8 +232,12 @@ class RecurrentGMMTD3:
                 pairwise.append(distances[..., mask].mean())
         actor_rl = torch.stack(rl_terms).mean()
         actor_bc = torch.stack(nll_terms).mean()
-        weight = bc_lambda(self.config["bc_lambda_schedule"], env_steps)
-        total = actor_rl + weight * actor_bc
+        q_scale = torch.stack(q_data_scales).mean().clamp_min(
+            float(self.config["q_scale_normalization"]["epsilon"]))
+        normalized_rl = (float(self.config["q_scale_normalization"]["alpha"])
+                         * actor_rl / q_scale.detach())
+        weight = self.bc_weight
+        total = normalized_rl + weight * actor_bc
         if not torch.isfinite(total):
             raise FloatingPointError("Non-finite Stage3-v3 Actor loss")
         self.actor_optimizer.zero_grad(set_to_none=True)
@@ -204,10 +252,15 @@ class RecurrentGMMTD3:
             return {}
         return {
             "actor_rl_loss": float(actor_rl.item()),
+            "actor_rl_loss_normalized": float(normalized_rl.item()),
+            "actor_q_data_abs_mean": float(q_scale.item()),
             "actor_bc_loss_raw": float(actor_bc.item()),
             "actor_bc_loss_weighted": float((weight * actor_bc).item()),
             "actor_total_loss": float(total.item()),
-            "lambda_bc": weight, "actor_grad_norm": actor_grad,
+            "lambda_bc": weight,
+            "bc_ema_success": (self.bc_ema_success if self.bc_ema_success is not None
+                               else 0.0),
+            "actor_grad_norm": actor_grad,
             "gmm_entropy": float(torch.stack(entropies).mean().item()),
             "mixture_prob_mean": float(1.0 / self.config["actor_source_contract"]["num_modes"]),
             "mixture_prob_max": float(torch.stack(max_probs).mean().item()),

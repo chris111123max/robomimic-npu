@@ -30,15 +30,21 @@ y = r + gamma * (1-terminal) *
 There is no target policy smoothing. The delayed Actor objective is
 
 ```text
-L_actor = -mean(sum_k p[k] * Q1(s, mu[k]))
-          + lambda_bc * mean_offline(-log GMM(a_demo | history))
+L_actor = -alpha * mean(sum_k p[k] * Q1(s, mu[k]))
+          / stop_gradient(mean(abs(Q1(s, a_replay))))
+          + adaptive_lambda_bc * mean_offline(-log GMM(a_demo | history))
 ```
 
 The RL term updates component means and mixture logits. The offline GMM NLL also
 maintains the scale head. Online CQL, SAC entropy/alpha, Q filters, AWAC,
 recurrent Critics, fallback policies, and handoff selectors are disabled.
-The delayed Actor update uses `policy_delay=4`, meaning one Actor update after
-every four Critic updates once the 10k competence gate is open.
+The delayed Actor update uses `policy_delay=2`, meaning one Actor update after
+every two Critic updates once the 10k competence gate is open. The RL term uses
+TD3+BC-style batch Q-scale normalization (`alpha=2.5`). The BC coefficient
+starts at 1 and changes only after valid fixed-seed evaluations using a
+performance/decline feedback rule, bounded to `[0, 1]`. Its controller state is
+saved in checkpoints and restored on resume. These coefficients are experiment
+settings, not values proven optimal for TwoArmTransport.
 
 Rollout Actor inference is vectorized across all active environments: recurrent
 hidden states are packed into one batch and actions are copied from the NPU to

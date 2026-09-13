@@ -14,7 +14,7 @@ import torch
 from stage3_v3_actor import (BatchedGMMExecutor, _zero_rows, distribution_tensors,
                              flat_to_obs, load_exact_actor, module_hash,
                              recurrent_distributions, target_final_distribution)
-from stage3_v3_agent import RecurrentGMMTD3, bc_lambda
+from stage3_v3_agent import RecurrentGMMTD3
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -139,6 +139,23 @@ def main():
     before = module_hash(agent.actor)
     metrics = agent.actor_update(batch, 10000)
     actor_changed = module_hash(agent.actor) != before
+    initial_weight = agent.bc_weight
+    agent.update_bc_feedback(0.65)
+    baseline_state = agent.bc_state()
+    agent.update_bc_feedback(0.2)
+    drop_weight = agent.bc_weight
+    bc_state = agent.bc_state()
+    clone_agent = RecurrentGMMTD3(copy.deepcopy(actor).train(),
+                                  build_critic(59, 14, [256, 256], "relu", True, device),
+                                  config, device, scale, offset)
+    clone_agent.load_bc_state(bc_state)
+    clone_agent.load_bc_state(baseline_state)
+    clone_agent.update_bc_feedback(0.2)
+    feedback_reproducible = clone_agent.bc_state() == bc_state
+    clone_agent.load_bc_state(bc_state)
+    for _ in range(8):
+        clone_agent.update_bc_feedback(0.2)
+    sustained_low_weight = clone_agent.bc_weight
     checks = {
         "exact_native_class": metadata["network_class"] == "RNNGMMActorNetwork",
         "parameter_count": metadata["parameter_count"] == 2078945,
@@ -146,15 +163,18 @@ def main():
         "frozen_before_10k": frozen, "gate_latched_at_10k": latched,
         "actor_update_changes_actor": actor_changed,
         "actor_loss_finite": all(np.isfinite(value) for value in metrics.values()),
-        "bc_schedule": bool(np.allclose(
-            [bc_lambda(config["bc_lambda_schedule"], step)
-             for step in (10000, 100000, 300000, 500000)],
-            [1.0, 1.0, 0.2, 0.0], atol=1e-6, rtol=0.0)),
+        "adaptive_bc_feedback": (initial_weight == 1.0 and drop_weight == 1.0
+                                 and sustained_low_weight < drop_weight),
+        "adaptive_bc_resume_state": feedback_reproducible,
+        "q_scale_normalization": (config["q_scale_normalization"]["enabled"] is True
+                                  and np.isfinite(metrics["actor_q_data_abs_mean"])
+                                  and metrics["actor_q_data_abs_mean"] > 0
+                                  and np.isfinite(metrics["actor_rl_loss_normalized"])),
         "no_online_cql": config["online_cql"]["enabled"] is False,
         "no_sac_alpha": "alpha_lr" not in config and "target_entropy" not in config,
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
         "utd_one": config["utd"] == 1,
-        "policy_delay_four": config["policy_delay"] == 4,
+        "policy_delay_two": config["policy_delay"] == 2,
         "batched_executor": batched_executor_ok,
         "hidden_reset_exact": hidden_reset_exact,
         "target_final_equivalence": target_maximum <= 1e-5,

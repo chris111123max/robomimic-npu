@@ -18,7 +18,7 @@
   "offline_fraction": 0.5,
   "online_fraction": 0.5,
   "utd": 1,
-  "policy_delay": 4,
+  "policy_delay": 2,
   "min_online_replay_size": 1000,
   "online_replay_capacity": 1000000,
   "online_sequence_capacity": 250000,
@@ -55,13 +55,17 @@
     "warmup_env_steps": 10000,
     "latched": true
   },
-  "bc_lambda_schedule": [
-    {"step": 10000, "value": 1.0},
-    {"step": 100000, "value": 1.0},
-    {"step": 300000, "value": 0.2},
-    {"step": 500000, "value": 0.0},
-    {"step": 3000000, "value": 0.0}
-  ],
+  "adaptive_bc": {
+    "initial_weight": 1.0,
+    "min_weight": 0.0,
+    "max_weight": 1.0,
+    "target_success_rate": 0.65,
+    "ema_rate": 0.5,
+    "kp": 0.1,
+    "kd": 0.5,
+    "feedback_source": "fixed_seed_evaluation_success_rate"
+  },
+  "q_scale_normalization": {"enabled": true, "alpha": 2.5, "epsilon": 0.000001},
   "exploration": {
     "execution": "checkpoint_gmm_categorical_plus_component_sample",
     "external_action_noise_std": 0.0,

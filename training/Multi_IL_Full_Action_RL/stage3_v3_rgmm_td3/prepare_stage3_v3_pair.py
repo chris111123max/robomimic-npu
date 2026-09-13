@@ -59,13 +59,23 @@ def validate_config(config):
         "activation": "relu", "critic_layer_norm": True, "gamma": 0.99,
         "tau": 0.005, "critic_lr": 3e-4, "critic_weight_decay": 1e-4,
         "batch_size": 256, "offline_fraction": 0.5, "online_fraction": 0.5,
-        "utd": 1, "policy_delay": 4,
+        "utd": 1, "policy_delay": 2,
     }
     for key, value in fixed.items():
         if config.get(key) != value:
             raise RuntimeError(f"Stage3-v3 fixed contract changed: {key}")
     if config["online_cql"]["enabled"]:
         raise RuntimeError("Stage3-v3 v1 forbids online CQL")
+    adaptive = config["adaptive_bc"]
+    if not (0 <= adaptive["min_weight"] <= adaptive["initial_weight"] <= adaptive["max_weight"]
+            and 0 < adaptive["ema_rate"] <= 1 and 0 <= adaptive["target_success_rate"] <= 1
+            and adaptive["kp"] >= 0 and adaptive["kd"] >= 0
+            and adaptive["feedback_source"] == "fixed_seed_evaluation_success_rate"):
+        raise RuntimeError("Invalid adaptive BC configuration")
+    normalization = config["q_scale_normalization"]
+    if not (normalization["enabled"] is True and normalization["alpha"] > 0
+            and normalization["epsilon"] > 0):
+        raise RuntimeError("Invalid Q scale normalization configuration")
     if config["actor_gate"] != {
         "equivalence_tolerance": 1e-5, "competence_episodes": 20,
         "competence_min_successes": 10, "warmup_env_steps": 10000,

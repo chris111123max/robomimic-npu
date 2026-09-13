@@ -147,8 +147,8 @@ def checkpoint_payload(agent, config, group, env_steps, generations,
         "actor_optimizer": agent.actor_optimizer.state_dict(),
         "critic_optimizer": agent.critic_optimizer.state_dict(),
         "actor_gate_open": bool(agent.actor_gate_open),
-        "gate_open_step": agent.gate_open_step, "lambda_bc_state": {
-            "schedule": config["bc_lambda_schedule"], "env_steps": int(env_steps)},
+        "gate_open_step": agent.gate_open_step,
+        "adaptive_bc_state": agent.bc_state(),
         "config": config, "rng_state": rng_state(torch),
         "generations": list(map(int, generations)), "episodes": int(episodes),
         "successes": int(successes), "online_replay_transitions": int(online.transitions),
@@ -174,6 +174,9 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
         raise RuntimeError("Resume checkpoint is not Stage3-v3")
     if payload["config"]["bc_rnn_checkpoint_sha256"] != config["bc_rnn_checkpoint_sha256"]:
         raise RuntimeError("Resume Actor source differs")
+    for key in ("adaptive_bc", "q_scale_normalization", "policy_delay"):
+        if payload["config"].get(key) != config.get(key):
+            raise RuntimeError(f"Resume training objective differs: {key}")
     agent.actor.load_state_dict(payload["actor"], strict=True)
     agent.target_actor.load_state_dict(payload["target_actor"], strict=True)
     agent.critic.load_state_dict(payload["q1_q2"], strict=True)
@@ -183,6 +186,7 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
     agent.critic_updates = int(payload["updates"]); agent.actor_updates = int(payload["actor_updates"])
     agent.actor_gate_open = bool(payload["actor_gate_open"])
     agent.gate_open_step = payload["gate_open_step"]
+    agent.load_bc_state(payload.get("adaptive_bc_state"))
     online = OnlineSequenceReplay.load(payload["online_sequence_replay"])
     online.current = {}
     restore_rng(payload["rng_state"], torch)
@@ -295,7 +299,9 @@ def main():
             "critic_batch": "128 offline sequences + 128 online sequences; final transition",
             "actor": metadata, "execution": config["exploration"]["execution"],
             "td_target": "r + gamma*(1-terminal)*sum_k p'_k*min(Q1',Q2')(s',mu'_k)",
-            "actor_objective": "-sum_k p_k*Q1(s,mu_k) + lambda_bc*GMM_NLL",
+            "actor_objective": "-alpha*E_k[p_k*Q1(s,mu_k)]/mean_abs_Q1_data + adaptive_lambda_bc*GMM_NLL",
+            "adaptive_bc": config["adaptive_bc"],
+            "q_scale_normalization": config["q_scale_normalization"],
             "online_cql": False, "critic_checkpoint": actual,
             "actor_checkpoint_sha256": file_hash(config["bc_rnn_checkpoint"]),
         })
@@ -318,6 +324,8 @@ def main():
                 restore_rng(saved_rng, torch)
             report.update({"stage": "stage3-v3", "group": args.group,
                            "env_steps": int(step), "actor_gate_open": agent.actor_gate_open})
+            agent.update_bc_feedback(report["success_rate"])
+            report["adaptive_bc_state"] = agent.bc_state()
             write_json(group_dir / "evaluations" / f"step_{step:07d}.json", report)
             diagnostics = agent.gmm_diagnostics(fixed_diagnostics)
             diagnostics.update({"stage": "stage3-v3", "group": args.group,
@@ -333,7 +341,9 @@ def main():
                 "env_steps": int(step), "eval_success_count": report["success_count"],
                 "eval_success_rate": report["success_rate"], "competence_pass": True,
                 "warmup_pass": int(step) >= config["actor_gate"]["warmup_env_steps"],
-                "gate_open": agent.actor_gate_open})
+                "gate_open": agent.actor_gate_open,
+                "adaptive_bc_weight": agent.bc_weight,
+                "adaptive_bc_ema_success": agent.bc_ema_success})
 
         if env_steps == 0:
             save_checkpoint(group_dir / "checkpoints" / "step0_transfer.pth", agent,
@@ -505,12 +515,12 @@ def main():
                     observations[env_id] = vector.reset(env_id, context["seed"])
                     executor.reset_indices([env_id])
 
+                if env_steps in evaluation_steps:
+                    run_evaluation(env_steps)
                 if env_steps in checkpoint_steps:
                     save_checkpoint(group_dir / "checkpoints" / f"step_{env_steps:07d}.pth",
                                     agent, config, args.group, env_steps, generations,
                                     episodes, successes, online, torch)
-                if env_steps in evaluation_steps:
-                    run_evaluation(env_steps)
 
             if profile_round:
                 log_jsonl(group_dir / "stage_timing.jsonl", {
