@@ -17,6 +17,7 @@ if str(V3) not in sys.path:
 from stage3_v3_actor import (distribution_tensors, load_exact_actor, module_hash,
                              recurrent_distributions, target_final_distribution)
 from stage3_v4_agent import RecurrentGMMTD3
+from stage3_v4_gmm_math import single_expected_q
 from stage3_v4_boundary import aligned_start
 from stage3_v4_replay import final_transition
 
@@ -62,38 +63,35 @@ def main():
     critic = build_critic(59, 14, [256, 256], "relu", True, device)
     agent = RecurrentGMMTD3(clone.train(), critic, config, device, scale, offset)
 
-    sequence_epsilon = torch.randn(4, 10, 5, 1, 14, device=device)
     vector_expected, vector_q, _, _ = agent._expected_q_sequence(
-        observations[:, :10], left[:10], epsilon=sequence_epsilon)
+        observations[:, :10], left[:10])
     per_step_expected = torch.stack([
         agent._expected_q(agent.critic, observations[:, index], left[index],
-                          twin_min=False, epsilon=sequence_epsilon[:, index])[0]
+                          twin_min=False)[0]
         for index in range(10)], dim=1)
 
-    # Fixed epsilon exposes both the sampled-policy value and the old mean-only
-    # approximation. The two must differ for a nonlinear Q with nonzero scale.
+    # Learned std remains in the network but cannot enter the RL objective.
     train_distributions, _ = recurrent_distributions(
         actor.train(), observations, steps, 10)
     distribution = train_distributions[0]
     params = distribution_tensors(distribution)
     eps = torch.ones(4, 5, 1, 14, device=device)
-    sampled, q1, q2, _, actions = agent._expected_q(
-        agent.critic, observations[:, 0], distribution, twin_min=False, epsilon=eps)
+    mean_only, q1, q2, _, actions = agent._expected_q(
+        agent.critic, observations[:, 0], distribution, twin_min=False)
     manual_q = agent.critic.q1(
-        observations[:, 0, None, None].expand(-1, 5, 1, -1).reshape(-1, 59),
-        actions.reshape(-1, 14)).reshape(4, 5, 1)
-    manual = (params["probs"] * manual_q.mean(-1)).sum(-1)
-    zero = torch.zeros_like(eps)
-    mean_only, _, _, _, _ = agent._expected_q(
-        agent.critic, observations[:, 0], distribution, twin_min=False, epsilon=zero)
+        observations[:, 0, None].expand(-1, 5, -1).reshape(-1, 59),
+        actions.reshape(-1, 14)).reshape(4, 5)
+    manual = (params["probs"] * manual_q).sum(-1)
     with torch.no_grad():
         target_distribution, _ = target_final_distribution(
             agent.target_actor, observations, steps, 10)
-        target_sampled, _, _, _, _ = agent._expected_q(
-            agent.target_critic, observations[:, -1], target_distribution, epsilon=eps)
         target_mean, _, _, _, _ = agent._expected_q(
-            agent.target_critic, observations[:, -1], target_distribution, epsilon=zero)
+            agent.target_critic, observations[:, -1], target_distribution)
         target_stds = distribution_tensors(target_distribution)["scales"]
+        sampled_diagnostic, _, _, _, _ = single_expected_q(
+            agent.critic, observations[:, 0], distribution,
+            agent.action_scale, agent.action_offset,
+            twin_min=False, epsilon=eps)
     frozen_hash = module_hash(agent.actor)
     critic_hash = module_hash(agent.critic)
     critic_sequence = {
@@ -136,28 +134,34 @@ def main():
         "target_recurrent_equivalence": target_diff <= 1e-5,
         "warmup_actor_frozen": not gate_before and frozen_hash == module_hash(agent.actor),
         "warmup_critic_changed": critic_warmup_changed,
-        "target_learned_std_enabled": agent.target_actor.low_noise_eval is False
-                                      and not torch.allclose(target_stds,
-                                                             torch.full_like(target_stds, 1e-4)),
+        "target_low_noise_contract": agent.target_actor.low_noise_eval is True
+                                     and not agent.target_actor.training
+                                     and torch.allclose(target_stds,
+                                                        torch.full_like(target_stds, 1e-4)),
         "gate_opens_at_10k": gate_at and agent.actor_gate_open,
         "actor_updated_after_gate": module_hash(agent.actor) != before,
-        "complete_gmm_gradients_finite": all(np.isfinite(value) for value in gradients.values())
-                                         and metrics["actor_grad_norm_total"] > 0,
-        "sampled_q_batched_equivalence": q2 is None and torch.allclose(q1, manual_q)
-                                        and torch.allclose(sampled, manual),
-        "time_mode_q_vectorized_equivalence": vector_q.shape == (4, 10, 5, 1)
+        "mean_logit_rnn_gradients": all(np.isfinite(value) for value in gradients.values())
+                                    and gradients["actor_grad_norm_gmm_mean"] > 0
+                                    and gradients["actor_grad_norm_gmm_logits"] > 0
+                                    and gradients["actor_grad_norm_rnn"] > 0,
+        "std_head_no_rl_gradient": gradients["actor_grad_norm_gmm_std"] == 0,
+        "component_mean_q_batched_equivalence": q2 is None and torch.allclose(q1, manual_q)
+                                                 and torch.allclose(mean_only, manual),
+        "time_mode_q_vectorized_equivalence": vector_q.shape == (4, 10, 5)
                                               and torch.allclose(vector_expected,
                                                                  per_step_expected, atol=1e-5),
-        "actor_sample_not_mean_only": not torch.allclose(sampled, mean_only),
-        "target_sample_not_mean_only": not torch.allclose(target_sampled, target_mean),
-        "actor_loss_raw_sampled_q": np.isclose(metrics["actor_rl_loss"],
+        "sampled_diagnostic_differs_but_no_grad": (not sampled_diagnostic.requires_grad
+                                                    and not torch.allclose(sampled_diagnostic, mean_only)),
+        "target_mean_value_finite": bool(torch.isfinite(target_mean).all()),
+        "actor_loss_raw_component_mean_q": np.isclose(metrics["actor_rl_loss"],
                                                metrics["actor_total_loss"]),
         "no_bc": config["bc_weight"] == metrics["lambda_bc"] == 0
                  and not config["adaptive_bc_enabled"],
         "no_q_normalization": config["actor_q_scale_normalization"] is False,
         "policy_delay_four": config["policy_delay"] == 4,
         "actor_batch_64": config["recurrent_replay"]["actor_sequence_batch_size"] == 64,
-        "one_sample_per_mode": config["gmm_rl_samples_per_mode"] == 1,
+        "diagnostic_one_sample_per_mode": config["diagnostic_learned_std_samples_per_mode"] == 1,
+        "case_a_objective": config["rl_policy_expectation"] == "categorical_component_mean",
         "aligned_same_episode": all(start in (0, 10, 20) for start in aligned_starts),
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
         "utd_one": config["utd"] == 1,
@@ -169,8 +173,8 @@ def main():
                       "target_max_abs_diff": target_diff,
                       "gradient_norms": gradients,
                       "gradient_nonzero_by_group": {key: value > 0 for key, value in gradients.items()},
-                      "sampled_minus_mean_q": float((sampled - mean_only).mean()),
-                      "target_sampled_minus_mean_q": float((target_sampled - target_mean).mean())}, indent=2))
+                      "sampled_diagnostic_minus_mean_q": float(
+                          (sampled_diagnostic - mean_only).mean())}, indent=2))
     raise SystemExit(0 if status == "PASS" else 1)
 
 

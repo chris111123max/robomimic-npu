@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""16-env Stage3-v4 recurrent stochastic-GMM TD3-style trainer."""
+"""16-env Stage3-v4 low-noise component-mean GMM TD3-style trainer."""
 from __future__ import annotations
 
 import argparse
@@ -180,7 +180,7 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
         raise RuntimeError("Resume checkpoint is not Stage3-v4")
     if payload["config"]["bc_rnn_checkpoint_sha256"] != config["bc_rnn_checkpoint_sha256"]:
         raise RuntimeError("Resume Actor source differs")
-    for key in ("gmm_rl_samples_per_mode", "adaptive_bc_enabled", "bc_weight",
+    for key in ("objective_revision", "rl_policy_expectation", "adaptive_bc_enabled", "bc_weight",
                 "actor_q_scale_normalization", "boundary_aligned_sequence_sampling",
                 "policy_delay", "recurrent_replay"):
         if payload["config"].get(key) != config.get(key):
@@ -204,6 +204,8 @@ def main():
     args = arguments()
     pair = Path(args.pair_run_dir).resolve()
     config = read_json(pair / "shared" / "config_resolved.json")
+    from prepare_stage3_v4_pair import validate_config
+    validate_config(config)
     phase0 = read_json(pair / "shared" / "phase0_gate.json")
     transfer = read_json(pair / "shared" / "transfer_validation.json")
     if not transfer["equivalence_pass"]:
@@ -308,14 +310,18 @@ def main():
             "online_replay_capacity_configured": int(config["online_replay_capacity"]),
             "online_sequence_capacity_effective": int(config["online_sequence_capacity"]),
             "actor": metadata, "execution": config["exploration"]["execution"],
-            "td_target": "r + gamma*(1-terminal)*sum_k p'_k*mean_j[min(Q1',Q2')(s',mu'_k+sigma'_k*epsilon_kj)]",
-            "actor_objective": "-mean[sum_k p_k*mean_j Q1(s,mu_k+sigma_k*epsilon_kj)]",
-            "gmm_rl_samples_per_mode": int(config["gmm_rl_samples_per_mode"]),
+            "objective_revision": config["objective_revision"],
+            "td_target": "r + gamma*(1-terminal)*sum_k p'_k*min(Q1',Q2')(s',mu'_k)",
+            "actor_objective": "-mean[sum_k p_k*Q1(s,mu_k)]",
+            "sampled_learned_std_q": "no_grad diagnostic only; excluded from losses",
             "actor_sequence_batch": int(config["recurrent_replay"]["actor_sequence_batch_size"]),
             "boundary_aligned_sequence_sampling": True,
             "boundary_evidence": "BatchedGMMExecutor resets hidden at episode timestep mod 10 == 0 and episode reset; replay stores contiguous episode_steps from 0; Actor windows begin at 0,10,... and never cross episodes",
-            "rollout_std_contract": "Native BatchedGMMExecutor uses actor.eval(); checkpoint low_noise_eval=True fixes environment std to 1e-4. Actor objective uses learned training-mode std; this is a pre-existing rollout/objective distribution difference preserved to avoid changing environment action behavior.",
-            "target_actor_contract": "Independent frozen Polyak-updated Actor, eval mode with low_noise_eval disabled on target copy so Bellman sampled expectation uses learned std; entire target under no_grad.",
+            "rollout_std_contract": "BatchedGMMExecutor temporarily calls actor.eval(); checkpoint low_noise_eval=True fixes Gaussian component std to 1e-4; categorical mode is sampled.",
+            "fixed_evaluation_std_contract": "evaluate_actor uses BatchedGMMExecutor, so eval mode and Gaussian std 1e-4 match online rollout.",
+            "actor_update_std_contract": "Actor is in train mode and computes learned std, but raw-Q RL objective uses only categorical probabilities and component means; std head has no direct RL gradient.",
+            "target_actor_contract": "Independent frozen Polyak-updated Actor remains eval with low_noise_eval=True; Bellman target enumerates component means under no_grad.",
+            "replay_action_contract": "The exact denormalized action array returned by BatchedGMMExecutor is passed to vector.step and online.add; no external noise or clipping.",
             "online_cql": False, "critic_checkpoint": actual,
             "actor_checkpoint_sha256": file_hash(config["bc_rnn_checkpoint"]),
         })
@@ -385,11 +391,8 @@ def main():
             active_cursor = (active_cursor + count) % num_envs
             if profile_round:
                 profile_started = profile_clock(torch, device)
-            # Environment action: one categorical GMM mode, then one Gaussian
-            # sample via the original executor. The RL expectation in
-            # stage3_v4_gmm_math instead enumerates all five modes and weighs
-            # one reparameterized Gaussian sample per mode; it is never an
-            # environment weighted-mean action.
+            # Environment samples a categorical mode then its low-noise Gaussian.
+            # RL enumerates all component means, approximating std=1e-4 sampling.
             actions = executor.actions_for(
                 active, [observations[index] for index in active],
                 config["exploration"]["external_action_noise_std"],
@@ -589,6 +592,10 @@ def main():
                 "actor_frozen_below_10k": (True if env_steps >= 10000 else module_hash(actor) == initial_actor_hash),
                 "critic_updated_during_warmup": module_hash(critic) != initial_critic_hash,
                 "gate_contract": agent.actor_gate_open == (env_steps >= 10000),
+                "actor_updated_after_gate": (env_steps < 10000 or
+                                              (agent.actor_updates > 0 and
+                                               module_hash(actor) != initial_actor_hash)),
+                "case_a_objective": config["objective_revision"] == "case-a-low-noise-component-mean-q",
                 "finite_training": all(math.isfinite(float(value)) for value in
                                        (env_steps, agent.critic_updates, agent.actor_updates)),
             }

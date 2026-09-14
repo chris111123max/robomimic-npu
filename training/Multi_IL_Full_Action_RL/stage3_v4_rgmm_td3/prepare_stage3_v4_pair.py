@@ -75,8 +75,11 @@ def validate_config(config):
     if (config.get("adaptive_bc_enabled") is not False or config.get("bc_weight") != 0
             or config.get("actor_q_scale_normalization") is not False
             or "adaptive_bc" in config or "q_scale_normalization" in config):
-        raise RuntimeError("Stage3-v4 must use raw sampled-Q RL without BC or Q scaling")
-    if (int(config.get("gmm_rl_samples_per_mode", 0)) < 1
+        raise RuntimeError("Stage3-v4 must use raw component-mean Q without BC or Q scaling")
+    if (config.get("objective_revision") != "case-a-low-noise-component-mean-q"
+            or config.get("rl_policy_expectation") != "categorical_component_mean"
+            or int(config.get("diagnostic_learned_std_samples_per_mode", 0)) < 1
+            or "gmm_rl_samples_per_mode" in config
             or config["recurrent_replay"]["actor_sequence_batch_size"] != 64
             or config["recurrent_replay"]["burn_in"] != 0
             or config["recurrent_replay"]["train_seq_len"] != 10

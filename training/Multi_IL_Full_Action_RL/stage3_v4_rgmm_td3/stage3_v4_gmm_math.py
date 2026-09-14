@@ -1,4 +1,4 @@
-"""Vectorized reparameterized GMM expectations, independent of robomimic I/O."""
+"""Vectorized GMM component-mean Q expectations and diagnostic sampling."""
 from __future__ import annotations
 
 import torch
@@ -9,6 +9,41 @@ def tensors(distribution):
     return {"means_normalized": base.loc, "scales": base.scale,
             "logits": distribution.mixture_distribution.logits,
             "probs": distribution.mixture_distribution.probs}
+
+
+def single_component_mean_q(critic, states, distribution, action_scale,
+                            action_offset, twin_min=True):
+    """Evaluate all K component means in one Q call; learned std is unused."""
+    params = tensors(distribution)
+    means = params["means_normalized"]
+    batch, modes, action_dim = means.shape
+    actions = (means * action_scale.reshape(1, 1, action_dim)
+               + action_offset.reshape(1, 1, action_dim))
+    flat_states = states[:, None, :].expand(-1, modes, -1).reshape(-1, states.shape[-1])
+    flat_actions = actions.reshape(-1, action_dim)
+    if twin_min:
+        q1, q2 = critic(flat_states, flat_actions)
+        q1, q2 = q1.reshape(batch, modes), q2.reshape(batch, modes)
+        selected = torch.minimum(q1, q2)
+    else:
+        q1 = critic.q1(flat_states, flat_actions).reshape(batch, modes)
+        q2, selected = None, q1
+    return (params["probs"] * selected).sum(-1), q1, q2, params, actions
+
+
+def sequence_component_mean_q(critic, states, distributions, action_scale,
+                              action_offset):
+    """One Q1 forward across sequence time and all mixture components."""
+    pieces = [tensors(item) for item in distributions]
+    params = {key: torch.stack([item[key] for item in pieces], dim=1)
+              for key in ("means_normalized", "scales", "logits", "probs")}
+    means = params["means_normalized"]
+    batch, time_steps, modes, action_dim = means.shape
+    actions = (means * action_scale.reshape(1, 1, 1, action_dim)
+               + action_offset.reshape(1, 1, 1, action_dim))
+    flat_states = states[:, :, None, :].expand(-1, -1, modes, -1).reshape(-1, states.shape[-1])
+    q1 = critic.q1(flat_states, actions.reshape(-1, action_dim)).reshape(batch, time_steps, modes)
+    return (params["probs"] * q1).sum(-1), q1, params, actions
 
 
 def single_expected_q(critic, states, distribution, action_scale, action_offset,

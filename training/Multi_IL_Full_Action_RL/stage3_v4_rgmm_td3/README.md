@@ -1,30 +1,36 @@
-# Stage3-v4：完整 GMM 采样期望 + recurrent Actor 加速
+# Stage3-v4：在线动作分布审计后的 Case A
 
-这是独立于 Stage3-v3 的实验目录；没有修改 Stage2、v3、环境、评估种子、Critic 架构或 50/50 replay 比例。BC-RNN-GMM Actor 从原 checkpoint 严格载入，Stage2 RNN-Q/Multi-Q 分别初始化相同结构的 twin MLP Critic（59+14 输入、[256,256]、ReLU、LayerNorm）。
+本目录只改 Stage3-v4，不改 Stage2、Stage3-v3、环境或固定评估协议。当前正式训练目标只有一种：**categorical component-mean Q**。旧的 learned-std sampled-GMM 目标已撤回，旧 v4 sampled 目标 checkpoint 因 `objective_revision` 不同不得静默续训。
 
-## 训练目标和机制
+## 真实调用链
 
-- v3 Actor 近似：`-E[Σ_k p_k Q1(s, μ_k)]`；v4：`-E[Σ_k p_k mean_j Q1(s, μ_k + σ_k ε_kj)]`。默认每 mode 采样一次，`K=5, M=1`。GMM mean、std、logits 和 LSTM 均保留计算图。
-- v3 target 近似：`r + γ(1-terminal) Σ_k p'_k min(Q1',Q2')(s',μ'_k)`；v4：`r + γ(1-terminal) Σ_k p'_k mean_j min(Q1',Q2')(s',μ'_k+σ'_k ε_kj)`。完整 target 计算在 `no_grad` 内。
-- Actor 的 10 个时间步、5 个 mode、每 mode M 个采样合并成一次 batched Q1 forward；target 的 5×M 个动作合并成一次 twin-Q forward。环境执行动作仍是类别采样后再采 Gaussian，不是加权均值。
-- 前 10,000 aggregate env steps Actor 不更新、Critic 按 UTD=1 更新。Phase-0 的转移等价性及 20 个固定种子的成功率门槛必须通过；10k 后 gate 锁存。`policy_delay=4`，Actor sequence batch=64，Critic batch=256（离线/在线各128）。BC 权重为0，无 adaptive BC、Q 尺度归一化、SAC alpha 或 online CQL。
-- 现有 `BatchedGMMExecutor` 在 episode reset 和 episode timestep 10 的倍数处将 hidden 清零；replay 为每个 episode 保存从0连续增长的 `episode_steps`，且 episode 单独存放。因此 Actor 训练只抽取同一 episode 的 `[0..9]`、`[10..19]` 等完整窗口，`burn_in=0`。Critic 的 11-step context 与 v3 一致。
-- Target Actor 是独立深拷贝，冻结参数，在 gate 打开后以 `tau=0.005` Polyak 更新。v3 在 `eval()` 模式下会把 target GMM std 固定为 `1e-4`；v4 仅在 target 副本上关闭 `low_noise_eval`，令 Bellman target 使用其学习到的 std，仍保持 eval 模式与原 soft-update 机制。
+| 环节 | 真实行为 |
+| --- | --- |
+| 训练入口 | `train_stage3_v4_vector.py` 创建 v3 `BatchedGMMExecutor`，`actions_for` 产生动作 |
+| Actor mode | 执行器临时调用 `actor.eval()`，动作生成后恢复原先 mode |
+| RNN hidden | 每个环境各有 hidden slot；episode reset 和 timestep 模 10 为 0 时清零 |
+| GMM 分布 | `RNNGMMActorNetwork` 输出 mean、raw scale、logits；`low_noise_eval=True` 且 eval 时 Gaussian σ 被固定为 `1e-4`，而 train 时才用 `softplus(raw_scale)+min_std` |
+| 抽样 | `MixtureSameFamily.sample()` 按 categorical 抽一个 mode，再从该分量的 Normal 抽动作；不是 argmax 或加权均值 |
+| 动作后处理 | 用 checkpoint 的 action scale/offset 反归一化；本实验 external noise 为 0、clip 为 false |
+| 环境与 replay | 同一个 `actions` 对象传给 vector `env.step`，也作为 `online.add(..., action, ...)` 的 action；worker 与 `EnvRobosuite.step` 原样转交动作 |
+| 固定评估 | 同一执行器，因此也是 eval + fixed σ=`1e-4` |
+| Actor RL update | `actor.train()`；learned σ 存在于分布，但 RL loss 只使用 mean/probs，std head 无直接 RL gradient |
+| Target Actor | 独立、冻结、Polyak 更新；保持 eval + `low_noise_eval=True`；Bellman target 只枚举分量均值 |
 
-重要限制：v3 原有环境执行器在 `actor.eval()` 且 `low_noise_eval=True` 下将环境动作的 Gaussian std 固定为 `1e-4`。v4 按任务要求保留原环境采样行为；Actor RL objective 使用训练模式的 learned std。所以 v4 修复了 Actor/target 的分量均值近似，却**尚未实现与真实环境执行方差严格一致**。这在 `runtime_audit.json` 明确记录，不能将本版本结论解释为完全消除了 rollout/objective 的分布差异。若未来要让环境执行 learned std，须作为独立消融明确改变 rollout 协议。
+数学上真实执行分布是 `π_env(a|h)=Σ_k p_k(h) N(a; μ_k(h), (10^-4)^2 I)`，此处 μ/σ 在 checkpoint 归一化动作空间，实际环境动作还须乘 action scale 并加 offset。它并非严格 Dirac 分布，因此分量均值 Q 是低噪声近似而非精确积分。训练目标为：
 
-终止语义保留 v3：成功（配置启用）或非 horizon 的 `raw_done` 作为 terminal，horizon 截断不作为 terminal；Bellman mask 是 `1-terminal`。不在本实验中变更。
+```text
+L_actor = -E_{s,h}[Σ_k p_k(h) Q1(s, denorm(μ_k(h)))]
+y = r + γ(1-terminal) Σ_k p'_k(h') min(Q1'(s', denorm(μ'_k)), Q2'(s', denorm(μ'_k)))
+```
 
-## 验证与产物
+`component_mean_expected_Q` 与 `sampled_learned_std_expected_Q` 仅在详细指标采集时、`no_grad` 下做反事实对照；后者不能参与梯度或 TD target。std head 和原 BC checkpoint 保留，共享 RNN/encoder 的变化可间接改变其输出，但 std head 本身无直接 RL 梯度。
 
-先运行不依赖 checkpoint 的数学检查，再运行 checkpoint-backed 验证。后者输出真实 GMM head/LSTM 梯度范数、step0 严格迁移、目标 Actor std、采样/均值对照、时间和 mode 向量化等检查。验证脚本只做合成 batch，不启动 MuJoCo。`run_phase0_stage3_v4.py` 验证真实 checkpoint 转移，并在固定种子 20000–20019 上执行20轮 competence 评估；也可从严格兼容的 v3/v4 已完成 pair 复用 Phase-0，避免重复等待。正式训练之前仍建议在新 pair 上跑 `--smoke --num-envs 2 --total-env-steps 12000`，覆盖 gate 两侧并检查 checkpoint/replay round-trip；正式 pair 必须另建。
+其余合同不变：Stage2 twin MLP + LayerNorm Critic，0–10k Actor 冻结/Critic UTD=1 更新，10k 且 Phase-0 gate 通过后 Actor 更新；Critic batch 256（离线/在线各 128），`policy_delay=4`，Actor recurrent batch 64，`train_seq_len=10`、`burn_in=0`。后两者成立的证据是执行器每 10 步清零 hidden，replay 的 `episode_steps` 从 0 连续且不跨 episode，`aligned_start` 只返回 0、10、20 等完整窗口并拒绝错位。无 adaptive BC、BC 权重为 0、无 Q-scale normalization、无 online CQL。
 
-训练输出：`rnn_q/` 与 `multi_q/` 各有 `console.log`、`train_metrics.jsonl`、`episode_metrics.jsonl`、`evaluations/`、`diagnostics/gmm_step_*.json`、`stage_timing.jsonl`、`throughput_metrics.jsonl`、`checkpoints/`、`summary.json`。GMM 诊断包含 std 全局及每 mode 的均值。`benchmark_stage3_v4.py` 按 gate 前后汇总 aggregate env steps/s、Critic updates/s 和 Actor updates/s。
-若有可比 v3 的 `throughput_metrics.jsonl`，可向 benchmark 加 `--v3-throughput-jsonl <路径>`，得到 gate 后实际速度比；未测量前不预设加速倍数。
+## 先审计，再做 12k 冒烟
 
-## 服务器命令（两张 NPU）
-
-以下在仓库根目录、`robosuite_npu` 环境运行。先根据服务器实际路径确认三个 checkpoint 和 Phase-0 参考 pair。参考 pair 可用已有 `stage3v3_reuse_20260912_180309`，但准备脚本会核验 SHA256、Actor hash、数据集、固定种子、成功率和 Phase-0 文件；不兼容时会拒绝复用。
+下面命令在服务器仓库根目录及 `robosuite_npu` 环境中运行。不要直接启动 3M。`REFERENCE_PHASE0_PAIR` 只能指向已经通过且准备脚本认定兼容的 Phase-0 pair；若没有，就不使用复用参数，准备后运行 `run_phase0_stage3_v4.py`。
 
 ```bash
 cd /data/home/3220251075/lerobot_workspace/robomimic
@@ -36,33 +42,19 @@ BC_RNN_CHECKPOINT="/data/home/3220251075/lerobot_workspace/training_runs/Pure IL
 RNN_Q_CHECKPOINT="$STAGE2_RUN/rnn_q/checkpoints/best.pth"
 MULTI_Q_CHECKPOINT="$STAGE2_RUN/multi_q/checkpoints/best.pth"
 REFERENCE_PHASE0_PAIR=/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v3_rgmm_td3/stage3v3_reuse_20260912_180309
-
 python "$SCRIPT_DIR/validate_stage3_v4_math.py"
+python "$SCRIPT_DIR/audit_stage3_v4_rollout.py" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --device npu:0 --samples 8
 python "$SCRIPT_DIR/validate_stage3_v4.py" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --device npu:0
-
-SMOKE_ID=stage3v4_smoke_$(date +%Y%m%d_%H%M%S)
-SMOKE_RUN_DIR="$OUTPUT_ROOT/$SMOKE_ID"
-python "$SCRIPT_DIR/prepare_stage3_v4_pair.py" --run-id "$SMOKE_ID" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --rnn-q-checkpoint "$RNN_Q_CHECKPOINT" --multi-q-checkpoint "$MULTI_Q_CHECKPOINT" --reuse-phase0-from "$REFERENCE_PHASE0_PAIR"
-python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group multi_q --device npu:0 --pair-run-dir "$SMOKE_RUN_DIR" --critic-init-checkpoint "$MULTI_Q_CHECKPOINT" --num-envs 2 --total-env-steps 12000 --smoke
-cat "$SMOKE_RUN_DIR/multi_q/smoke_validation.json"
-
-PAIR_ID=stage3v4_pair_$(date +%Y%m%d_%H%M%S)
-PAIR_RUN_DIR="$OUTPUT_ROOT/$PAIR_ID"
-python "$SCRIPT_DIR/prepare_stage3_v4_pair.py" --run-id "$PAIR_ID" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --rnn-q-checkpoint "$RNN_Q_CHECKPOINT" --multi-q-checkpoint "$MULTI_Q_CHECKPOINT" --reuse-phase0-from "$REFERENCE_PHASE0_PAIR"
-
-export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-nohup python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group rnn_q --device npu:0 --pair-run-dir "$PAIR_RUN_DIR" --critic-init-checkpoint "$RNN_Q_CHECKPOINT" --num-envs 16 --total-env-steps 3000000 > "$PAIR_RUN_DIR/rnn_q/console.log" 2>&1 &
-echo $! > "$PAIR_RUN_DIR/rnn_q/train.pid"
-nohup python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group multi_q --device npu:1 --pair-run-dir "$PAIR_RUN_DIR" --critic-init-checkpoint "$MULTI_Q_CHECKPOINT" --num-envs 16 --total-env-steps 3000000 > "$PAIR_RUN_DIR/multi_q/console.log" 2>&1 &
-echo $! > "$PAIR_RUN_DIR/multi_q/train.pid"
 ```
 
-若不复用 Phase-0，准备时去掉 `--reuse-phase0-from`，随后执行 `python "$SCRIPT_DIR/run_phase0_stage3_v4.py" --pair-run-dir "$PAIR_RUN_DIR" --device npu:0`，成功后再启动训练。两分支各自独立使用 NPU:0 / NPU:1，不共享优化器或 replay。
+审计 JSON 应显示 `rollout_sigma_*≈0.0001`、`executor_reconstruction_max_abs_diff≤1e-5`，并输出实际动作与所选分量均值的差值（环境动作单位）。不应仅凭数学 validator PASS 就判定在线 contract 正确。
 
 ```bash
-tail -f "$PAIR_RUN_DIR/multi_q/console.log"
-python "$SCRIPT_DIR/benchmark_stage3_v4.py" --pair-run-dir "$PAIR_RUN_DIR" --group multi_q
+SMOKE_ID=stage3v4_casea_smoke_$(date +%Y%m%d_%H%M%S)
+SMOKE_RUN_DIR="$OUTPUT_ROOT/$SMOKE_ID"
+python "$SCRIPT_DIR/prepare_stage3_v4_pair.py" --run-id "$SMOKE_ID" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --rnn-q-checkpoint "$RNN_Q_CHECKPOINT" --multi-q-checkpoint "$MULTI_Q_CHECKPOINT" --reuse-phase0-from "$REFERENCE_PHASE0_PAIR"
+test -f "$SMOKE_RUN_DIR/shared/config_resolved.json" && test -f "$SMOKE_RUN_DIR/shared/phase0_gate.json" && python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group multi_q --device npu:0 --pair-run-dir "$SMOKE_RUN_DIR" --critic-init-checkpoint "$MULTI_Q_CHECKPOINT" --num-envs 2 --total-env-steps 12000 --smoke
+cat "$SMOKE_RUN_DIR/multi_q/smoke_validation.json"
 ```
+
+重点看 `multi_q/console.log`、`train_metrics.jsonl`、`runtime_audit.json`、`stage_timing.jsonl`、`smoke_validation.json`：0–10k Actor 更新数应为 0 且参数 hash 不变；10k 后 gate 打开、Actor 更新数增长、Critic 持续更新；梯度有限、std head 直接梯度为 0；无 NaN；`actor_expected_component_mean_q` 是训练值，`actor_q_sampled_learned_std_diagnostic` 只是对照；吞吐以 gate 前/后实际 steps/s 判断。通过后再决定是否准备新的正式 pair。

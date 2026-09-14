@@ -1,4 +1,4 @@
-"""Stochastic GMM-expectation TD3-style updates for an exact recurrent Actor."""
+"""Low-noise rollout-aligned GMM component-mean TD3-style updates."""
 from __future__ import annotations
 
 import copy
@@ -13,7 +13,8 @@ if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
 from stage3_v3_actor import (distribution_tensors, module_hash,
                              recurrent_distributions, target_final_distribution)
-from stage3_v4_gmm_math import single_expected_q, sequence_expected_q
+from stage3_v4_gmm_math import (single_component_mean_q, sequence_component_mean_q,
+                                 single_expected_q, sequence_expected_q)
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -45,10 +46,7 @@ class RecurrentGMMTD3:
         self.actor = actor.train()
         self.target_actor = copy.deepcopy(actor).to(device)
         self.target_actor.eval()
-        # In the native robomimic network, eval()+low_noise_eval replaces all
-        # learned stds with 1e-4. Keep the independent Polyak target and eval
-        # mode, but retain its learned GMM variance for the stochastic target.
-        self.target_actor.low_noise_eval = False
+        # Match the online executor's eval()+low_noise_eval=True contract.
         self.target_actor.requires_grad_(False)
         self.critic = critic
         self.target_critic = copy.deepcopy(critic).to(device)
@@ -84,19 +82,14 @@ class RecurrentGMMTD3:
                     device=self.device)
                 for key, value in batch.items()}
 
-    def _expected_q(self, critic, states, distribution, twin_min=True,
-                    epsilon=None):
-        """Enumerate modes; reparameterize Gaussian samples; one batched Q call."""
-        return single_expected_q(
+    def _expected_q(self, critic, states, distribution, twin_min=True):
+        return single_component_mean_q(
             critic, states, distribution, self.action_scale, self.action_offset,
-            samples=int(self.config["gmm_rl_samples_per_mode"]),
-            twin_min=twin_min, epsilon=epsilon)
+            twin_min=twin_min)
 
-    def _expected_q_sequence(self, states, distributions, epsilon=None):
-        """One Q1 forward over [batch,time,mode,sample], with full gradients."""
-        return sequence_expected_q(
-            self.critic, states, distributions, self.action_scale, self.action_offset,
-            samples=int(self.config["gmm_rl_samples_per_mode"]), epsilon=epsilon)
+    def _expected_q_sequence(self, states, distributions):
+        return sequence_component_mean_q(
+            self.critic, states, distributions, self.action_scale, self.action_offset)
 
     def critic_update(self, batch, target_sequence, collect_metrics=True):
         b = self._tensor_batch(batch)
@@ -129,11 +122,18 @@ class RecurrentGMMTD3:
             # diagnostics at train_metrics_interval_updates boundaries.
             return {}
         with torch.no_grad():
-            zero_epsilon = torch.zeros_like(target_tensors["means_normalized"]).unsqueeze(-2).expand(
-                -1, -1, int(self.config["gmm_rl_samples_per_mode"]), -1)
-            mean_approx, _, _, _, _ = self._expected_q(
-                self.target_critic, target["next_observations"][:, -1], distribution,
-                epsilon=zero_epsilon)
+            # Diagnostic counterfactual only. Never enters td_target or backward.
+            self.target_actor.low_noise_eval = False
+            try:
+                learned_distribution, _ = target_final_distribution(
+                    self.target_actor, target["next_observations"],
+                    target["episode_steps"] + 1, horizon=horizon)
+                sampled_diagnostic, _, _, _, _ = single_expected_q(
+                    self.target_critic, target["next_observations"][:, -1],
+                    learned_distribution, self.action_scale, self.action_offset,
+                    samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
+            finally:
+                self.target_actor.low_noise_eval = True
         return {
             "critic_loss_q1": float(loss_q1.item()),
             "critic_loss_q2": float(loss_q2.item()),
@@ -147,10 +147,10 @@ class RecurrentGMMTD3:
             "q1_min": float(q1.min().item()), "q1_max": float(q1.max().item()),
             "q2_min": float(q2.min().item()), "q2_max": float(q2.max().item()),
             "critic_grad_norm": critic_grad,
-            "target_expected_sampled_q": float(expected_next.mean().item()),
-            "target_q_component_mean_estimate": float(mean_approx.mean().item()),
-            "target_q_gmm_sample_estimate": float(expected_next.mean().item()),
-            "target_q_estimate_gap": float((expected_next - mean_approx).mean().item()),
+            "target_expected_component_mean_q": float(expected_next.mean().item()),
+            "target_q_component_mean_estimate": float(expected_next.mean().item()),
+            "target_q_sampled_learned_std_diagnostic": float(sampled_diagnostic.mean().item()),
+            "target_q_sampled_minus_mean_gap": float((sampled_diagnostic - expected_next).mean().item()),
         }
 
     def actor_update(self, sequences, env_steps, collect_metrics=True):
@@ -195,15 +195,14 @@ class RecurrentGMMTD3:
             return {}
         probabilities = tensors["probs"]
         entropy = (-(probabilities * probabilities.clamp_min(1e-8).log()).sum(-1)).mean()
-        sampled = q1.detach().reshape(-1)
+        component_q = q1.detach().reshape(-1)
         std_values = tensors["scales"].detach().reshape(-1)
         with torch.no_grad():
-            zero_epsilon = torch.zeros_like(tensors["means_normalized"]).unsqueeze(-2).expand(
-                -1, -1, -1, int(self.config["gmm_rl_samples_per_mode"]), -1)
-            mean_estimate, _, _, _ = self._expected_q_sequence(
-                b["observations"][:, burn:], learn_distributions,
-                epsilon=zero_epsilon)
-            mean_estimate = mean_estimate.mean()
+            # Counterfactual learned-std Q is logged only and has no RL gradient.
+            sampled_diagnostic, _, _, _ = sequence_expected_q(
+                self.critic, b["observations"][:, burn:], learn_distributions,
+                self.action_scale, self.action_offset,
+                samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
             means = tensors["means_normalized"]
             distances = torch.cdist(means, means)
             modes = means.shape[-2]
@@ -219,20 +218,21 @@ class RecurrentGMMTD3:
             "gmm_std_mean": float(std_values.mean().item()),
             "gmm_std_min": float(std_values.min().item()),
             "gmm_std_max": float(std_values.max().item()),
-            "actor_expected_sampled_q": float((-actor_rl).item()),
-            "actor_sampled_q_mean": float(sampled.mean().item()),
-            "actor_sampled_q_std": float(sampled.std(unbiased=False).item()),
-            "actor_sampled_q_min": float(sampled.min().item()),
-            "actor_sampled_q_max": float(sampled.max().item()),
-            "actor_q_component_mean_estimate": float(mean_estimate.item()),
-            "actor_q_gmm_sample_estimate": float((-actor_rl).item()),
-            "actor_q_estimate_gap": float((-actor_rl - mean_estimate).item()),
+            "actor_expected_component_mean_q": float((-actor_rl).item()),
+            "actor_component_q_mean": float(component_q.mean().item()),
+            "actor_component_q_std": float(component_q.std(unbiased=False).item()),
+            "actor_component_q_min": float(component_q.min().item()),
+            "actor_component_q_max": float(component_q.max().item()),
+            "actor_q_component_mean_estimate": float((-actor_rl).item()),
+            "actor_q_sampled_learned_std_diagnostic": float(sampled_diagnostic.mean().item()),
+            "actor_q_sampled_minus_mean_gap": float((sampled_diagnostic.mean() + actor_rl).item()),
             "policy_delay": int(self.config["policy_delay"]),
             "actor_sequence_batch": int(self.config["recurrent_replay"]["actor_sequence_batch_size"]),
-            "gmm_rl_samples_per_mode": int(self.config["gmm_rl_samples_per_mode"]),
+            "diagnostic_learned_std_samples_per_mode": int(
+                self.config["diagnostic_learned_std_samples_per_mode"]),
             "mixture_prob_mean": float(1.0 / self.config["actor_source_contract"]["num_modes"]),
             "mixture_prob_max": float(probabilities.max(-1).values.mean().item()),
-            "component_q_mean": float(sampled.mean().item()),
+            "component_q_mean": float(component_q.mean().item()),
             "component_mean_pairwise_distance": float(pairwise.item()),
             "effectively_active_modes": float(math.exp(entropy.item())),
             "actor_parameter_drift_l2": self.parameter_drift(),
