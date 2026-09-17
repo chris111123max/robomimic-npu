@@ -36,6 +36,8 @@ def arguments():
     parser.add_argument("--total-env-steps", type=int)
     parser.add_argument("--resume")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--compile-backend", choices=("none", "torchair"), default=None)
+    parser.add_argument("--no-prefetch", action="store_true")
     return parser.parse_args()
 
 
@@ -277,6 +279,12 @@ def main():
                                  dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
         critic, _ = strict_stage2_load(actual, device)
         agent = RecurrentGMMTD3(actor, critic, config, device, scale, offset)
+        from stage3_v4_execution import prepare_round_batches, enable_npu_compile
+        optimization = config.get("execution_optimization", {})
+        prefetch = optimization.get("prefetch_minibatches", True) and not args.no_prefetch
+        compile_backend = args.compile_backend or optimization.get("compile_backend", "none")
+        if compile_backend == "torchair":
+            enable_npu_compile(agent)
         initial_actor_hash = module_hash(actor)
         initial_critic_hash = module_hash(critic)
         offline = OfflineDemonstrations(config["expert_dataset"], config["training_seed"])
@@ -306,6 +314,8 @@ def main():
             "device": str(device), "num_envs": num_envs,
             "env_steps_semantics": "aggregate environment transitions", "utd": 1,
             "policy_delay": int(config["policy_delay"]),
+            "prefetch_minibatches": bool(prefetch), "compile_backend": compile_backend,
+            "actor_update_schedule": "one Actor step per Critic step after 10k gate",
             "critic_batch": "128 offline sequences + 128 online sequences; final transition",
             "online_replay_capacity_configured": int(config["online_replay_capacity"]),
             "online_sequence_capacity_effective": int(config["online_sequence_capacity"]),
@@ -388,6 +398,7 @@ def main():
         last_report_critic_updates = agent.critic_updates
         last_report_actor_updates = agent.actor_updates
         while env_steps < total and not stop_requested:
+            round_started = time.perf_counter()
             boundaries = [step for step in evaluation_steps | checkpoint_steps |
                           {int(config["actor_gate"]["warmup_env_steps"]), total}
                           if step > env_steps]
@@ -417,6 +428,19 @@ def main():
                 profile["vector_env_step_ms"] = 1000 * (
                     time.perf_counter() - profile_started)
             action_by_env = dict(zip(active, actions))
+            round_critic_start, round_actor_start = agent.critic_updates, agent.actor_updates
+            prepared_critics, prepared_actors = [], []
+            update_index = 0
+            if (prefetch and env_steps >= config["min_online_replay_size"]
+                    and online.can_sample(config["recurrent_replay"]["critic_context_length"])):
+                if profile_round:
+                    prefetch_started = profile_clock(torch, device)
+                prepared_critics, prepared_actors = prepare_round_batches(
+                    offline, online, count, config, device,
+                    actor_ready=agent.actor_gate_open and online.can_sample(
+                        config["recurrent_replay"]["train_seq_len"]))
+                if profile_round:
+                    profile["round_replay_prepare_ms"] = 1000 * (profile_clock(torch, device) - prefetch_started)
             for env_id, message in results:
                 context = contexts[env_id]
                 if message[0] == "FATAL":
@@ -469,9 +493,12 @@ def main():
                     profile_critic = profile_round and "critic_update_ms" not in profile
                     if profile_critic:
                         profile_started = profile_clock(torch, device)
-                    critic_sequences = symmetric_sequence_batch(
-                        offline, online, 256, context_length)
-                    critic_batch = final_transition(critic_sequences)
+                    if update_index < len(prepared_critics):
+                        critic_batch, critic_sequences = prepared_critics[update_index]
+                    else:
+                        critic_sequences = symmetric_sequence_batch(
+                            offline, online, config["batch_size"], context_length)
+                        critic_batch = final_transition(critic_sequences)
                     if profile_critic:
                         profile["critic_replay_ms"] = 1000 * (
                             profile_clock(torch, device) - profile_started)
@@ -495,10 +522,13 @@ def main():
                         profile_actor = profile_round and "actor_update_ms" not in profile
                         if profile_actor:
                             profile_started = profile_clock(torch, device)
-                        actor_sequences = aligned_sequence_batch(
-                            offline, online,
-                            int(config["recurrent_replay"]["actor_sequence_batch_size"]),
-                            actor_length, horizon=10)
+                        if update_index < len(prepared_actors):
+                            actor_sequences = prepared_actors[update_index]
+                        else:
+                            actor_sequences = aligned_sequence_batch(
+                                offline, online,
+                                int(config["recurrent_replay"]["actor_sequence_batch_size"]),
+                                actor_length, horizon=10)
                         if profile_actor:
                             profile["actor_replay_ms"] = 1000 * (
                                 profile_clock(torch, device) - profile_started)
@@ -513,6 +543,7 @@ def main():
                     if profile_polyak:
                         profile_started = profile_clock(torch, device)
                     agent.polyak_update()
+                    update_index += 1
                     if profile_polyak:
                         profile["polyak_update_ms"] = 1000 * (
                             profile_clock(torch, device) - profile_started)
@@ -559,6 +590,9 @@ def main():
                     "sampled_vector_envs": count,
                     "sampled_critic_updates": int("critic_update_ms" in profile),
                     "sampled_actor_updates": int("actor_update_ms" in profile),
+                    "round_critic_updates": agent.critic_updates - round_critic_start,
+                    "round_actor_updates": agent.actor_updates - round_actor_start,
+                    "round_wall_ms": 1000 * (time.perf_counter() - round_started),
                     "timing_semantics": "one sampled vector round; device synchronized at measured boundaries",
                     **profile,
                 })

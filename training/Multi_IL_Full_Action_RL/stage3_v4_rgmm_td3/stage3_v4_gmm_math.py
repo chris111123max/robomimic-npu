@@ -46,6 +46,17 @@ def sequence_component_mean_q(critic, states, distributions, action_scale,
     return (params["probs"] * q1).sum(-1), q1, params, actions
 
 
+def full_sequence_component_mean_q(critic, states, distribution, action_scale, action_offset):
+    """Native full-sequence Actor output with identical time/mode Q layout."""
+    params = tensors(distribution)
+    means = params["means_normalized"]
+    batch, time_steps, modes, action_dim = means.shape
+    actions = means * action_scale.reshape(1, 1, 1, action_dim) + action_offset.reshape(1, 1, 1, action_dim)
+    flat_states = states[:, :, None, :].expand(-1, -1, modes, -1).reshape(-1, states.shape[-1])
+    q1 = critic.q1(flat_states, actions.reshape(-1, action_dim)).reshape(batch, time_steps, modes)
+    return (params["probs"] * q1).sum(-1), q1, params, actions
+
+
 def single_expected_q(critic, states, distribution, action_scale, action_offset,
                       samples=1, twin_min=True, epsilon=None):
     params = tensors(distribution)

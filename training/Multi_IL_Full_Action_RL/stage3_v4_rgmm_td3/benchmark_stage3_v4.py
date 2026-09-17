@@ -35,7 +35,8 @@ def summarize_timing(path):
             if line.strip()]
     keys = ("actor_inference_ms", "vector_env_step_ms", "critic_replay_ms",
             "critic_update_ms", "actor_replay_ms", "actor_update_ms",
-            "polyak_update_ms", "target_actor_sequence_ms", "target_q_ms")
+            "polyak_update_ms", "target_actor_sequence_ms", "target_q_ms",
+            "round_replay_prepare_ms", "round_wall_ms", "round_critic_updates", "round_actor_updates")
     return {"samples": len(rows), **{
         key: (sum(float(row[key]) for row in rows if key in row)
               / sum(key in row for row in rows) if any(key in row for row in rows)

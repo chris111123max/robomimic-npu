@@ -26,7 +26,25 @@ y = r + γ(1-terminal) Σ_k p'_k(h') min(Q1'(s', denorm(μ'_k)), Q2'(s', denorm(
 
 `component_mean_expected_Q` 与 `sampled_learned_std_expected_Q` 仅在详细指标采集时、`no_grad` 下做反事实对照；后者不能参与梯度或 TD target。std head 和原 BC checkpoint 保留，共享 RNN/encoder 的变化可间接改变其输出，但 std head 本身无直接 RL 梯度。
 
-其余合同不变：Stage2 twin MLP + LayerNorm Critic，0–10k Actor 冻结/Critic UTD=1 更新，10k 且 Phase-0 gate 通过后 Actor 更新；Critic batch 256（离线/在线各 128），`policy_delay=4`，Actor recurrent batch 64，`train_seq_len=10`、`burn_in=0`。后两者成立的证据是执行器每 10 步清零 hidden，replay 的 `episode_steps` 从 0 连续且不跨 episode，`aligned_start` 只返回 0、10、20 等完整窗口并拒绝错位。无 adaptive BC、BC 权重为 0、无 Q-scale normalization、无 online CQL。
+当前更新设置：Stage2 twin MLP + LayerNorm Critic，0–10k Actor 冻结/Critic UTD=1 更新，10k 且 Phase-0 gate 通过后 Actor 更新；Critic batch 256（离线/在线各 128），`policy_delay=1`，Actor recurrent batch 64，`train_seq_len=10`、`burn_in=0`。gate 后 Actor/Critic 每个 transition 各更新一次，随后执行 Polyak；两种 batch 大小和梯度尺度仍不同，因此“一样多的 optimizer 步”并不代表相同的梯度大小。执行器每 10 步清零 hidden，replay 的 `episode_steps` 从 0 连续且不跨 episode，`aligned_start` 只返回 0、10、20 等完整窗口并拒绝错位。无 adaptive BC、BC 权重为 0、无 Q-scale normalization、无 online CQL。
+
+## 顺序更新的执行优化（policy_delay=1）
+
+默认 `execution_optimization.prefetch_minibatches=true`：每个向量轮次提前采样各自独立的 Critic/Actor minibatch，并按字段合并传输，再顺序执行 optimizer 步。Critic 仍每步 batch=256，Actor 仍每步 batch=64；没有合并梯度或减少更新。预采样使用本轮开始时的 replay 快照，最多滞后一个向量轮次，具体 RNG/采样轨迹改变。`--no-prefetch` 可关闭以比较性能。
+
+Actor 更新使用一次 native `forward_train` 完成完整的 10-step aligned window，替代十次逐 timestep 调用；验证器检查旧/新路径的输出和参数梯度等价性。详细 Actor/Critic 指标用一次批量 scalar transfer 读取；逐步 finite-loss 检查、梯度裁剪和 Polyak 更新保留。
+
+可显式添加 `--compile-backend torchair`。实现用 `torchair.get_npu_backend()` 与 `torch.compile(dynamic=False)` 编译 online/target Q forward，以及 Actor loss 内的 Q1。LSTM、反向调用与 optimizer 调度仍使用原生 PyTorch；不宣称整个训练步已经编译。checkpoint 模块名称保持原样。依赖缺失或图编译/反向不支持时直接报错，可用 `--compile-backend none` 运行 eager；默认 none，不自动安装或升级服务器依赖。
+
+新实验请重新 prepare，并可复用已有 Phase-0；旧 delay=4 的 resolved config/checkpoint 不能直接用于新 delay=1 续训。服务器验证：
+
+```bash
+python "$SCRIPT_DIR/validate_stage3_v4.py" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --device npu:0
+# 服务器具备匹配的 TorchAir 后，另验编译执行与反向：
+python "$SCRIPT_DIR/validate_stage3_v4.py" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --device npu:0 --compile-backend torchair
+```
+
+训练命令可增加 `--compile-backend torchair`；查看 `stage_timing.jsonl` 的 `round_replay_prepare_ms`、`round_wall_ms`、`round_critic_updates`、`round_actor_updates` 和单次更新耗时。编译首次调用有预热，比较稳定阶段并分别比较 actor_frozen/actor_active。delay=1 的 Actor 更新数是原 delay=4 的四倍，优化后总速度不能直接与旧延迟设置视为同强度对比。
 
 本轮性能优化不改上述合同：TD target 的 11-step RNN 前缀现在按最后一个 hidden-reset 边界分组，用一次完整 sequence forward 代替逐 timestep 的 Python/NPU 调用；`validate_stage3_v4.py` 同时比较旧路径与新路径的 distribution tensors。Actor/target Q 仍是同一 component-mean 公式。回放的 boundary-aligned sampler 保持“episode 均匀、合法 horizon 起点均匀”的分布，仅将随机起点生成和窗口收集批量化。常量 device tensor、动作归一化和 diagnostics 语义不变。
 

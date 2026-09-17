@@ -15,9 +15,9 @@ V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
 from stage3_v3_actor import (distribution_tensors, load_exact_actor, module_hash,
-                             recurrent_distributions, target_final_distribution)
+                             recurrent_distributions, target_final_distribution, flat_to_obs)
 from stage3_v4_agent import RecurrentGMMTD3, target_final_distribution_vectorized
-from stage3_v4_gmm_math import single_expected_q
+from stage3_v4_gmm_math import single_expected_q, full_sequence_component_mean_q
 from stage3_v4_boundary import aligned_start
 from stage3_v4_replay import aligned_sequence_batch, final_transition
 
@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--bc-rnn-checkpoint", required=True)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--config", default=str(Path(__file__).with_name("stage3_v4_config.json")))
+    parser.add_argument("--compile-backend", choices=("none", "torchair"), default="none")
     args = parser.parse_args()
     if args.device.startswith("npu"):
         import torch_npu  # noqa: F401
@@ -66,6 +67,9 @@ def main():
                              dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
     critic = build_critic(59, 14, [256, 256], "relu", True, device)
     agent = RecurrentGMMTD3(clone.train(), critic, config, device, scale, offset)
+    if args.compile_backend == "torchair":
+        from stage3_v4_execution import enable_npu_compile
+        enable_npu_compile(agent)
 
     vector_expected, vector_q, _, _ = agent._expected_q_sequence(
         observations[:, :10], left[:10])
@@ -77,6 +81,22 @@ def main():
     # Learned std remains in the network but cannot enter the RL objective.
     train_distributions, _ = recurrent_distributions(
         actor.train(), observations, steps, 10)
+    native_distribution = actor.forward_train(
+        flat_to_obs(observations[:, :10]),
+        rnn_init_state=None, return_state=False)
+    native_expected, _, _, _ = full_sequence_component_mean_q(
+        agent.critic, observations[:, :10], native_distribution, scale, offset)
+    legacy_expected, _, _, _ = agent._expected_q_sequence(
+        observations[:, :10], train_distributions[:10])
+    parameters = tuple(actor.parameters())
+    native_grads = torch.autograd.grad(-native_expected.mean(), parameters,
+                                        allow_unused=True, retain_graph=True)
+    legacy_grads = torch.autograd.grad(-legacy_expected.mean(), parameters,
+                                        allow_unused=True, retain_graph=True)
+    gradient_equivalence = all(
+        (a is None and b is None) or (a is not None and b is not None
+                                     and torch.allclose(a, b, rtol=1e-3, atol=1e-5))
+        for a, b in zip(native_grads, legacy_grads))
     distribution = train_distributions[0]
     params = distribution_tensors(distribution)
     eps = torch.ones(4, 5, 1, 14, device=device)
@@ -130,14 +150,20 @@ def main():
                 self.episodes.append({
                     "observations": np.zeros((length, 59), np.float32),
                     "actions": np.zeros((length, 14), np.float32),
-                    "rewards": np.zeros((length, 1), np.float32),
+                    "rewards": np.full((length, 1), seed, np.float32),
                     "next_observations": np.zeros((length, 59), np.float32),
                     "terminals": np.zeros((length, 1), np.float32),
                     "episode_steps": steps,
                 })
         def _all_episodes(self):
             return self.episodes
+        def sample_sequences(self, count, length):
+            from stage3_v4_replay import _sample_sequence_batch
+            return _sample_sequence_batch(self.episodes, self.rng, count, length)
     replay_batch = aligned_sequence_batch(SyntheticReplay(7), SyntheticReplay(8), 64, 10, 10)
+    from stage3_v4_execution import prepare_round_batches
+    prepared_critics, prepared_actors = prepare_round_batches(
+        SyntheticReplay(7), SyntheticReplay(8), 2, config, device, True)
     batch = {
         "observations": observations[:, :10].detach().cpu().numpy(),
         "next_observations": observations[:, :10].detach().cpu().numpy(),
@@ -185,7 +211,16 @@ def main():
         "no_bc": config["bc_weight"] == metrics["lambda_bc"] == 0
                  and not config["adaptive_bc_enabled"],
         "no_q_normalization": config["actor_q_scale_normalization"] is False,
-        "policy_delay_four": config["policy_delay"] == 4,
+        "policy_delay_one": config["policy_delay"] == 1,
+        "native_actor_output_equivalence": torch.allclose(native_expected, legacy_expected, rtol=1e-4, atol=1e-5),
+        "native_actor_gradient_equivalence": gradient_equivalence,
+        "round_prefetch_batch_contract": (
+            len(prepared_critics) == len(prepared_actors) == 2
+            and prepared_critics[0][0]["observations"].shape == (256, 59)
+            and prepared_actors[0]["observations"].shape == (64, 10, 59)
+            and torch.all(prepared_critics[0][0]["rewards"][:128] == 7)
+            and torch.all(prepared_critics[0][0]["rewards"][128:] == 8)
+            and torch.all(prepared_actors[0]["episode_steps"][:, 0] % 10 == 0)),
         "actor_batch_64": config["recurrent_replay"]["actor_sequence_batch_size"] == 64,
         "diagnostic_one_sample_per_mode": config["diagnostic_learned_std_samples_per_mode"] == 1,
         "case_a_objective": config["rl_policy_expectation"] == "categorical_component_mean",

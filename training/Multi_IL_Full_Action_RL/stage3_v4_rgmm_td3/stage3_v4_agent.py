@@ -15,7 +15,8 @@ if str(V3) not in sys.path:
 from stage3_v3_actor import (distribution_tensors, flat_to_obs, module_hash,
                              recurrent_distributions)
 from stage3_v4_gmm_math import (single_component_mean_q, sequence_component_mean_q,
-                                 single_expected_q, sequence_expected_q)
+                                 single_expected_q, sequence_expected_q,
+                                 full_sequence_component_mean_q)
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -120,7 +121,16 @@ def strict_stage2_load(path, device):
 def grad_norm(parameters):
     values = [parameter.grad.detach().norm(2) for parameter in parameters
               if parameter.grad is not None]
-    return float(torch.stack(values).norm(2).item()) if values else 0.0
+    return torch.stack(values).norm(2) if values else 0.0
+
+
+def read_scalar_metrics(metrics):
+    """Copy all diagnostic scalars in one device-to-host transfer."""
+    keys = [key for key, value in metrics.items() if torch.is_tensor(value)]
+    if keys:
+        values = torch.stack([metrics[key].detach().reshape(()) for key in keys]).cpu().tolist()
+        metrics.update(zip(keys, values))
+    return metrics
 
 
 class RecurrentGMMTD3:
@@ -220,24 +230,24 @@ class RecurrentGMMTD3:
                     samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
             finally:
                 self.target_actor.low_noise_eval = True
-        return {
-            "critic_loss_q1": float(loss_q1.item()),
-            "critic_loss_q2": float(loss_q2.item()),
-            "td_target_mean": float(td_target.mean().item()),
-            "q1_mean": float(q1.mean().item()), "q2_mean": float(q2.mean().item()),
-            "qmin_mean": float(torch.minimum(q1, q2).mean().item()),
-            "q1_abs_mean": float(q1.abs().mean().item()),
-            "q2_abs_mean": float(q2.abs().mean().item()),
-            "q1_std": float(q1.std(unbiased=False).item()),
-            "q2_std": float(q2.std(unbiased=False).item()),
-            "q1_min": float(q1.min().item()), "q1_max": float(q1.max().item()),
-            "q2_min": float(q2.min().item()), "q2_max": float(q2.max().item()),
+        return read_scalar_metrics({
+            "critic_loss_q1": loss_q1,
+            "critic_loss_q2": loss_q2,
+            "td_target_mean": td_target.mean(),
+            "q1_mean": q1.mean(), "q2_mean": q2.mean(),
+            "qmin_mean": torch.minimum(q1, q2).mean(),
+            "q1_abs_mean": q1.abs().mean(),
+            "q2_abs_mean": q2.abs().mean(),
+            "q1_std": q1.std(unbiased=False),
+            "q2_std": q2.std(unbiased=False),
+            "q1_min": q1.min(), "q1_max": q1.max(),
+            "q2_min": q2.min(), "q2_max": q2.max(),
             "critic_grad_norm": critic_grad,
-            "target_expected_component_mean_q": float(expected_next.mean().item()),
-            "target_q_component_mean_estimate": float(expected_next.mean().item()),
-            "target_q_sampled_learned_std_diagnostic": float(sampled_diagnostic.mean().item()),
-            "target_q_sampled_minus_mean_gap": float((sampled_diagnostic - expected_next).mean().item()),
-        }
+            "target_expected_component_mean_q": expected_next.mean(),
+            "target_q_component_mean_estimate": expected_next.mean(),
+            "target_q_sampled_learned_std_diagnostic": sampled_diagnostic.mean(),
+            "target_q_sampled_minus_mean_gap": (sampled_diagnostic - expected_next).mean(),
+        })
 
     def actor_update(self, sequences, env_steps, collect_metrics=True):
         if not self.actor_gate_open:
@@ -247,15 +257,18 @@ class RecurrentGMMTD3:
                                 for key in ("observations", "episode_steps")})
         burn = int(self.config["recurrent_replay"]["burn_in"])
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
-        distributions, _ = recurrent_distributions(
-            self.actor, b["observations"], b["episode_steps"], horizon=horizon,
-            no_grad_prefix=burn)
-        learn_distributions = distributions[burn:]
+        if burn != 0 or b["observations"].shape[1] != horizon:
+            raise ValueError("Full-sequence Actor requires one aligned horizon and zero burn-in")
+        # Replay guarantees starts at step 0,10,...; no internal reset exists
+        # within this window. A single native RNN call retains BPTT gradients.
+        distribution = self.actor.forward_train(
+            flat_to_obs(b["observations"]), rnn_init_state=None, return_state=False)
         for parameter in self.critic.parameters():
             parameter.requires_grad_(False)
         try:
-            expected, q1, tensors, _ = self._expected_q_sequence(
-                b["observations"][:, burn:], learn_distributions)
+            expected, q1, tensors, _ = full_sequence_component_mean_q(
+                self.critic, b["observations"], distribution,
+                self.action_scale, self.action_offset)
             actor_rl = -expected.mean()
             if not torch.isfinite(actor_rl):
                 raise FloatingPointError("Non-finite Stage3-v4 Actor loss")
@@ -289,6 +302,8 @@ class RecurrentGMMTD3:
         std_values = tensors["scales"].detach().reshape(-1)
         with torch.no_grad():
             # Counterfactual learned-std Q is logged only and has no RL gradient.
+            learn_distributions, _ = recurrent_distributions(
+                self.actor, b["observations"], b["episode_steps"], horizon=horizon)
             sampled_diagnostic, _, _, _ = sequence_expected_q(
                 self.critic, b["observations"][:, burn:], learn_distributions,
                 self.action_scale, self.action_offset,
@@ -298,43 +313,42 @@ class RecurrentGMMTD3:
             modes = means.shape[-2]
             mask = ~torch.eye(modes, dtype=torch.bool, device=means.device)
             pairwise = distances[..., mask].mean()
-        return {
-            "actor_rl_loss": float(actor_rl.item()),
-            "actor_total_loss": float(actor_rl.item()),
+        return read_scalar_metrics({
+            "actor_rl_loss": actor_rl,
+            "actor_total_loss": actor_rl,
             "lambda_bc": 0.0,
             "actor_grad_norm_total": actor_grad,
             **head_grads,
-            "gmm_entropy": float(entropy.item()),
-            "gmm_std_mean": float(std_values.mean().item()),
-            "gmm_std_min": float(std_values.min().item()),
-            "gmm_std_max": float(std_values.max().item()),
-            "actor_expected_component_mean_q": float((-actor_rl).item()),
-            "actor_component_q_mean": float(component_q.mean().item()),
-            "actor_component_q_std": float(component_q.std(unbiased=False).item()),
-            "actor_component_q_min": float(component_q.min().item()),
-            "actor_component_q_max": float(component_q.max().item()),
-            "actor_q_component_mean_estimate": float((-actor_rl).item()),
-            "actor_q_sampled_learned_std_diagnostic": float(sampled_diagnostic.mean().item()),
-            "actor_q_sampled_minus_mean_gap": float((sampled_diagnostic.mean() + actor_rl).item()),
+            "gmm_entropy": entropy,
+            "gmm_std_mean": std_values.mean(),
+            "gmm_std_min": std_values.min(),
+            "gmm_std_max": std_values.max(),
+            "actor_expected_component_mean_q": -actor_rl,
+            "actor_component_q_mean": component_q.mean(),
+            "actor_component_q_std": component_q.std(unbiased=False),
+            "actor_component_q_min": component_q.min(),
+            "actor_component_q_max": component_q.max(),
+            "actor_q_component_mean_estimate": -actor_rl,
+            "actor_q_sampled_learned_std_diagnostic": sampled_diagnostic.mean(),
+            "actor_q_sampled_minus_mean_gap": sampled_diagnostic.mean() + actor_rl,
             "policy_delay": int(self.config["policy_delay"]),
             "actor_sequence_batch": int(self.config["recurrent_replay"]["actor_sequence_batch_size"]),
             "diagnostic_learned_std_samples_per_mode": int(
                 self.config["diagnostic_learned_std_samples_per_mode"]),
             "mixture_prob_mean": float(1.0 / self.config["actor_source_contract"]["num_modes"]),
-            "mixture_prob_max": float(probabilities.max(-1).values.mean().item()),
-            "component_q_mean": float(component_q.mean().item()),
-            "component_mean_pairwise_distance": float(pairwise.item()),
-            "effectively_active_modes": float(math.exp(entropy.item())),
+            "mixture_prob_max": probabilities.max(-1).values.mean(),
+            "component_q_mean": component_q.mean(),
+            "component_mean_pairwise_distance": pairwise,
+            "effectively_active_modes": entropy.exp(),
             "actor_parameter_drift_l2": self.parameter_drift(),
-        }
+        })
 
     def parameter_drift(self):
-        total = 0.0
         with torch.no_grad():
-            for key, value in self.actor.state_dict().items():
-                difference = value.detach().cpu() - self.initial_actor[key]
-                total += float(difference.square().sum())
-        return math.sqrt(total)
+            reference = self.reference_actor.state_dict()
+            total = torch.stack([(value.detach() - reference[key]).square().sum()
+                                 for key, value in self.actor.state_dict().items()]).sum()
+        return float(total.sqrt().item())
 
     @torch.no_grad()
     def gmm_diagnostics(self, sequences):
