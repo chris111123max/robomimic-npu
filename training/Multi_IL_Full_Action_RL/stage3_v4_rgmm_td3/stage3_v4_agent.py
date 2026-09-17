@@ -46,7 +46,12 @@ def target_final_distribution_vectorized(actor, observations, episode_steps, hor
     for row in reset_cpu:
         positions = np.flatnonzero(row)
         starts.append(int(positions[-1]) if len(positions) else 0)
-    result = [None] * batch
+    # Keep raw distribution parameters instead of slicing MixtureSameFamily
+    # objects.  torch.distributions.Distribution does not guarantee tensor-
+    # style indexing (MixtureSameFamily is not subscriptable on torch-npu).
+    result_loc = [None] * batch
+    result_scale = [None] * batch
+    result_logits = [None] * batch
     for start in sorted(set(starts)):
         rows = [index for index, value in enumerate(starts) if value == start]
         row_index = torch.as_tensor(rows, dtype=torch.long, device=observations.device)
@@ -55,18 +60,18 @@ def target_final_distribution_vectorized(actor, observations, episode_steps, hor
             flat_to_obs(suffix), rnn_init_state=None, return_state=False)
         last = distribution.component_distribution.base_dist.loc.shape[1] - 1
         base = distribution.component_distribution.base_dist
-        component = torch.distributions.Independent(
-            torch.distributions.Normal(base.loc[:, last], base.scale[:, last]), 1)
-        mixture = torch.distributions.Categorical(
-            logits=distribution.mixture_distribution.logits[:, last])
-        final = torch.distributions.MixtureSameFamily(mixture, component)
+        final_loc = base.loc[:, last]
+        final_scale = base.scale[:, last]
+        final_logits = distribution.mixture_distribution.logits[:, last]
         for position, row in enumerate(rows):
-            result[row] = final[position:position + 1]
+            result_loc[row] = final_loc[position:position + 1]
+            result_scale[row] = final_scale[position:position + 1]
+            result_logits[row] = final_logits[position:position + 1]
     # Concatenate distribution tensors explicitly to avoid relying on private
     # Distribution slicing behavior for heterogeneous row groups.
-    base_loc = torch.cat([item.component_distribution.base_dist.loc for item in result], dim=0)
-    base_scale = torch.cat([item.component_distribution.base_dist.scale for item in result], dim=0)
-    logits = torch.cat([item.mixture_distribution.logits for item in result], dim=0)
+    base_loc = torch.cat(result_loc, dim=0)
+    base_scale = torch.cat(result_scale, dim=0)
+    logits = torch.cat(result_logits, dim=0)
     component = torch.distributions.Independent(
         torch.distributions.Normal(base_loc, base_scale), 1)
     return torch.distributions.MixtureSameFamily(
