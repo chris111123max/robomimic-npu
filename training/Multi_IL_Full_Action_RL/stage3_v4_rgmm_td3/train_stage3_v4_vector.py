@@ -312,7 +312,8 @@ def main():
         write_json(group_dir / "runtime_audit.json", {
             "stage": "stage3-v4", "group": args.group, "run_type": config["run_type"],
             "device": str(device), "num_envs": num_envs,
-            "env_steps_semantics": "aggregate environment transitions", "utd": 1,
+            "env_steps_semantics": "aggregate environment transitions",
+            "utd": float(config.get("utd", 0.25)),
             "policy_delay": int(config["policy_delay"]),
             "prefetch_minibatches": bool(prefetch), "compile_backend": compile_backend,
             "actor_update_schedule": "one Actor step per Critic step after 10k gate",

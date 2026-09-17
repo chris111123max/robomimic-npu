@@ -211,7 +211,7 @@ def main():
         "no_bc": config["bc_weight"] == metrics["lambda_bc"] == 0
                  and not config["adaptive_bc_enabled"],
         "no_q_normalization": config["actor_q_scale_normalization"] is False,
-        "policy_delay_four": config["policy_delay"] == 4,
+        "policy_delay_one": config["policy_delay"] == 1,
         "native_actor_output_equivalence": torch.allclose(native_expected, legacy_expected, rtol=1e-4, atol=1e-5),
         "native_actor_gradient_equivalence": gradient_equivalence,
         "round_prefetch_batch_contract": (
