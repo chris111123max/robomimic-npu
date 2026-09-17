@@ -150,7 +150,8 @@ def main():
     env = build_env(config["expert_dataset"])
     try:
         competence = evaluate_actor(actor, scale, offset, env,
-                                    config["evaluation_seeds"], config["horizon"],
+                                    config.get("competence_evaluation_seeds",
+                                               config["evaluation_seeds"]), config["horizon"],
                                     config["sim_error_handling"]["evaluation_retry_count"])
     finally:
         close_env(env)

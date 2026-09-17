@@ -16,10 +16,10 @@ if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
 from stage3_v3_actor import (distribution_tensors, load_exact_actor, module_hash,
                              recurrent_distributions, target_final_distribution)
-from stage3_v4_agent import RecurrentGMMTD3
+from stage3_v4_agent import RecurrentGMMTD3, target_final_distribution_vectorized
 from stage3_v4_gmm_math import single_expected_q
 from stage3_v4_boundary import aligned_start
-from stage3_v4_replay import final_transition
+from stage3_v4_replay import aligned_sequence_batch, final_transition
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -52,7 +52,11 @@ def main():
     transfer_diff = max(float((distribution_tensors(a)[key] - distribution_tensors(b)[key]).abs().max())
                         for a, b in zip(left, right) for key in keys)
     with torch.no_grad():
-        optimized, _ = target_final_distribution(actor, observations, steps, 10)
+        legacy_target, _ = target_final_distribution(actor, observations, steps, 10)
+        optimized, _ = target_final_distribution_vectorized(actor, observations, steps, 10)
+    legacy_target_diff = max(float((distribution_tensors(legacy_target)[key]
+                                   - distribution_tensors(optimized)[key]).abs().max())
+                             for key in keys)
     target_diff = max(float((distribution_tensors(left[-1])[key]
                              - distribution_tensors(optimized)[key]).abs().max())
                       for key in keys)
@@ -116,6 +120,24 @@ def main():
     fake_episode = {"episode_steps": np.arange(30), "actions": np.zeros((30, 14))}
     aligned_starts = [aligned_start(fake_episode, 10, 10, np.random.default_rng(index))
                       for index in range(8)]
+    class SyntheticReplay:
+        def __init__(self, seed):
+            self.rng = np.random.default_rng(seed)
+            self.episodes = []
+            for offset in range(3):
+                length = 30 + offset
+                steps = np.arange(length, dtype=np.int64)
+                self.episodes.append({
+                    "observations": np.zeros((length, 59), np.float32),
+                    "actions": np.zeros((length, 14), np.float32),
+                    "rewards": np.zeros((length, 1), np.float32),
+                    "next_observations": np.zeros((length, 59), np.float32),
+                    "terminals": np.zeros((length, 1), np.float32),
+                    "episode_steps": steps,
+                })
+        def _all_episodes(self):
+            return self.episodes
+    replay_batch = aligned_sequence_batch(SyntheticReplay(7), SyntheticReplay(8), 64, 10, 10)
     batch = {
         "observations": observations[:, :10].detach().cpu().numpy(),
         "next_observations": observations[:, :10].detach().cpu().numpy(),
@@ -136,6 +158,7 @@ def main():
         "strict_transfer": not strict_result.missing_keys and not strict_result.unexpected_keys,
         "step0_output_equivalence": transfer_diff <= 1e-5,
         "target_recurrent_equivalence": target_diff <= 1e-5,
+        "target_sequence_vectorized_equivalence": legacy_target_diff <= 1e-5,
         "warmup_actor_frozen": not gate_before and warmup_actor_unchanged,
         "warmup_critic_changed": critic_warmup_changed,
         "target_low_noise_contract": agent.target_actor.low_noise_eval is True
@@ -166,7 +189,18 @@ def main():
         "actor_batch_64": config["recurrent_replay"]["actor_sequence_batch_size"] == 64,
         "diagnostic_one_sample_per_mode": config["diagnostic_learned_std_samples_per_mode"] == 1,
         "case_a_objective": config["rl_policy_expectation"] == "categorical_component_mean",
+        "formal_evaluation_seeds_ten": config["evaluation_seeds"] == list(range(20000, 20010)),
+        "competence_seed_contract": config["competence_evaluation_seeds"] == list(range(20000, 20020)),
+        "smoke_evaluation_seeds_two": config["smoke_evaluation_seeds"] == [20000, 20001],
         "aligned_same_episode": all(start in (0, 10, 20) for start in aligned_starts),
+        "replay_batch_shape_boundary_ratio": (
+            replay_batch["observations"].shape == (64, 10, 59)
+            and replay_batch["actions"].shape == (64, 10, 14)
+            and int(replay_batch["is_offline"].sum()) == 32
+            and np.array_equal(
+                replay_batch["episode_steps"],
+                replay_batch["episode_steps"][:, :1] + np.arange(10)[None, :])
+            and np.all(replay_batch["episode_steps"][:, 0] % 10 == 0)),
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
         "utd_one": config["utd"] == 1,
     }
@@ -175,6 +209,7 @@ def main():
     print(json.dumps({"status": status, "checks": checks,
                       "transfer_max_abs_diff": transfer_diff,
                       "target_max_abs_diff": target_diff,
+                      "target_legacy_vs_vectorized_max_abs_diff": legacy_target_diff,
                       "gradient_norms": gradients,
                       "gradient_nonzero_by_group": {key: value > 0 for key, value in gradients.items()},
                       "sampled_diagnostic_minus_mean_q": float(

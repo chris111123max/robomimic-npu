@@ -319,6 +319,10 @@ def main():
             "boundary_evidence": "BatchedGMMExecutor resets hidden at episode timestep mod 10 == 0 and episode reset; replay stores contiguous episode_steps from 0; Actor windows begin at 0,10,... and never cross episodes",
             "rollout_std_contract": "BatchedGMMExecutor temporarily calls actor.eval(); checkpoint low_noise_eval=True fixes Gaussian component std to 1e-4; categorical mode is sampled.",
             "fixed_evaluation_std_contract": "evaluate_actor uses BatchedGMMExecutor, so eval mode and Gaussian std 1e-4 match online rollout.",
+            "evaluation_seeds": list(config["smoke_evaluation_seeds"] if args.smoke
+                                     else config["evaluation_seeds"]),
+            "smoke_evaluation_policy": ("2 seeds at final 12k only" if args.smoke
+                                         else "10 fixed seeds at configured milestones"),
             "actor_update_std_contract": "Actor is in train mode and computes learned std, but raw-Q RL objective uses only categorical probabilities and component means; std head has no direct RL gradient.",
             "target_actor_contract": "Independent frozen Polyak-updated Actor remains eval with low_noise_eval=True; Bellman target enumerates component means under no_grad.",
             "replay_action_contract": "The exact denormalized action array returned by BatchedGMMExecutor is passed to vector.step and online.add; no external noise or clipping.",
@@ -327,6 +331,10 @@ def main():
         })
 
         evaluation_steps = milestones(config, "evaluation_env_steps", total)
+        if args.smoke:
+            evaluation_steps = {total}
+        evaluation_seeds = (config["smoke_evaluation_seeds"] if args.smoke
+                            else config["evaluation_seeds"])
         checkpoint_steps = milestones(config, "checkpoint_env_steps", total)
         best_success = -1.0
 
@@ -337,7 +345,7 @@ def main():
             seed_all(config["training_seed"] + 7000000 + int(step), torch)
             try:
                 report = evaluate_actor(
-                    actor, scale, offset, eval_env, config["evaluation_seeds"],
+                    actor, scale, offset, eval_env, evaluation_seeds,
                     config["horizon"], config["sim_error_handling"]["evaluation_retry_count"],
                     vector.action_low if config["exploration"]["clip_to_env_bounds"] else None,
                     vector.action_high if config["exploration"]["clip_to_env_bounds"] else None)
@@ -367,7 +375,7 @@ def main():
             save_checkpoint(group_dir / "checkpoints" / "step0_transfer.pth", agent,
                             config, args.group, 0, generations, episodes, successes,
                             online, torch)
-            if 0 in evaluation_steps:
+            if 0 in evaluation_steps and not args.smoke:
                 run_evaluation(0)
 
         print(f"[STAGE3-V4] group={args.group} num_envs={num_envs} "

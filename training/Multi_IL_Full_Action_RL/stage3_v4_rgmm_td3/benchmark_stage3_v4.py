@@ -27,6 +27,21 @@ def summarize(path):
     return result
 
 
+def summarize_timing(path):
+    path = Path(path)
+    if not path.is_file():
+        return {"samples": 0}
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+    keys = ("actor_inference_ms", "vector_env_step_ms", "critic_replay_ms",
+            "critic_update_ms", "actor_replay_ms", "actor_update_ms",
+            "polyak_update_ms", "target_actor_sequence_ms", "target_q_ms")
+    return {"samples": len(rows), **{
+        key: (sum(float(row[key]) for row in rows if key in row)
+              / sum(key in row for row in rows) if any(key in row for row in rows)
+              else None) for key in keys}}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pair-run-dir", required=True)
@@ -35,7 +50,9 @@ def main():
     args = parser.parse_args()
     path = Path(args.pair_run_dir) / args.group / "throughput_metrics.jsonl"
     report = {"stage": "stage3-v4", "group": args.group,
-              "throughput": summarize(path)}
+              "throughput": summarize(path),
+              "stage_timing": summarize_timing(
+                  Path(args.pair_run_dir) / args.group / "stage_timing.jsonl")}
     if args.v3_throughput_jsonl:
         baseline = summarize(args.v3_throughput_jsonl)
         report["v3_baseline"] = baseline

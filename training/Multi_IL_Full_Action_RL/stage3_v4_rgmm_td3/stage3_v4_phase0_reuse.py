@@ -21,7 +21,7 @@ EVALUATION_CONTRACT_KEYS = (
     "bc_rnn_checkpoint_sha256",
     "expert_dataset_sha256",
     "training_seed",
-    "evaluation_seeds",
+    "competence_evaluation_seeds",
     "horizon",
     "sim_error_handling",
 )
@@ -50,8 +50,14 @@ def validate_phase0_reuse(reference_pair, target_config, target_actor_hash):
     reference = Path(reference_pair).resolve(strict=True)
     shared = reference / "shared"
     old_config = _read(shared / "config_resolved.json")
-    mismatches = [key for key in EVALUATION_CONTRACT_KEYS
-                  if old_config.get(key) != target_config.get(key)]
+    mismatches = []
+    for key in EVALUATION_CONTRACT_KEYS:
+        old_value = old_config.get(key)
+        if key == "competence_evaluation_seeds" and old_value is None:
+            # Older v3/v4 pairs used evaluation_seeds for Phase-0 competence.
+            old_value = old_config.get("evaluation_seeds")
+        if old_value != target_config.get(key):
+            mismatches.append(key)
     if mismatches:
         raise RuntimeError(f"Phase-0 reuse contract differs: {', '.join(mismatches)}")
 
@@ -62,7 +68,8 @@ def validate_phase0_reuse(reference_pair, target_config, target_actor_hash):
     expected_sha = target_config["bc_rnn_checkpoint_sha256"]
     required_successes = int(target_config["actor_gate"]["competence_min_successes"])
     expected_episodes = int(target_config["actor_gate"]["competence_episodes"])
-    expected_seeds = list(target_config["evaluation_seeds"])
+    expected_seeds = list(target_config.get("competence_evaluation_seeds",
+                                           target_config["evaluation_seeds"]))
     maximum_diff = float(transfer.get("max_abs_diff", float("inf")))
 
     if fairness.get("stage") not in ("stage3-v3", "stage3-v4") or not fairness.get("actor_hashes_identical"):

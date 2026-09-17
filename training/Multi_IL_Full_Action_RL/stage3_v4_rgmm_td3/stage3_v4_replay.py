@@ -19,13 +19,26 @@ def _sample_aligned(source, count, length, horizon):
     eligible = [episode for episode in episodes if len(episode["actions"]) >= length]
     if not eligible:
         raise RuntimeError("No complete boundary-aligned Actor window available")
-    result = {key: [] for key in CORE + ("episode_steps",)}
-    for _ in range(int(count)):
-        episode = eligible[int(source.rng.integers(len(eligible)))]
-        start = aligned_start(episode, length, horizon, source.rng)
-        for key in result:
-            result[key].append(np.asarray(episode[key][start:start + length]))
-    return {key: np.stack(value) for key, value in result.items()}
+    count = int(count)
+    # Draw the same distribution as the reference implementation: episodes
+    # are uniform, then complete horizon-aligned starts are uniform within the
+    # selected episode. Vectorized draws remove one RNG call per sample.
+    episode_ids = source.rng.integers(len(eligible), size=count)
+    window_counts = np.asarray(
+        [(len(episode["actions"]) - int(length)) // int(horizon) + 1
+         for episode in eligible], dtype=np.int64)
+    start_ids = source.rng.integers(
+        window_counts[episode_ids], size=count) * int(horizon)
+    result = {}
+    for key in CORE + ("episode_steps",):
+        result[key] = np.stack([
+            np.asarray(eligible[int(episode_id)][key][int(start):int(start) + int(length)])
+            for episode_id, start in zip(episode_ids, start_ids)
+        ])
+    expected_steps = start_ids[:, None] + np.arange(int(length), dtype=np.int64)[None, :]
+    if not np.array_equal(result["episode_steps"], expected_steps):
+        raise RuntimeError("Aligned replay sampler produced a non-boundary window")
+    return result
 
 
 def aligned_sequence_batch(offline, online, count, length, horizon=10):

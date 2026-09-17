@@ -28,9 +28,13 @@ y = r + γ(1-terminal) Σ_k p'_k(h') min(Q1'(s', denorm(μ'_k)), Q2'(s', denorm(
 
 其余合同不变：Stage2 twin MLP + LayerNorm Critic，0–10k Actor 冻结/Critic UTD=1 更新，10k 且 Phase-0 gate 通过后 Actor 更新；Critic batch 256（离线/在线各 128），`policy_delay=4`，Actor recurrent batch 64，`train_seq_len=10`、`burn_in=0`。后两者成立的证据是执行器每 10 步清零 hidden，replay 的 `episode_steps` 从 0 连续且不跨 episode，`aligned_start` 只返回 0、10、20 等完整窗口并拒绝错位。无 adaptive BC、BC 权重为 0、无 Q-scale normalization、无 online CQL。
 
+本轮性能优化不改上述合同：TD target 的 11-step RNN 前缀现在按最后一个 hidden-reset 边界分组，用一次完整 sequence forward 代替逐 timestep 的 Python/NPU 调用；`validate_stage3_v4.py` 同时比较旧路径与新路径的 distribution tensors。Actor/target Q 仍是同一 component-mean 公式。回放的 boundary-aligned sampler 保持“episode 均匀、合法 horizon 起点均匀”的分布，仅将随机起点生成和窗口收集批量化。常量 device tensor、动作归一化和 diagnostics 语义不变。
+
+正式 evaluation 固定为 10 个 seed（20000–20009），所有分支一致；smoke 仅使用 20000、20001，并只在最终 12000 aggregate steps 评估一次，0–10k gate/冻结检查仍完整执行。当前仓库没有服务器 profiling 数据，因此不会虚构提速百分比；`stage_timing.jsonl` 应用于同一机器比较改动前后的 `aggregate_env_steps_per_sec`、`critic_replay_ms`、`critic_update_ms` 和 `vector_env_step_ms`。
+
 ## 先审计，再做 12k 冒烟
 
-下面命令在服务器仓库根目录及 `robosuite_npu` 环境中运行。不要直接启动 3M。`REFERENCE_PHASE0_PAIR` 只能指向已经通过且准备脚本认定兼容的 Phase-0 pair；若没有，就不使用复用参数，准备后运行 `run_phase0_stage3_v4.py`。
+下面命令在服务器仓库根目录及 `robosuite_npu` 环境中运行。不要直接启动 3M。正式训练 evaluation 固定为 10 个 seed；Phase-0 competence 仍保留原来的 20 个 seed/10 个成功门槛以保持 gate 语义。`REFERENCE_PHASE0_PAIR` 必须与这两套 seed 配置兼容；若没有，就去掉复用参数，准备后运行 `run_phase0_stage3_v4.py`。
 
 ```bash
 cd /data/home/3220251075/lerobot_workspace/robomimic
@@ -55,6 +59,13 @@ SMOKE_RUN_DIR="$OUTPUT_ROOT/$SMOKE_ID"
 python "$SCRIPT_DIR/prepare_stage3_v4_pair.py" --run-id "$SMOKE_ID" --bc-rnn-checkpoint "$BC_RNN_CHECKPOINT" --rnn-q-checkpoint "$RNN_Q_CHECKPOINT" --multi-q-checkpoint "$MULTI_Q_CHECKPOINT" --reuse-phase0-from "$REFERENCE_PHASE0_PAIR"
 test -f "$SMOKE_RUN_DIR/shared/config_resolved.json" && test -f "$SMOKE_RUN_DIR/shared/phase0_gate.json" && python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group multi_q --device npu:0 --pair-run-dir "$SMOKE_RUN_DIR" --critic-init-checkpoint "$MULTI_Q_CHECKPOINT" --num-envs 2 --total-env-steps 12000 --smoke
 cat "$SMOKE_RUN_DIR/multi_q/smoke_validation.json"
+```
+
+使用同一个 prepared pair 测试 RNN-Q：
+
+```bash
+python -u "$SCRIPT_DIR/train_stage3_v4_vector.py" --group rnn_q --device npu:0 --pair-run-dir "$SMOKE_RUN_DIR" --critic-init-checkpoint "$RNN_Q_CHECKPOINT" --num-envs 2 --total-env-steps 12000 --smoke
+cat "$SMOKE_RUN_DIR/rnn_q/smoke_validation.json"
 ```
 
 重点看 `multi_q/console.log`、`train_metrics.jsonl`、`runtime_audit.json`、`stage_timing.jsonl`、`smoke_validation.json`：0–10k Actor 更新数应为 0 且参数 hash 不变；10k 后 gate 打开、Actor 更新数增长、Critic 持续更新；梯度有限、std head 直接梯度为 0；无 NaN；`actor_expected_component_mean_q` 是训练值，`actor_q_sampled_learned_std_diagnostic` 只是对照；吞吐以 gate 前/后实际 steps/s 判断。通过后再决定是否准备新的正式 pair。

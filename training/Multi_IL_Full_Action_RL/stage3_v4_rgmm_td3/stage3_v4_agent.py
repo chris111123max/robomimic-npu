@@ -6,13 +6,14 @@ import math
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 
 V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
-from stage3_v3_actor import (distribution_tensors, module_hash,
-                             recurrent_distributions, target_final_distribution)
+from stage3_v3_actor import (distribution_tensors, flat_to_obs, module_hash,
+                             recurrent_distributions)
 from stage3_v4_gmm_math import (single_component_mean_q, sequence_component_mean_q,
                                  single_expected_q, sequence_expected_q)
 
@@ -21,6 +22,55 @@ STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pret
 if str(STAGE2) not in sys.path:
     sys.path.insert(0, str(STAGE2))
 from critic_network import load_stage2_critic_checkpoint  # noqa: E402
+
+
+@torch.no_grad()
+def target_final_distribution_vectorized(actor, observations, episode_steps, horizon=10):
+    """Compute the final target distribution with full-sequence RNN kernels.
+
+    The legacy helper launches one encoder/RNN call per timestep and applies
+    hidden resets in Python.  A context can contain at most a few reset
+    boundaries; grouping rows by their last boundary lets the native RNN run
+    each contiguous suffix in one call while preserving zero-state semantics.
+    """
+    if observations.ndim != 3 or observations.shape[-1] != 59:
+        raise ValueError("Recurrent observations must have shape [B,T,59]")
+    if episode_steps.shape != observations.shape[:2] or observations.shape[1] < 1:
+        raise ValueError("Invalid target recurrent context")
+    batch, time_steps = observations.shape[:2]
+    reset = episode_steps.remainder(int(horizon)).eq(0)
+    # One host read per target batch is intentional: it replaces T NPU kernel
+    # launches and is outside the optimizer's numerical path.
+    reset_cpu = reset.detach().cpu().numpy()
+    starts = []
+    for row in reset_cpu:
+        positions = np.flatnonzero(row)
+        starts.append(int(positions[-1]) if len(positions) else 0)
+    result = [None] * batch
+    for start in sorted(set(starts)):
+        rows = [index for index, value in enumerate(starts) if value == start]
+        row_index = torch.as_tensor(rows, dtype=torch.long, device=observations.device)
+        suffix = observations.index_select(0, row_index)[:, start:]
+        distribution = actor.forward_train(
+            flat_to_obs(suffix), rnn_init_state=None, return_state=False)
+        last = distribution.component_distribution.base_dist.loc.shape[1] - 1
+        base = distribution.component_distribution.base_dist
+        component = torch.distributions.Independent(
+            torch.distributions.Normal(base.loc[:, last], base.scale[:, last]), 1)
+        mixture = torch.distributions.Categorical(
+            logits=distribution.mixture_distribution.logits[:, last])
+        final = torch.distributions.MixtureSameFamily(mixture, component)
+        for position, row in enumerate(rows):
+            result[row] = final[position:position + 1]
+    # Concatenate distribution tensors explicitly to avoid relying on private
+    # Distribution slicing behavior for heterogeneous row groups.
+    base_loc = torch.cat([item.component_distribution.base_dist.loc for item in result], dim=0)
+    base_scale = torch.cat([item.component_distribution.base_dist.scale for item in result], dim=0)
+    logits = torch.cat([item.mixture_distribution.logits for item in result], dim=0)
+    component = torch.distributions.Independent(
+        torch.distributions.Normal(base_loc, base_scale), 1)
+    return torch.distributions.MixtureSameFamily(
+        torch.distributions.Categorical(logits=logits), component), None
 
 
 def strict_stage2_load(path, device):
@@ -97,7 +147,7 @@ class RecurrentGMMTD3:
                                      for key in ("next_observations", "episode_steps")})
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         with torch.no_grad():
-            distribution, _ = target_final_distribution(
+            distribution, _ = target_final_distribution_vectorized(
                 self.target_actor, target["next_observations"],
                 target["episode_steps"] + 1, horizon=horizon)
             expected_next, target_q1, target_q2, target_tensors, _ = self._expected_q(
@@ -125,7 +175,7 @@ class RecurrentGMMTD3:
             # Diagnostic counterfactual only. Never enters td_target or backward.
             self.target_actor.low_noise_eval = False
             try:
-                learned_distribution, _ = target_final_distribution(
+                learned_distribution, _ = target_final_distribution_vectorized(
                     self.target_actor, target["next_observations"],
                     target["episode_steps"] + 1, horizon=horizon)
                 sampled_diagnostic, _, _, _, _ = single_expected_q(

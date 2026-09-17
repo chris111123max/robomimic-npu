@@ -85,7 +85,9 @@ def validate_config(config):
             or config["recurrent_replay"]["train_seq_len"] != 10
             or config.get("boundary_aligned_sequence_sampling") is not True):
         raise RuntimeError("Stage3-v4 aligned recurrent sampling contract changed")
-    if (config.get("evaluation_seeds") != list(range(20000, 20020))
+    if (config.get("evaluation_seeds") != list(range(20000, 20010))
+            or config.get("competence_evaluation_seeds") != list(range(20000, 20020))
+            or config.get("smoke_evaluation_seeds") != [20000, 20001]
             or not set((0, 10000, 25000, 50000, 100000, 150000, 200000,
                         300000, 500000, 1000000, 2000000, 3000000)).issubset(
                             set(config.get("evaluation_env_steps", [])))
@@ -176,6 +178,7 @@ def main():
         "train_seed_base": int(config["train_seed_base"]),
         "train_seed_rule": "train_seed_base + generation * num_envs + env_id",
         "evaluation_seeds": config["evaluation_seeds"],
+        "competence_evaluation_seeds": config["competence_evaluation_seeds"],
     }
     fairness = {
         "stage": "stage3-v4", "status": "PREPARED",
