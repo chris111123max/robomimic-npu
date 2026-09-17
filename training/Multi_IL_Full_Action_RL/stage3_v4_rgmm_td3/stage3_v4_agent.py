@@ -179,9 +179,13 @@ class RecurrentGMMTD3:
             head_grads = {}
             if collect_metrics:
                 named = dict(self.actor.named_parameters())
-                for label, token in (("gmm_mean", "per_step_net.nets.mean"),
-                                     ("gmm_std", "per_step_net.nets.scale"),
-                                     ("gmm_logits", "per_step_net.nets.logits"),
+                # RNNGMMActorNetwork registers the shared ObservationDecoder under
+                # ``nets.decoder`` before it is referenced again by the RNN
+                # per-step network. ``named_parameters()`` therefore exposes the
+                # canonical decoder names below (duplicate references are removed).
+                for label, token in (("gmm_mean", "nets.decoder.nets.mean"),
+                                     ("gmm_std", "nets.decoder.nets.scale"),
+                                     ("gmm_logits", "nets.decoder.nets.logits"),
                                      ("rnn", "nets.rnn.nets")):
                     head_grads[f"actor_grad_norm_{label}"] = grad_norm(
                         value for name, value in named.items() if token in name)

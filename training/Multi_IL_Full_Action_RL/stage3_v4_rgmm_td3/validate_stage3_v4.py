@@ -106,6 +106,10 @@ def main():
                         collect_metrics=False)
     critic_warmup_changed = module_hash(agent.critic) != critic_hash
     gate_before = agent.maybe_open_gate(9999, True, True)
+    # Check the complete frozen interval before opening the 10k gate and before
+    # any Actor optimizer step. Comparing this hash after actor_update() would
+    # incorrectly fail whenever the post-gate Actor update works as intended.
+    warmup_actor_unchanged = frozen_hash == module_hash(agent.actor)
     gate_at = agent.maybe_open_gate(10000, True, True)
 
     # Actor sequence starts on a real zero-hidden boundary and is one horizon.
@@ -132,7 +136,7 @@ def main():
         "strict_transfer": not strict_result.missing_keys and not strict_result.unexpected_keys,
         "step0_output_equivalence": transfer_diff <= 1e-5,
         "target_recurrent_equivalence": target_diff <= 1e-5,
-        "warmup_actor_frozen": not gate_before and frozen_hash == module_hash(agent.actor),
+        "warmup_actor_frozen": not gate_before and warmup_actor_unchanged,
         "warmup_critic_changed": critic_warmup_changed,
         "target_low_noise_contract": agent.target_actor.low_noise_eval is True
                                      and not agent.target_actor.training
