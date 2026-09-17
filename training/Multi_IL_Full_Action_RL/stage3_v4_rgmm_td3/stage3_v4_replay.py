@@ -9,9 +9,60 @@ import numpy as np
 V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
-from stage3_v3_replay import (CORE, OfflineDemonstrations, OnlineSequenceReplay,
+from stage3_v3_replay import (CORE, OfflineDemonstrations as _OfflineDemonstrations,
+                              OnlineSequenceReplay as _OnlineSequenceReplay,
                               final_transition, symmetric_sequence_batch)
 from stage3_v4_boundary import aligned_start
+
+
+def _sample_sequence_batch(episodes, rng, count, length):
+    """Sample the reference distribution with batched RNG/index generation."""
+    eligible = [episode for episode in episodes
+                if len(episode["actions"]) >= int(length)]
+    if not eligible:
+        raise RuntimeError("No complete episode is available for recurrent sampling")
+    count = int(count)
+    episode_ids = rng.integers(len(eligible), size=count)
+    start_counts = np.asarray(
+        [len(episode["actions"]) - int(length) + 1 for episode in eligible],
+        dtype=np.int64,
+    )
+    starts = rng.integers(start_counts[episode_ids], size=count)
+    return {
+        key: np.stack([
+            eligible[int(episode_id)][key][int(start):int(start) + int(length)]
+            for episode_id, start in zip(episode_ids, starts)
+        ])
+        for key in CORE + ("episode_steps",)
+    }
+
+
+class OfflineDemonstrations(_OfflineDemonstrations):
+    """Stage3-v4 replay with batched sequence index generation."""
+
+    def sample_sequences(self, count, length):
+        return _sample_sequence_batch(self.episodes, self.rng, count, length)
+
+
+class OnlineSequenceReplay(_OnlineSequenceReplay):
+    """Stage3-v4 replay with batched sequence index generation."""
+
+    def sample_sequences(self, count, length):
+        return _sample_sequence_batch(
+            list(self.episodes) + list(self.current.values()),
+            self.rng, count, length,
+        )
+
+    @classmethod
+    def load(cls, path):
+        payload = np.load(path, allow_pickle=True).item()
+        replay = cls(payload["capacity"])
+        replay.transitions = int(payload["transitions"])
+        from collections import deque
+        replay.episodes = deque(payload["episodes"])
+        replay.current = payload.get("current", {})
+        replay.rng.bit_generator.state = payload["rng_state"]
+        return replay
 
 
 def _sample_aligned(source, count, length, horizon):

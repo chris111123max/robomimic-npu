@@ -24,8 +24,26 @@ if str(STAGE2) not in sys.path:
 from critic_network import load_stage2_critic_checkpoint  # noqa: E402
 
 
+def _last_reset_starts_from_numpy(episode_steps, horizon):
+    """Return the same last-reset positions without synchronizing the NPU.
+
+    Replay batches are NumPy arrays before ``_tensor_batch`` moves observations
+    to the accelerator.  Computing this metadata here avoids the old
+    device->host ``episode_steps.cpu()`` round trip inside every Critic update.
+    """
+    values = np.asarray(episode_steps, dtype=np.int64)
+    if values.ndim != 2 or values.shape[1] < 1:
+        raise ValueError("episode_steps must have shape [B,T]")
+    starts = []
+    for row in values:
+        positions = np.flatnonzero((row + 1) % int(horizon) == 0)
+        starts.append(int(positions[-1]) if len(positions) else 0)
+    return starts
+
+
 @torch.no_grad()
-def target_final_distribution_vectorized(actor, observations, episode_steps, horizon=10):
+def target_final_distribution_vectorized(actor, observations, episode_steps=None,
+                                         horizon=10, starts=None):
     """Compute the final target distribution with full-sequence RNN kernels.
 
     The legacy helper launches one encoder/RNN call per timestep and applies
@@ -35,17 +53,26 @@ def target_final_distribution_vectorized(actor, observations, episode_steps, hor
     """
     if observations.ndim != 3 or observations.shape[-1] != 59:
         raise ValueError("Recurrent observations must have shape [B,T,59]")
-    if episode_steps.shape != observations.shape[:2] or observations.shape[1] < 1:
+    if observations.shape[1] < 1:
         raise ValueError("Invalid target recurrent context")
     batch, time_steps = observations.shape[:2]
-    reset = episode_steps.remainder(int(horizon)).eq(0)
-    # One host read per target batch is intentional: it replaces T NPU kernel
-    # launches and is outside the optimizer's numerical path.
-    reset_cpu = reset.detach().cpu().numpy()
-    starts = []
-    for row in reset_cpu:
-        positions = np.flatnonzero(row)
-        starts.append(int(positions[-1]) if len(positions) else 0)
+    if starts is None:
+        if episode_steps is None or episode_steps.shape != observations.shape[:2]:
+            raise ValueError("Invalid target recurrent context")
+        # Compatibility path for validators and callers that already have the
+        # metadata on the host. Training passes ``starts`` explicitly below.
+        if torch.is_tensor(episode_steps):
+            reset_cpu = episode_steps.remainder(int(horizon)).eq(0).detach().cpu().numpy()
+        else:
+            reset_cpu = (np.asarray(episode_steps, dtype=np.int64)
+                         % int(horizon) == 0)
+        starts = []
+        for row in reset_cpu:
+            positions = np.flatnonzero(row)
+            starts.append(int(positions[-1]) if len(positions) else 0)
+    if len(starts) != batch or any(int(start) < 0 or int(start) >= time_steps
+                                   for start in starts):
+        raise ValueError("Invalid target reset-start metadata")
     # Keep raw distribution parameters instead of slicing MixtureSameFamily
     # objects.  torch.distributions.Distribution does not guarantee tensor-
     # style indexing (MixtureSameFamily is not subscriptable on torch-npu).
@@ -148,13 +175,17 @@ class RecurrentGMMTD3:
 
     def critic_update(self, batch, target_sequence, collect_metrics=True):
         b = self._tensor_batch(batch)
-        target = self._tensor_batch({key: target_sequence[key]
-                                     for key in ("next_observations", "episode_steps")})
+        # ``episode_steps`` is replay metadata. Keep it on the host and derive
+        # reset boundaries before moving tensors to the NPU; this removes one
+        # synchronizing device->host copy per Critic update.
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
+        target_starts = _last_reset_starts_from_numpy(
+            target_sequence["episode_steps"], horizon)
+        target = self._tensor_batch({"next_observations": target_sequence["next_observations"]})
         with torch.no_grad():
             distribution, _ = target_final_distribution_vectorized(
                 self.target_actor, target["next_observations"],
-                target["episode_steps"] + 1, horizon=horizon)
+                horizon=horizon, starts=target_starts)
             expected_next, target_q1, target_q2, target_tensors, _ = self._expected_q(
                 self.target_critic, target["next_observations"][:, -1], distribution)
             td_target = b["rewards"] + float(self.config["gamma"]) * (
@@ -182,7 +213,7 @@ class RecurrentGMMTD3:
             try:
                 learned_distribution, _ = target_final_distribution_vectorized(
                     self.target_actor, target["next_observations"],
-                    target["episode_steps"] + 1, horizon=horizon)
+                    horizon=horizon, starts=target_starts)
                 sampled_diagnostic, _, _, _, _ = single_expected_q(
                     self.target_critic, target["next_observations"][:, -1],
                     learned_distribution, self.action_scale, self.action_offset,

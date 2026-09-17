@@ -22,6 +22,37 @@ _THREAD_ENV = {
 }
 
 
+def _worker_cpu_affinity(env_id: int) -> None:
+    """Optionally pin one MuJoCo worker to one CPU core.
+
+    This is an execution-only optimization.  It is disabled unless the
+    parent supplies ``STAGE3_ENV_CPU_CORES`` as a comma-separated list or
+    range (for example ``0-15,32-35``), so existing runs are unchanged.
+    """
+    specification = os.environ.get("STAGE3_ENV_CPU_CORES", "").strip()
+    if not specification or not hasattr(os, "sched_setaffinity"):
+        return
+    cores = []
+    try:
+        for token in specification.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if "-" in token:
+                first, last = (int(value) for value in token.split("-", 1))
+                cores.extend(range(first, last + 1))
+            else:
+                cores.append(int(token))
+        cores = sorted(set(cores))
+        if not cores:
+            return
+        os.sched_setaffinity(0, {cores[int(env_id) % len(cores)]})
+    except (OSError, ValueError):
+        # Cgroups may expose only a subset of the requested host cores.  A
+        # failed optional pin must never abort training.
+        return
+
+
 def _safe_send(conn, message) -> None:
     try:
         conn.send(message)
@@ -53,6 +84,7 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
     # These values are also injected by the parent before spawn so that they
     # are already visible while the child imports numpy / MuJoCo.
     os.environ.update(_THREAD_ENV)
+    _worker_cpu_affinity(env_id)
 
     env = None
     try:
