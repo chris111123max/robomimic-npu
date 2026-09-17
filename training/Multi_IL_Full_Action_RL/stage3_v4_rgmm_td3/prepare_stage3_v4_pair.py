@@ -65,11 +65,13 @@ def validate_config(config):
         "activation": "relu", "critic_layer_norm": True, "gamma": 0.99,
         "tau": 0.005, "critic_lr": 3e-4, "critic_weight_decay": 1e-4,
         "batch_size": 256, "offline_fraction": 0.5, "online_fraction": 0.5,
-        "utd": 1, "policy_delay": 1,
+        "utd": 0.25, "policy_delay": 1,
     }
     for key, value in fixed.items():
         if config.get(key) != value:
             raise RuntimeError(f"Stage3-v4 fixed contract changed: {key}")
+    if config.get("updates_every_n_env_steps") != 4:
+        raise RuntimeError("Stage3-v4 fixed contract changed: updates_every_n_env_steps")
     execution = config.get("execution_optimization", {})
     if execution.get("compile_backend", "none") not in ("none", "torchair"):
         raise RuntimeError("Unknown Stage3-v4 compile backend")

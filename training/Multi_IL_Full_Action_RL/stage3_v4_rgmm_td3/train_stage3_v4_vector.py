@@ -489,6 +489,7 @@ def main():
 
                 context_length = int(config["recurrent_replay"]["critic_context_length"])
                 if (env_steps >= config["min_online_replay_size"]
+                        and env_steps % int(config.get("updates_every_n_env_steps", 1)) == 0
                         and online.can_sample(context_length)):
                     profile_critic = profile_round and "critic_update_ms" not in profile
                     if profile_critic:

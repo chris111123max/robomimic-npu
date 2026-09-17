@@ -211,7 +211,7 @@ def main():
         "no_bc": config["bc_weight"] == metrics["lambda_bc"] == 0
                  and not config["adaptive_bc_enabled"],
         "no_q_normalization": config["actor_q_scale_normalization"] is False,
-        "policy_delay_one": config["policy_delay"] == 1,
+        "policy_delay_four": config["policy_delay"] == 4,
         "native_actor_output_equivalence": torch.allclose(native_expected, legacy_expected, rtol=1e-4, atol=1e-5),
         "native_actor_gradient_equivalence": gradient_equivalence,
         "round_prefetch_batch_contract": (
@@ -237,7 +237,8 @@ def main():
                 replay_batch["episode_steps"][:, :1] + np.arange(10)[None, :])
             and np.all(replay_batch["episode_steps"][:, 0] % 10 == 0)),
         "exact_50_50": config["offline_fraction"] == config["online_fraction"] == 0.5,
-        "utd_one": config["utd"] == 1,
+        "utd_quarter": config["utd"] == 0.25,
+        "updates_every_four_env_steps": config.get("updates_every_n_env_steps") == 4,
     }
     checks = {key: bool(value) for key, value in checks.items()}
     status = "PASS" if all(checks.values()) else "FAIL"
