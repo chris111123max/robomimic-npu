@@ -12,6 +12,7 @@ import os
 import time
 import traceback
 from typing import Iterable, List, Optional, Sequence, Tuple
+from multiprocessing.shared_memory import SharedMemory
 
 import numpy as np
 
@@ -79,7 +80,22 @@ def _action_bounds(env):
     )
 
 
-def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
+def _obs_to_flat_shared(observation):
+    from stage3_v3_actor import obs_to_flat
+    return np.asarray(obs_to_flat(observation), dtype=np.float32).reshape(-1)
+
+
+def _flat_to_obs_shared(flat):
+    from stage3_v3_actor import flat_to_obs
+    return flat_to_obs(np.asarray(flat, dtype=np.float32))
+
+
+def _worker(conn, env_id: int, dataset: str, initial_seed: int,
+            shared_obs_name: Optional[str] = None,
+            shared_action_name: Optional[str] = None,
+            shared_num_envs: int = 0,
+            shared_obs_dim: int = 59,
+            shared_action_dim: int = 14) -> None:
     """Own exactly one CPU MuJoCo environment."""
     # These values are also injected by the parent before spawn so that they
     # are already visible while the child imports numpy / MuJoCo.
@@ -87,7 +103,16 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
     _worker_cpu_affinity(env_id)
 
     env = None
+    obs_shm = action_shm = None
+    shared_obs = shared_action = None
     try:
+        if shared_obs_name and shared_action_name:
+            obs_shm = SharedMemory(name=shared_obs_name)
+            action_shm = SharedMemory(name=shared_action_name)
+            shared_obs = np.ndarray((int(shared_num_envs), int(shared_obs_dim)),
+                                    dtype=np.float32, buffer=obs_shm.buf)
+            shared_action = np.ndarray((int(shared_num_envs), int(shared_action_dim)),
+                                       dtype=np.float32, buffer=action_shm.buf)
         from stage3_new_evaluation import (
             build_env,
             close_env,
@@ -98,6 +123,8 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
 
         env = build_env(dataset)
         obs = reset_seed(env, int(initial_seed))
+        if shared_obs is not None:
+            shared_obs[env_id, :] = _obs_to_flat_shared(obs)
         low, high = _action_bounds(env)
         _safe_send(
             conn,
@@ -134,9 +161,21 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
                     # rebuild for this env only.
                     _safe_send(conn, ("FATAL", str(error)))
 
+            elif command == "step_shared":
+                try:
+                    obs, reward, done, info = env.step(
+                        np.asarray(shared_action[env_id], dtype=np.float32))
+                    shared_obs[env_id, :] = _obs_to_flat_shared(obs)
+                    _safe_send(conn, ("OK_SHARED", float(reward), bool(done),
+                                      bool(success(env)), info))
+                except mujoco_fatal_error_type() as error:
+                    _safe_send(conn, ("FATAL", str(error)))
+
             elif command == "reset":
                 try:
                     obs = reset_seed(env, int(payload))
+                    if shared_obs is not None:
+                        shared_obs[env_id, :] = _obs_to_flat_shared(obs)
                     _safe_send(conn, ("RESET_OK", obs))
                 except mujoco_fatal_error_type() as error:
                     _safe_send(conn, ("RESET_FATAL", str(error)))
@@ -148,6 +187,8 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
                         close_env(env)
                     env = build_env(dataset)
                     obs = reset_seed(env, seed)
+                    if shared_obs is not None:
+                        shared_obs[env_id, :] = _obs_to_flat_shared(obs)
                     low, high = _action_bounds(env)
                     _safe_send(
                         conn,
@@ -199,6 +240,12 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int) -> None:
             conn.close()
         except BaseException:
             pass
+        for resource in (obs_shm, action_shm):
+            if resource is not None:
+                try:
+                    resource.close()
+                except BaseException:
+                    pass
 
 
 class StaggeredVectorEnv:
@@ -213,6 +260,7 @@ class StaggeredVectorEnv:
         timeout: float = 120.0,
         start_method: str = "spawn",
         command_timeout: Optional[float] = None,
+        shared_memory: Optional[bool] = None,
     ):
         self.dataset = dataset
         self.num_envs = int(num_envs)
@@ -243,6 +291,26 @@ class StaggeredVectorEnv:
         self._closed = False
         self.action_low = None
         self.action_high = None
+        self.shared_memory = (
+            os.environ.get("STAGE3_SHARED_MEMORY", "1") == "1"
+            if shared_memory is None else bool(shared_memory))
+        self._shared_obs_dim = 59
+        self._shared_action_dim = 14
+        self._obs_shm = self._action_shm = None
+        self._shared_obs = self._shared_action = None
+        if self.shared_memory:
+            self._obs_shm = SharedMemory(
+                create=True, size=self.num_envs * self._shared_obs_dim * 4)
+            self._action_shm = SharedMemory(
+                create=True, size=self.num_envs * self._shared_action_dim * 4)
+            self._shared_obs = np.ndarray(
+                (self.num_envs, self._shared_obs_dim), dtype=np.float32,
+                buffer=self._obs_shm.buf)
+            self._shared_action = np.ndarray(
+                (self.num_envs, self._shared_action_dim), dtype=np.float32,
+                buffer=self._action_shm.buf)
+            self._shared_obs.fill(0.0)
+            self._shared_action.fill(0.0)
 
         try:
             for env_id in range(self.num_envs):
@@ -275,7 +343,11 @@ class StaggeredVectorEnv:
         try:
             process = self.ctx.Process(
                 target=_worker,
-                args=(child, env_id, self.dataset, seed),
+                args=(child, env_id, self.dataset, seed,
+                      self._obs_shm.name if self._obs_shm else None,
+                      self._action_shm.name if self._action_shm else None,
+                      self.num_envs, self._shared_obs_dim,
+                      self._shared_action_dim),
                 name=f"stage3-env-{env_id:02d}",
             )
             process.daemon = True
@@ -388,7 +460,11 @@ class StaggeredVectorEnv:
                 raise FloatingPointError(
                     f"env_id={env_id} action contains non-finite values"
                 )
-            self.connections[env_id].send(("step", action))
+            if self._shared_action is not None:
+                self._shared_action[env_id, :] = action
+                self.connections[env_id].send(("step_shared", None))
+            else:
+                self.connections[env_id].send(("step", action))
 
         results = []
         for env_id in ids:
@@ -397,6 +473,9 @@ class StaggeredVectorEnv:
                 timeout=self.command_timeout,
                 operation="step",
             )
+            if message[0] == "OK_SHARED":
+                message = ("OK", _flat_to_obs_shared(self._shared_obs[env_id]),
+                           message[1], message[2], message[3], message[4])
             if message[0] not in ("OK", "FATAL"):
                 raise RuntimeError(
                     f"env_id={env_id} unexpected step response: {message}"
@@ -500,5 +579,13 @@ class StaggeredVectorEnv:
                 conn.close()
             except BaseException:
                 pass
+
+        for resource in (self._obs_shm, self._action_shm):
+            if resource is not None:
+                try:
+                    resource.close()
+                    resource.unlink()
+                except FileNotFoundError:
+                    pass
 
         self._closed = True

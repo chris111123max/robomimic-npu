@@ -87,3 +87,6 @@ cat "$SMOKE_RUN_DIR/rnn_q/smoke_validation.json"
 ```
 
 重点看 `multi_q/console.log`、`train_metrics.jsonl`、`runtime_audit.json`、`stage_timing.jsonl`、`smoke_validation.json`：0–10k Actor 更新数应为 0 且参数 hash 不变；10k 后 gate 打开、Actor 更新数增长、Critic 持续更新；梯度有限、std head 直接梯度为 0；无 NaN；`actor_expected_component_mean_q` 是训练值，`actor_q_sampled_learned_std_diagnostic` 只是对照；吞吐以 gate 前/后实际 steps/s 判断。通过后再决定是否准备新的正式 pair。
+## 环境通信优化
+
+Stage3-v4 的 vector worker 默认启用共享内存（`STAGE3_SHARED_MEMORY=1`）：动作写入固定的 `[num_envs,14]` 缓冲区，worker 将 observation 写入固定的 `[num_envs,59]` 缓冲区，Pipe 只传递控制消息、奖励和终止标志，避免每一步 pickle 整个 observation 字典。动作会先批量发送，再批量收取结果；worker 仍保持独立进程和原有 episode/reset 语义。若需回退到旧的 Pipe observation 传输，可设置 `STAGE3_SHARED_MEMORY=0`。CPU 绑定继续由 `STAGE3_ENV_CPU_CORES` 控制，训练质量合同不变。
