@@ -600,7 +600,10 @@ def main():
                     observations[env_id] = vector.reset(env_id, context["seed"])
                     executor.reset_indices([env_id])
 
-                if handoff.readiness_due(env_steps):
+                # Readiness metrics are defined on complete online episodes;
+                # before the first one, defer the scheduled check rather than
+                # treating a missing diagnostic sample as a training failure.
+                if handoff.readiness_due(env_steps) and online.episodes:
                     readiness = replay_metrics(agent, online, episodes, successes, config,
                                                handoff.state.readiness_history, env_steps=env_steps)
                     record = handoff.submit_readiness(readiness)
