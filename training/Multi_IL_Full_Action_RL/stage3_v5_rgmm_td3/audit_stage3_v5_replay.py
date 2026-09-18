@@ -15,6 +15,8 @@ def main():
   batch=multi.sample_sequences(128,11); ids=batch["source_id"]
   assert len(ids)==128 and all(((ids==i).sum() in (42,43) for i in range(3)))
   for i in range(3): counts[i]+=int((ids==i).sum())
- result={"batches":a.batches,"counts":dict(zip(("rnn","transformer","gmm"),counts)),"ratios":[x/sum(counts) for x in counts],"status":"PASS" if counts[0]==counts[1]==counts[2] else "FAIL"}
+ # A non-multiple of three batches has at most one unavoidable sample of
+ # remainder imbalance.  This is the intended deterministic rotation.
+ result={"batches":a.batches,"counts":dict(zip(("rnn","transformer","gmm"),counts)),"ratios":[x/sum(counts) for x in counts],"max_count_gap":max(counts)-min(counts),"status":"PASS" if max(counts)-min(counts)<=1 else "FAIL"}
  print(json.dumps(result,indent=2));
 if __name__=="__main__": main()

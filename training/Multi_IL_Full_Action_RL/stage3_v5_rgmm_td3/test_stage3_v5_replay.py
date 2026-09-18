@@ -1,5 +1,6 @@
-import tempfile, unittest
+import tempfile, unittest, sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h5py, numpy as np
 from stage3_v5_replay import CANONICAL_KEYS, Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations
 
