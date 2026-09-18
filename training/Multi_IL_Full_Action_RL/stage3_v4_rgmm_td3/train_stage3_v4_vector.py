@@ -184,7 +184,8 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
         raise RuntimeError("Resume Actor source differs")
     for key in ("objective_revision", "rl_policy_expectation", "adaptive_bc_enabled", "bc_weight",
                 "actor_q_scale_normalization", "boundary_aligned_sequence_sampling",
-                "policy_delay", "recurrent_replay"):
+                "policy_delay", "utd", "updates_every_n_env_steps",
+                "recurrent_replay"):
         if payload["config"].get(key) != config.get(key):
             raise RuntimeError(f"Resume training objective differs: {key}")
     agent.actor.load_state_dict(payload["actor"], strict=True)

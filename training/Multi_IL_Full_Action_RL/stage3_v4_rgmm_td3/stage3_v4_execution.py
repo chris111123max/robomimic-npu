@@ -6,7 +6,13 @@ import torch
 def prepare_round_batches(offline, online, count, config, device, actor_ready):
     from stage3_v4_replay import symmetric_sequence_batch, final_transition, aligned_sequence_batch
     critics, actors = [], []
-    for _ in range(count):
+    # The vector round may contain 16 transitions while the configured update
+    # stride is four.  Prefetch exactly the number of optimizer rounds that
+    # will actually be consumed; sampling 16 batches here would waste CPU/NPU
+    # transfer time and leave most prefetched batches unused.
+    stride = max(1, int(config.get("updates_every_n_env_steps", 1)))
+    update_count = max(1, (int(count) + stride - 1) // stride)
+    for _ in range(update_count):
         sequence = symmetric_sequence_batch(
             offline, online, config["batch_size"],
             config["recurrent_replay"]["critic_context_length"])

@@ -87,7 +87,11 @@ def _obs_to_flat_shared(observation):
 
 def _flat_to_obs_shared(flat):
     from stage3_v3_actor import flat_to_obs
-    return flat_to_obs(np.asarray(flat, dtype=np.float32))
+    # The source is a reusable SharedMemory row.  Copy before constructing
+    # observation views; otherwise the next worker step overwrites the
+    # observation already stored in the trainer/replay buffer.
+    owned = np.array(flat, dtype=np.float32, copy=True)
+    return flat_to_obs(owned)
 
 
 def _worker(conn, env_id: int, dataset: str, initial_seed: int,
