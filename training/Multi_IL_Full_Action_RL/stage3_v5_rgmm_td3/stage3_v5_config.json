@@ -17,6 +17,8 @@
   "actor_warmup": {"target_actor_lr": 0.000002, "critic_lr_final_fraction": 0.25},
   "evaluation": {"interval_steps": 100000, "seeds": [20000,20001,20002,20003,20004,20005,20006,20007,20008,20009]},
   "checkpoint_interval_steps": 100000,
+  "train_metrics_interval_updates": 100,
+  "sim_error_handling": {"evaluation_retry_count": 1, "max_consecutive_fatal_errors": 3},
   "parallel_env": {"num_envs": 16, "startup_parallelism": 4, "env_startup_timeout_sec": 120, "env_command_timeout_sec": 120, "multiprocessing_start_method": "spawn", "max_collector_lag_transitions": 256},
   "training_seed": 20260918, "train_seed_base": 30000,
   "exploration": {"execution": "checkpoint_gmm_categorical_plus_component_sample", "external_action_noise_std": 0.0, "clip_to_env_bounds": false, "evaluation_external_noise_std": 0.0},
