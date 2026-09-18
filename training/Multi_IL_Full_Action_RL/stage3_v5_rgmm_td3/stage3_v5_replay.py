@@ -40,18 +40,20 @@ class Stage1OfflineSequenceReplay:
         required = ("obs", "next_obs", "actions", "rewards", "dones", "terminated", "truncated")
         missing = [key for key in required if key not in group]
         if missing: raise RuntimeError(f"{group.name}: missing {missing}")
-        actions = np.asarray(group["actions"], np.float32); length = len(actions)
-        obs = np.concatenate([np.asarray(group["obs"][key], np.float32).reshape(length, -1) for key in CANONICAL_KEYS], axis=1)
-        nxt = np.concatenate([np.asarray(group["next_obs"][key], np.float32).reshape(length, -1) for key in CANONICAL_KEYS], axis=1)
-        terminated, truncated = np.asarray(group["terminated"], bool).reshape(-1, 1), np.asarray(group["truncated"], bool).reshape(-1, 1)
-        dones = np.asarray(group["dones"], bool).reshape(-1, 1)
+        # h5py cannot always perform a direct HDF5->bool conversion. Read the
+        # native array first, then let NumPy cast it explicitly.
+        actions = np.asarray(group["actions"][...], np.float32); length = len(actions)
+        obs = np.concatenate([np.asarray(group["obs"][key][...], np.float32).reshape(length, -1) for key in CANONICAL_KEYS], axis=1)
+        nxt = np.concatenate([np.asarray(group["next_obs"][key][...], np.float32).reshape(length, -1) for key in CANONICAL_KEYS], axis=1)
+        terminated, truncated = np.asarray(group["terminated"][...], bool).reshape(-1, 1), np.asarray(group["truncated"][...], bool).reshape(-1, 1)
+        dones = np.asarray(group["dones"][...], bool).reshape(-1, 1)
         if obs.shape != (length,59) or nxt.shape != (length,59) or actions.shape != (length,14): raise RuntimeError(f"{group.name}: dimensional contract failed")
         if not np.array_equal(dones, terminated | truncated): raise RuntimeError(f"{group.name}: done contract failed")
         if not all(np.isfinite(x).all() for x in (obs,nxt,actions)): raise RuntimeError(f"{group.name}: non-finite values")
         def scalar(name, default):
             value = group.attrs[name] if name in group.attrs else (group[name][()] if name in group else default)
             return np.asarray(value).reshape(-1)[0].item()
-        return {"observations":obs,"next_observations":nxt,"actions":actions,"rewards":np.asarray(group["rewards"],np.float32).reshape(-1,1),"dones":dones,"terminated":terminated,"truncated":truncated,"terminals":terminated.astype(np.float32),"episode_steps":np.arange(length,dtype=np.int64),"episode_id":int(scalar("episode_id",-1)),"seed":int(scalar("initial_seed",-1)),"success":bool(scalar("episode_success",False))}
+        return {"observations":obs,"next_observations":nxt,"actions":actions,"rewards":np.asarray(group["rewards"][...],np.float32).reshape(-1,1),"dones":dones,"terminated":terminated,"truncated":truncated,"terminals":terminated.astype(np.float32),"episode_steps":np.arange(length,dtype=np.int64),"episode_id":int(scalar("episode_id",-1)),"seed":int(scalar("initial_seed",-1)),"success":bool(scalar("episode_success",False))}
 
     def sample_sequences(self, count, length, aligned=False, horizon=10):
         eligible = [ep for ep in self.episodes if len(ep["actions"]) >= int(length)]
