@@ -23,3 +23,13 @@ class TestReplay(unittest.TestCase):
    for _ in range(3):
     ids=multi.sample_sequences(128,10)["source_id"]; self.assertEqual(len(ids),128); totals += [(ids==i).sum() for i in range(3)]
    self.assertTrue(np.array_equal(totals,[128,128,128]))
+
+ def test_rnn_source_is_exclusive_and_aligned(self):
+  with tempfile.TemporaryDirectory() as d:
+   path=str(Path(d)/"rnn.h5"); make_file(path)
+   replay=Stage1OfflineSequenceReplay(path,"rnn",7)
+   batch=replay.sample_sequences(128,10)
+   self.assertTrue(np.all(batch["source_id"] == 0))
+   aligned=replay.sample_sequences(32,10,aligned=True,horizon=10)
+   self.assertTrue(np.all(aligned["source_id"] == 0))
+   self.assertTrue(np.all(aligned["episode_steps"][:, 0] % 10 == 0))

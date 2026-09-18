@@ -13,7 +13,7 @@ if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
 from stage3_v3_replay import (CORE, OfflineDemonstrations as _OfflineDemonstrations,
                               OnlineSequenceReplay as _OnlineSequenceReplay,
-                              final_transition)
+                              final_transition, symmetric_sequence_batch)
 
 SOURCE_NAMES = ("rnn", "transformer", "gmm")
 SOURCE_IDS = {name: index for index, name in enumerate(SOURCE_NAMES)}
