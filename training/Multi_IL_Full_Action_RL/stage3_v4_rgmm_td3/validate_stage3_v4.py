@@ -215,7 +215,7 @@ def main():
         "native_actor_output_equivalence": torch.allclose(native_expected, legacy_expected, rtol=1e-4, atol=1e-5),
         "native_actor_gradient_equivalence": gradient_equivalence,
         "round_prefetch_batch_contract": (
-            len(prepared_critics) == len(prepared_actors) == 2
+            len(prepared_critics) == len(prepared_actors) == 1
             and prepared_critics[0][0]["observations"].shape == (256, 59)
             and prepared_actors[0]["observations"].shape == (64, 10, 59)
             and torch.all(prepared_critics[0][0]["rewards"][:128] == 7)
