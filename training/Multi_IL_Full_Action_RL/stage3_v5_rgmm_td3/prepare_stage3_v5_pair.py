@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare immutable shared inputs for the paired Stage3-v4 experiment."""
+"""Prepare immutable shared inputs for the paired Stage3-v5 experiment."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +15,7 @@ import torch
 V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
-from stage3_v3_actor import load_exact_actor, module_hash
+from stage3_v5_actor import load_exact_actor, module_hash
 from stage3_v5_agent import strict_stage2_load
 
 HERE = Path(__file__).resolve().parent
@@ -52,61 +52,8 @@ def arguments():
     parser.add_argument("--rnn-q-checkpoint", required=True)
     parser.add_argument("--multi-q-checkpoint", required=True)
     parser.add_argument("--total-env-steps", type=int)
-    parser.add_argument("--reuse-phase0-from", help="completed compatible Stage3-v3 or v4 pair")
+    parser.add_argument("--reuse-phase0-from", help="deprecated; V5 rejects Phase-0 reuse")
     return parser.parse_args()
-
-
-def validate_config(config):
-    if config.get("stage") != "stage3-v4-rgmm-td3":
-        raise RuntimeError("Expected Stage3-v4 resolved configuration")
-    fixed = {
-        "obs_dim": 59, "action_dim": 14, "hidden_dims": [256, 256],
-        "activation": "relu", "critic_layer_norm": True, "gamma": 0.99,
-        "tau": 0.005, "critic_lr": 3e-4, "critic_weight_decay": 1e-4,
-        "batch_size": 256, "offline_fraction": 0.5, "online_fraction": 0.5,
-        "utd": 0.25, "policy_delay": 1,
-    }
-    for key, value in fixed.items():
-        if config.get(key) != value:
-            raise RuntimeError(f"Stage3-v4 fixed contract changed: {key}")
-    if config.get("updates_every_n_env_steps") != 4:
-        raise RuntimeError("Stage3-v4 fixed contract changed: updates_every_n_env_steps")
-    execution = config.get("execution_optimization", {})
-    if execution.get("compile_backend", "none") not in ("none", "torchair"):
-        raise RuntimeError("Unknown Stage3-v4 compile backend")
-    if config["online_cql"]["enabled"]:
-        raise RuntimeError("Stage3-v4 forbids online CQL")
-    if (config.get("adaptive_bc_enabled") is not False or config.get("bc_weight") != 0
-            or config.get("actor_q_scale_normalization") is not False
-            or "adaptive_bc" in config or "q_scale_normalization" in config):
-        raise RuntimeError("Stage3-v4 must use raw component-mean Q without BC or Q scaling")
-    if (config.get("objective_revision") != "case-a-low-noise-component-mean-q"
-            or config.get("rl_policy_expectation") != "categorical_component_mean"
-            or int(config.get("diagnostic_learned_std_samples_per_mode", 0)) < 1
-            or "gmm_rl_samples_per_mode" in config
-            or config["recurrent_replay"]["actor_sequence_batch_size"] != 64
-            or config["recurrent_replay"]["burn_in"] != 0
-            or config["recurrent_replay"]["train_seq_len"] != 10
-            or config.get("boundary_aligned_sequence_sampling") is not True):
-        raise RuntimeError("Stage3-v4 aligned recurrent sampling contract changed")
-    if (config.get("evaluation_seeds") != list(range(20000, 20010))
-            or config.get("competence_evaluation_seeds") != list(range(20000, 20020))
-            or config.get("smoke_evaluation_seeds") != [20000, 20001]
-            or not set((0, 10000, 25000, 50000, 100000, 150000, 200000,
-                        300000, 500000, 1000000, 2000000, 3000000)).issubset(
-                            set(config.get("evaluation_env_steps", [])))
-            or config.get("horizon") != 700
-            or config.get("min_online_replay_size") != 1000
-            or config.get("online_replay_capacity") != 1000000
-            or config.get("online_sequence_capacity") != 250000
-            or config["exploration"]["external_action_noise_std"] != 0):
-        raise RuntimeError("Stage3-v4 evaluation, replay, or rollout contract changed")
-    if config["actor_gate"] != {
-        "equivalence_tolerance": 1e-5, "competence_episodes": 20,
-        "competence_min_successes": 10, "warmup_env_steps": 10000,
-        "latched": True,
-    }:
-        raise RuntimeError("Stage3-v4 competence gate contract changed")
 
 
 def validate_config(config):
@@ -123,6 +70,10 @@ def validate_config(config):
         raise RuntimeError("Stage3-v5 forbids BC regularization")
     if config["parallel_env"].get("num_envs") != 16 or config["parallel_env"].get("startup_parallelism") != 4:
         raise RuntimeError("Formal V5 requires 16 environments started in 4-wide batches")
+    if int(config["parallel_env"].get("max_collector_lag_transitions", 0)) < 16:
+        raise RuntimeError("V5 collector lag bound must cover one 16-env dispatch")
+    if set(config.get("offline_sources", {})) != {"bc_rnn", "bc_transformer", "bc_gmm"}:
+        raise RuntimeError("V5 requires the three audited Stage1 offline sources")
     if config["evaluation"]["seeds"] != list(range(20000, 20010)):
         raise RuntimeError("V5 requires the fixed ten evaluation seeds")
 
@@ -171,6 +122,15 @@ def main():
     config["bc_rnn_checkpoint_sha256"] = checkpoint_sha
     config["expert_dataset"] = str(expert_dataset)
     config["expert_dataset_sha256"] = sha256(expert_dataset)
+    offline_source_metadata = {}
+    for source_name, source_path in config["offline_sources"].items():
+        source_file = Path(source_path).resolve()
+        if not source_file.is_file():
+            raise FileNotFoundError(f"Offline Stage1 source not found: {source_file}")
+        offline_source_metadata[source_name] = {
+            "path": str(source_file), "sha256": sha256(source_file),
+        }
+    config["offline_source_metadata"] = offline_source_metadata
     actor_hash = module_hash(actor)
     if args.reuse_phase0_from:
         raise RuntimeError("V5 does not reuse Phase-0 policy evaluations; Critic readiness is replay-only")
@@ -203,14 +163,21 @@ def main():
     }
     fairness = {
         "stage": "stage3-v5", "status": "PREPARED",
-        "only_primary_variable": "Stage2 Critic initialization checkpoint",
+        "primary_branch_variables": ["Stage2 Critic initialization checkpoint",
+                                      "offline replay composition"],
         "branches": ["rnn_q", "multi_q"], "actor_hashes_identical": True,
         "actor_hash": actor_hash, "actor_checkpoint_sha256": sha256(immutable_bc),
         "actor_optimizer": {"type": "Adam", "lr": config["actor_lr"], "weight_decay": 0.0},
         "critic_optimizer": {"type": "AdamW", "lr": config["critic_lr"],
                              "weight_decay": config["critic_weight_decay"]},
         "environment_seeds_identical": True, "evaluation_seeds_identical": True,
-        "offline_dataset_identical": True, "replay_settings_identical": True,
+        "offline_dataset_identical": False,
+        "offline_sources": offline_source_metadata,
+        "offline_replay_composition": {
+            "rnn_q": "RNN-only Stage1 rollout source",
+            "multi_q": "balanced rotation of RNN, Transformer, and GMM Stage1 sources",
+        },
+        "replay_settings_identical": True,
         "training_schedules_identical": True, "critic_initialization": critic_sources,
     }
     write_json(shared / "config_resolved.json", config)

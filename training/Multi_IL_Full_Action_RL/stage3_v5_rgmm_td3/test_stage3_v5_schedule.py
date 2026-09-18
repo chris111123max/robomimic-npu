@@ -52,6 +52,14 @@ class TestV5Handoff(unittest.TestCase):
         self.assertTrue(handoff.evaluation_due(end))
         self.assertFalse(handoff.evaluation_due(end + 1))
 
+    def test_smoke_uses_short_explicit_warmup(self):
+        config = copy.deepcopy(CONFIG)
+        config.update({"run_type": "SMOKE", "smoke_warmup_steps": 4})
+        handoff = CriticHandoff(config)
+        for step in (100000, 110000, 120000):
+            handoff.submit_readiness(metrics(step))
+        self.assertEqual(handoff.state.actor_warmup_steps, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

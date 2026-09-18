@@ -1,6 +1,6 @@
 # Stage3-v5: Critic-gated TD3 handoff
 
-Stage3-v5 preserves V4's GMM Actor objective, twin-Q target, recurrent context,
+Stage3-v5 preserves the audited GMM Actor objective, twin-Q target, recurrent context,
 action normalization, reward/terminal behavior and Polyak update.  It changes
 only training control: `CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL`.
 
@@ -22,6 +22,63 @@ Replay remains 256 transitions per Critic update: 128 offline + 128 online.
 `rnn_q` draws the offline half from BC-RNN only. `multi_q` uses the same 128
 offline total, split 43/43/42 across BC-RNN, BC-Transformer and BC-GMM, with the
 remainder rotated over time.
+
+Stage1 HDF5 replay is loaded natively from `/episodes`, retaining
+`terminated`, `truncated`, and `dones`. A truncation bootstraps the Bellman
+target; only a true termination masks it. The vector collector dispatches
+worker steps asynchronously and consumes previous-round credits with actual
+forward/backward/optimizer/Polyak work while workers simulate. Each atomic
+update is followed by a readiness poll; an already-ready round waits at most
+one guaranteed atomic update, not an unbounded credit drain. Credit backlog
+divided by UTD defines learner lag. Dispatch is throttled before this exceeds
+256 eligible transitions. Resets send all RESET requests before receiving.
+
+Rollout uses immutable Actor snapshots, selected per environment only at its
+hidden-reset boundary. Train weights never replace weights within a recurrent
+block. Policy-version lag is bounded and logged. Resume discards incomplete
+rollout episodes/hidden state rather than mixing old hidden with new weights.
+
+Readiness uses independent reservoir-selection RNG (at most 64 success and
+64 failure episodes), then freezes episodes, sequence indices and OOD noise.
+All training RNG states are defensively restored even if diagnostics fail.
+Coverage still requires 150 completed episodes and at least 30 of each class.
+TD diagnostics share the training Bellman target helper. Plateau requires
+small absolute relative change, not merely lack of improvement. OOD hard
+gating uses **p95 excess normalized by reference Q standard deviation**;
+the existing numeric threshold 2.0 is applied to this statistic, not absolute
+maximum excess. Absolute/relative/normalized mean, p95 and max are logged.
+
+Checks begin at 100K. With three history points followed by three consecutive
+overall passes, the earliest usual readiness is 140K, not 120K; insufficient
+coverage or failed metrics can delay it. No gate is relaxed to shorten this.
+
+## Ordered server acceptance (no formal training)
+
+After preparing a fresh pair, run on one card:
+
+```bash
+SCRIPT_DIR=training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3
+python "$SCRIPT_DIR/benchmark_stage3_v5.py" --acceptance --pair-run-dir "$RUN_DIR" --group multi_q --device npu:0 --steps 4096 --warmup-steps 1024
+```
+
+This runs compilation, replay/schedule/validator, RNG/snapshot/lag and math
+tests, real A/B/C/D benchmarks, A/D scaling at 2/4/8/16 envs, then a small
+overlap-verified smoke. Failure stops acceptance. Measurements and logs go
+under the pair's branch benchmarks directory; smoke has a separate directory.
+A/B use stored Stage1 actions and no timed NPU forward/backward; C/D use the
+same frozen Actor and are the matched synchronous/asynchronous comparison.
+Benchmark profiling synchronizes devices for honest timing; production
+profiling defaults off. CPU synthetic tests are correctness evidence only.
+
+`collector_wait_ms` measures lag-throttle catch-up; `learner_wait_ms` records
+environment wait (not an independent idle-device estimator). Aggregate and
+collector throughput both count collected transitions per measured wall time.
+Overlap sums per-round maximum intersections of actual worker simulation
+and device-completed learner intervals, excluding replay preparation.
+Effective policy delay is null in critic-only benchmarks (Actor disabled).
+Source counters separately report `critic_offline_*` and `actor_offline_*`.
+The historical approximately 22 steps/s baseline is user-reported, not a
+matched measurement. Do not claim improvement before server C/D results.
 
 Prepare a pair, then train a branch (do not run the former Phase-0 scripts):
 

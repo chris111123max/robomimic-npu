@@ -7,11 +7,12 @@ from pathlib import Path
 import numpy as np
 import h5py
 import json
+from contextlib import nullcontext
 
 V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
-from stage3_v3_replay import (CORE, OfflineDemonstrations as _OfflineDemonstrations,
+from stage3_v5_replay_core import (CORE, OfflineDemonstrations as _OfflineDemonstrations,
                               OnlineSequenceReplay as _OnlineSequenceReplay,
                               final_transition, symmetric_sequence_batch)
 
@@ -27,6 +28,7 @@ class Stage1OfflineSequenceReplay:
         if source not in SOURCE_IDS: raise ValueError(f"Unknown source {source}")
         self.path, self.source, self.source_id = str(Path(path).resolve()), source, SOURCE_IDS[source]
         self.rng = np.random.default_rng(int(seed)); self.episodes = []; self.samples_drawn = 0
+        self.samples_by_purpose = {"critic": 0, "actor": 0, "diagnostic": 0}
         with h5py.File(self.path, "r") as handle:
             if "episodes" not in handle: raise RuntimeError(f"{path}: expected Stage1 /episodes")
             keys = tuple(json.loads(handle.attrs["canonical_observation_keys"]))
@@ -55,7 +57,7 @@ class Stage1OfflineSequenceReplay:
             return np.asarray(value).reshape(-1)[0].item()
         return {"observations":obs,"next_observations":nxt,"actions":actions,"rewards":np.asarray(group["rewards"][...],np.float32).reshape(-1,1),"dones":dones,"terminated":terminated,"truncated":truncated,"terminals":terminated.astype(np.float32),"episode_steps":np.arange(length,dtype=np.int64),"episode_id":int(scalar("episode_id",-1)),"seed":int(scalar("initial_seed",-1)),"success":bool(scalar("episode_success",False))}
 
-    def sample_sequences(self, count, length, aligned=False, horizon=10):
+    def sample_sequences(self, count, length, aligned=False, horizon=10, purpose="critic"):
         eligible = [ep for ep in self.episodes if len(ep["actions"]) >= int(length)]
         if not eligible: raise RuntimeError("No valid Stage1 sequence")
         ids = self.rng.integers(len(eligible), size=int(count)); out={key:[] for key in CORE+("episode_steps","terminated","truncated","dones")}
@@ -64,10 +66,13 @@ class Stage1OfflineSequenceReplay:
             start=int(self.rng.integers(starts))*(horizon if aligned else 1)
             for key in out: out[key].append(ep[key][start:start+int(length)])
         self.samples_drawn += int(count)
+        self.samples_by_purpose[purpose] = self.samples_by_purpose.get(purpose, 0) + int(count)
         result={key:np.stack(value) for key,value in out.items()}; result["source_id"]=np.full(int(count),self.source_id,np.int8); return result
 
-    def state_dict(self): return {"rng_state":self.rng.bit_generator.state,"samples_drawn":self.samples_drawn}
-    def load_state_dict(self, value): self.rng.bit_generator.state=value["rng_state"]; self.samples_drawn=int(value["samples_drawn"])
+    def state_dict(self): return {"rng_state":self.rng.bit_generator.state,"samples_drawn":self.samples_drawn,"samples_by_purpose":dict(self.samples_by_purpose)}
+    def load_state_dict(self, value):
+        self.rng.bit_generator.state=value["rng_state"]; self.samples_drawn=int(value["samples_drawn"])
+        self.samples_by_purpose.update(value.get("samples_by_purpose", {}))
 
 
 def _sample_sequence_batch(episodes, rng, count, length):
@@ -93,7 +98,7 @@ def _sample_sequence_batch(episodes, rng, count, length):
 
 
 class OfflineDemonstrations(_OfflineDemonstrations):
-    """Stage3-v4 replay with batched sequence index generation."""
+    """Stage3-v5-compatible replay with batched sequence index generation."""
 
     def sample_sequences(self, count, length):
         return _sample_sequence_batch(self.episodes, self.rng, count, length)
@@ -105,32 +110,71 @@ class BalancedOfflineDemonstrations:
         self.sources = [Stage1OfflineSequenceReplay(path, name, int(seed) + index)
                         for index, (name, path) in enumerate(zip(SOURCE_NAMES, datasets))]
         self.rng = np.random.default_rng(int(seed)); self._remainder_cursor = 0
+        self.purpose_cursors = {"critic": 0, "actor": 0, "diagnostic": 0}
         self.episodes = sum((source.episodes for source in self.sources), [])
 
     def _all_episodes(self):
         return self.episodes
 
-    def sample_sequences(self, count, length, aligned=False, horizon=10):
+    def sample_sequences(self, count, length, aligned=False, horizon=10, purpose="critic"):
         base = int(count) // 3
         # For 128 this produces 43/43/42 and rotates the short source.
         counts = [base, base, base]
+        cursor = self.purpose_cursors.get(purpose, 0)
         for offset in range(int(count) - 3 * base):
-            counts[(self._remainder_cursor + offset) % 3] += 1
-        self._remainder_cursor = (self._remainder_cursor + 1) % 3
-        pieces = [source.sample_sequences(n, length, aligned, horizon) for source, n in zip(self.sources, counts)]
+            counts[(cursor + offset) % 3] += 1
+        self.purpose_cursors[purpose] = (cursor + 1) % 3
+        self._remainder_cursor = self.purpose_cursors["critic"]
+        pieces = [source.sample_sequences(n, length, aligned, horizon, purpose=purpose) for source, n in zip(self.sources, counts)]
         keys = CORE + ("episode_steps", "terminated", "truncated", "dones", "source_id")
         result = {key: np.concatenate([piece[key] for piece in pieces], axis=0) for key in keys}
         permutation = self.rng.permutation(int(count))
         return {key: value[permutation] for key, value in result.items()}
 
-    def state_dict(self): return {"rotation_index":self._remainder_cursor,"rng_state":self.rng.bit_generator.state,"sources":[x.state_dict() for x in self.sources]}
+    def state_dict(self): return {"rotation_index":self._remainder_cursor,"purpose_cursors":dict(self.purpose_cursors),"rng_state":self.rng.bit_generator.state,"sources":[x.state_dict() for x in self.sources]}
     def load_state_dict(self, value):
         self._remainder_cursor=int(value["rotation_index"]); self.rng.bit_generator.state=value["rng_state"]
+        self.purpose_cursors.update(value.get("purpose_cursors", {"critic":self._remainder_cursor}))
         for sampler,state in zip(self.sources,value["sources"]): sampler.load_state_dict(state)
 
 
 class OnlineSequenceReplay(_OnlineSequenceReplay):
-    """Stage3-v4 replay with batched sequence index generation."""
+    """Stage3-v5 online replay with batched sequence index generation."""
+
+    def __init__(self, capacity_transitions, seed=0):
+        super().__init__(capacity_transitions, seed)
+        self.diagnostic_rng = np.random.default_rng(int(seed) + 90173)
+        self.diagnostic_reservoir = {True: [], False: []}
+        self.diagnostic_seen = {True: 0, False: 0}
+        self.fixed_critic_diagnostic_set = None
+
+    def add_episode(self, episode):
+        super().add_episode(episode)
+        label = bool(episode.get("success", False))
+        self.diagnostic_seen[label] += 1
+        reservoir = self.diagnostic_reservoir[label]
+        slot = (len(reservoir) if len(reservoir) < 64 else
+                int(self.diagnostic_rng.integers(self.diagnostic_seen[label])))
+        if slot < 64:
+            saved = {key: np.asarray(value).copy() for key, value in episode.items()}
+            saved["diagnostic_episode_id"] = sum(self.diagnostic_seen.values()) - 1
+            if slot == len(reservoir):
+                reservoir.append(saved)
+            else:
+                reservoir[slot] = saved
+
+    def add(self, env_id, observation, action, reward, next_observation, terminal,
+            episode_step, terminated=None, truncated=None):
+        """Append a transition while retaining Gym termination semantics."""
+        super().add(env_id, observation, action, reward, next_observation,
+                    terminal, episode_step)
+        episode = self.current[int(env_id)]
+        episode.setdefault("terminated", []).append(
+            np.asarray([bool(terminal if terminated is None else terminated)], bool))
+        episode.setdefault("truncated", []).append(
+            np.asarray([bool(False if truncated is None else truncated)], bool))
+        episode.setdefault("dones", []).append(
+            np.asarray([bool(terminal or (False if truncated is None else truncated))], bool))
 
     def sample_sequences(self, count, length):
         return _sample_sequence_batch(
@@ -145,6 +189,16 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
             saved["success"] = bool(success)
             self.add_episode(saved)
 
+    def save(self, path):
+        np.save(path, {"capacity": self.capacity, "transitions": self.transitions,
+                       "rng_state": self.rng.bit_generator.state,
+                       "episodes": list(self.episodes), "current": self.current,
+                       "diagnostic_rng_state": self.diagnostic_rng.bit_generator.state,
+                       "diagnostic_reservoir": self.diagnostic_reservoir,
+                       "diagnostic_seen": self.diagnostic_seen,
+                       "fixed_critic_diagnostic_set": self.fixed_critic_diagnostic_set},
+                allow_pickle=True)
+
     @classmethod
     def load(cls, path):
         payload = np.load(path, allow_pickle=True).item()
@@ -154,12 +208,22 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
         replay.episodes = deque(payload["episodes"])
         replay.current = payload.get("current", {})
         replay.rng.bit_generator.state = payload["rng_state"]
+        replay.diagnostic_rng.bit_generator.state = payload.get("diagnostic_rng_state", replay.diagnostic_rng.bit_generator.state)
+        replay.diagnostic_reservoir = payload.get("diagnostic_reservoir", {True: [], False: []})
+        replay.diagnostic_seen = payload.get("diagnostic_seen", {True: 0, False: 0})
+        replay.fixed_critic_diagnostic_set = payload.get("fixed_critic_diagnostic_set")
+        if "diagnostic_reservoir" not in payload:
+            for episode in replay.episodes:
+                label = bool(episode.get("success", False))
+                replay.diagnostic_seen[label] += 1
+                if len(replay.diagnostic_reservoir[label]) < 64:
+                    replay.diagnostic_reservoir[label].append(episode)
         return replay
 
 
-def _sample_aligned(source, count, length, horizon):
+def _sample_aligned(source, count, length, horizon, purpose="actor"):
     if isinstance(source, (Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations)):
-        return source.sample_sequences(count, length, aligned=True, horizon=horizon)
+        return source.sample_sequences(count, length, aligned=True, horizon=horizon, purpose=purpose)
     episodes = source.episodes if isinstance(source, OfflineDemonstrations) else source._all_episodes()
     eligible = [episode for episode in episodes if len(episode["actions"]) >= length]
     if not eligible:
@@ -186,12 +250,13 @@ def _sample_aligned(source, count, length, horizon):
     return result
 
 
-def aligned_sequence_batch(offline, online, count, length, horizon=10):
+def aligned_sequence_batch(offline, online, count, length, horizon=10, profiler=None):
     if int(count) <= 0 or int(count) % 2 or int(length) != int(horizon):
         raise ValueError("Aligned Actor batch requires even count and one RNN horizon")
     half = int(count) // 2
-    left = _sample_aligned(offline, half, int(length), int(horizon))
-    right = _sample_aligned(online, half, int(length), int(horizon))
+    with profiler.measure("actor_replay_sample_ms") if profiler else nullcontext():
+        left = _sample_aligned(offline, half, int(length), int(horizon))
+        right = _sample_aligned(online, half, int(length), int(horizon))
     batch = {key: np.concatenate((left[key], right[key]), axis=0)
              for key in CORE + ("episode_steps",)}
     batch["is_offline"] = np.concatenate((np.ones(half, np.float32),
@@ -199,3 +264,25 @@ def aligned_sequence_batch(offline, online, count, length, horizon=10):
     if not np.all(batch["episode_steps"][:, 0] % horizon == 0):
         raise RuntimeError("Actor batch starts outside a hidden-state reset boundary")
     return batch
+
+
+def symmetric_sequence_batch(offline, online, count, length, profiler=None):
+    if int(count) != 256:
+        raise ValueError("V5 Critic batch must remain 128 offline + 128 online")
+    with profiler.measure("offline_replay_sample_ms") if profiler else nullcontext():
+        left = offline.sample_sequences(128, length, purpose="critic")
+    with profiler.measure("online_replay_sample_ms") if profiler else nullcontext():
+        right = online.sample_sequences(128, length)
+    with profiler.measure("batch_prepare_ms") if profiler else nullcontext():
+        result = {key: np.concatenate((left[key], right[key]), axis=0)
+                  for key in CORE + ("episode_steps",)}
+        result["is_offline"] = np.r_[np.ones(128, np.float32), np.zeros(128, np.float32)]
+    return result
+
+
+def source_sample_metrics(offline):
+    sources = offline.sources if hasattr(offline, "sources") else [offline]
+    return {f"{purpose}_offline_{name}_samples": sum(
+                source.samples_by_purpose.get(purpose, 0)
+                for source in sources if source.source == name)
+            for purpose in ("critic", "actor") for name in SOURCE_NAMES}

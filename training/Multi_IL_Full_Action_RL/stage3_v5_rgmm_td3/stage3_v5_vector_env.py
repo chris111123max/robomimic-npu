@@ -1,9 +1,9 @@
 """Spawn-based staggered MuJoCo workers for the progressive experiment only.
 
-The training process owns all torch / NPU models.  Workers own only one
-robosuite / MuJoCo environment each.  Workers are started sequentially and a
-worker must report READY before the next worker is started.  This avoids the
-large initialization spike that previously crashed the terminal / job.
+The training process owns all torch / NPU models. Workers own only one
+robosuite / MuJoCo environment each. Workers start in bounded batches and
+each reports READY before the next batch is launched. This avoids the large
+initialization spike that previously crashed the terminal / job.
 """
 from __future__ import annotations
 
@@ -81,12 +81,12 @@ def _action_bounds(env):
 
 
 def _obs_to_flat_shared(observation):
-    from stage3_v3_actor import obs_to_flat
+    from stage3_v5_actor import obs_to_flat
     return np.asarray(obs_to_flat(observation), dtype=np.float32).reshape(-1)
 
 
 def _flat_to_obs_shared(flat):
-    from stage3_v3_actor import flat_to_obs
+    from stage3_v5_actor import flat_to_obs
     # The source is a reusable SharedMemory row.  Copy before constructing
     # observation views; otherwise the next worker step overwrites the
     # observation already stored in the trainer/replay buffer.
@@ -148,7 +148,10 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int,
 
             if command == "step":
                 try:
+                    started = time.perf_counter()
                     obs, reward, done, info = env.step(payload)
+                    info = dict(info or {}, _stage3_env_started=started,
+                                _stage3_env_finished=time.perf_counter())
                     _safe_send(
                         conn,
                         (
@@ -167,8 +170,11 @@ def _worker(conn, env_id: int, dataset: str, initial_seed: int,
 
             elif command == "step_shared":
                 try:
+                    started = time.perf_counter()
                     obs, reward, done, info = env.step(
                         np.asarray(shared_action[env_id], dtype=np.float32))
+                    info = dict(info or {}, _stage3_env_started=started,
+                                _stage3_env_finished=time.perf_counter())
                     shared_obs[env_id, :] = _obs_to_flat_shared(obs)
                     _safe_send(conn, ("OK_SHARED", float(reward), bool(done),
                                       bool(success(env)), info))
@@ -466,6 +472,20 @@ class StaggeredVectorEnv:
         if any(i < 0 or i >= self.num_envs for i in ids):
             raise IndexError("env_id out of range")
 
+        self.step_async(actions, ids)
+        return self.step_wait(ids)
+
+    def step_async(self, actions, env_ids=None):
+        """Dispatch a round without waiting for MuJoCo workers."""
+        if self._closed:
+            raise RuntimeError("Cannot dispatch a closed vector environment")
+        ids = list(range(self.num_envs)) if env_ids is None else [int(i) for i in env_ids]
+        if any(i < 0 or i >= self.num_envs for i in ids):
+            raise IndexError("env_id out of range")
+        if len(ids) != len(actions) or len(set(ids)) != len(ids):
+            raise ValueError("env_ids/actions mismatch or duplicate ids")
+        if hasattr(self, "_pending_step_ids"):
+            raise RuntimeError("A vector step is already pending")
         for env_id, action in zip(ids, actions):
             action = np.asarray(action, dtype=np.float32)
             if action.shape != self.action_low.shape:
@@ -482,6 +502,19 @@ class StaggeredVectorEnv:
                 self.connections[env_id].send(("step_shared", None))
             else:
                 self.connections[env_id].send(("step", action))
+        self._pending_step_ids = ids
+
+    def any_ready(self):
+        """Nonblocking poll used between atomic learner updates."""
+        return any(self.connections[i].poll(0) for i in
+                   getattr(self, "_pending_step_ids", []))
+
+    def step_wait(self, env_ids=None):
+        """Collect a previously dispatched round."""
+        ids = list(getattr(self, "_pending_step_ids", []))
+        if env_ids is not None and [int(i) for i in env_ids] != ids:
+            raise ValueError("step_wait ids differ from step_async ids")
+        if not ids: raise RuntimeError("No pending vector step")
 
         results = []
         for env_id in ids:
@@ -501,7 +534,31 @@ class StaggeredVectorEnv:
 
         if ids:
             self.vector_steps += 1
+        del self._pending_step_ids
         return results
+
+    def reset_many(self, env_seeds, rebuild=False):
+        """Send RESET to all requested workers before receiving any result."""
+        if hasattr(self, "_pending_step_ids"):
+            raise RuntimeError("Collect the pending round before reset")
+        items = [(int(i), int(seed)) for i, seed in (env_seeds.items() if hasattr(env_seeds, "items") else env_seeds)]
+        if len({i for i, _ in items}) != len(items) or any(i < 0 or i >= self.num_envs for i, _ in items):
+            raise ValueError("Invalid batch reset ids")
+        for env_id, seed in items:
+            self.connections[env_id].send(("rebuild" if rebuild else "reset", seed))
+        result = {}
+        for env_id, seed in items:
+            message = self._recv(env_id, timeout=self.command_timeout,
+                                 operation=f"batch reset seed={seed}")
+            if message[0] == "RESET_OK": result[env_id] = message[1]
+            elif message[0] == "REBUILD_OK":
+                if not np.array_equal(message[2], self.action_low) or not np.array_equal(message[3], self.action_high):
+                    raise RuntimeError("Action bounds changed after batch rebuild")
+                result[env_id] = message[1]
+            elif message[0] == "RESET_FATAL" and not rebuild:
+                result[env_id] = self.reset(env_id, seed, rebuild=True)
+            else: raise RuntimeError(f"env_id={env_id} batch reset failed: {message}")
+        return result
 
     def reset(self, env_id: int, seed: int, rebuild: bool = False):
         """Reset one env.  A RESET_FATAL is retried by rebuilding that env."""

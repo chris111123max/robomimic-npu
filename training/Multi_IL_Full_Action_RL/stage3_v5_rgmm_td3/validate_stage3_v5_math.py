@@ -8,9 +8,9 @@ import numpy as np
 import torch
 from torch import distributions as D
 
-from stage3_v4_gmm_math import (single_component_mean_q, sequence_component_mean_q,
+from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean_q,
                                  single_expected_q)
-from stage3_v4_boundary import aligned_start
+from stage3_v5_boundary import aligned_start
 
 
 class ToyQ(torch.nn.Module):

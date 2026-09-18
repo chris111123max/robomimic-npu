@@ -12,11 +12,12 @@ import torch
 V3 = Path(__file__).resolve().parents[1] / "stage3_v3_rgmm_td3"
 if str(V3) not in sys.path:
     sys.path.insert(0, str(V3))
-from stage3_v3_actor import (distribution_tensors, flat_to_obs, module_hash,
+from stage3_v5_actor import (distribution_tensors, flat_to_obs, module_hash,
                              recurrent_distributions)
 from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean_q,
                                  single_expected_q, sequence_expected_q,
                                  full_sequence_component_mean_q)
+from stage3_v5_profile import StageProfiler
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
@@ -144,6 +145,7 @@ class RecurrentGMMTD3:
         self.target_critic = copy.deepcopy(critic).to(device)
         self.target_critic.requires_grad_(False)
         self.config, self.device = config, device
+        self.profiler = StageProfiler(device)
         self.action_scale = action_scale.to(device)
         self.action_offset = action_offset.to(device)
         # The optimizer exists during CRITIC_ONLY for resumability, but has a
@@ -155,6 +157,7 @@ class RecurrentGMMTD3:
             weight_decay=float(config["critic_weight_decay"]))
         self.critic_updates = 0
         self.actor_updates = 0
+        self.actor_enabled_critic_updates = 0
         self.actor_gate_open = False
         self.gate_open_step = None
         self.initial_actor = {key: value.detach().cpu().clone()
@@ -188,35 +191,48 @@ class RecurrentGMMTD3:
         return sequence_component_mean_q(
             self.critic, states, distributions, self.action_scale, self.action_offset)
 
-    def critic_update(self, batch, target_sequence, collect_metrics=True):
-        b = self._tensor_batch(batch)
+    @torch.no_grad()
+    def bellman_target(self, b, target_sequence):
+        """Shared Case-A target for training and frozen readiness samples."""
         # ``episode_steps`` is replay metadata. Keep it on the host and derive
         # reset boundaries before moving tensors to the NPU; this removes one
         # synchronizing device->host copy per Critic update.
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         target_starts = _last_reset_starts_from_numpy(
             target_sequence["episode_steps"], horizon)
-        target = self._tensor_batch({"next_observations": target_sequence["next_observations"]})
-        with torch.no_grad():
-            distribution, _ = target_final_distribution_vectorized(
-                self.target_actor, target["next_observations"],
-                horizon=horizon, starts=target_starts)
-            expected_next, target_q1, target_q2, target_tensors, _ = self._expected_q(
-                self.target_critic, target["next_observations"][:, -1], distribution)
-            td_target = b["rewards"] + float(self.config["gamma"]) * (
-                1.0 - b["terminals"]) * expected_next.reshape(-1, 1)
-        q1, q2 = self.critic(b["observations"], b["actions"])
-        loss_q1 = torch.nn.functional.mse_loss(q1, td_target)
-        loss_q2 = torch.nn.functional.mse_loss(q2, td_target)
-        loss = loss_q1 + loss_q2
+        with self.profiler.measure("host_to_device_ms", device=True):
+            target = self._tensor_batch({"next_observations": target_sequence["next_observations"]})
+        distribution, _ = target_final_distribution_vectorized(
+            self.target_actor, target["next_observations"],
+            horizon=horizon, starts=target_starts)
+        expected_next, _, _, _, _ = self._expected_q(
+            self.target_critic, target["next_observations"][:, -1], distribution)
+        td_target = b["rewards"] + float(self.config["gamma"]) * (
+            1.0 - b["terminals"]) * expected_next.reshape(-1, 1)
+        return td_target, distribution, expected_next, target, target_starts
+
+    def critic_update(self, batch, target_sequence, collect_metrics=True):
+        with self.profiler.measure("host_to_device_ms", device=True):
+            b = self._tensor_batch(batch)
+        horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
+        with self.profiler.measure("critic_target_ms", device=True):
+            td_target, distribution, expected_next, target, target_starts = self.bellman_target(b, target_sequence)
+        with self.profiler.measure("critic_forward_ms", device=True):
+            q1, q2 = self.critic(b["observations"], b["actions"])
+            loss_q1 = torch.nn.functional.mse_loss(q1, td_target)
+            loss_q2 = torch.nn.functional.mse_loss(q2, td_target)
+            loss = loss_q1 + loss_q2
         if not torch.isfinite(loss):
-            raise FloatingPointError("Non-finite Stage3-v4 Critic loss")
-        self.critic_optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        critic_grad = grad_norm(self.critic.parameters()) if collect_metrics else None
-        torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.config["critic_max_grad_norm"]))
-        self.critic_optimizer.step()
+            raise FloatingPointError("Non-finite Stage3-v5 Critic loss")
+        with self.profiler.measure("critic_backward_ms", device=True):
+            self.critic_optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            critic_grad = grad_norm(self.critic.parameters()) if collect_metrics else None
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.config["critic_max_grad_norm"]))
+        with self.profiler.measure("critic_optimizer_ms", device=True):
+            self.critic_optimizer.step()
         self.critic_updates += 1
+        self.actor_enabled_critic_updates += int(self.actor_gate_open)
         if not collect_metrics:
             # Avoid synchronizing several NPU scalar tensors back to the host
             # on every transition. The trainer only needs detailed Critic
@@ -257,28 +273,34 @@ class RecurrentGMMTD3:
     def actor_update(self, sequences, env_steps, collect_metrics=True):
         if not self.actor_gate_open:
             raise RuntimeError("Actor update attempted outside ACTOR_WARMUP/JOINT_RL")
+        if self.critic_updates % int(self.config["policy_delay"]):
+            raise RuntimeError("Actor update attempted off the policy_delay boundary")
         self.actor.train()
-        b = self._tensor_batch({key: sequences[key]
-                                for key in ("observations", "episode_steps")})
+        with self.profiler.measure("host_to_device_ms", device=True):
+            b = self._tensor_batch({key: sequences[key]
+                                    for key in ("observations", "episode_steps")})
         burn = int(self.config["recurrent_replay"]["burn_in"])
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         if burn != 0 or b["observations"].shape[1] != horizon:
             raise ValueError("Full-sequence Actor requires one aligned horizon and zero burn-in")
         # Replay guarantees starts at step 0,10,...; no internal reset exists
         # within this window. A single native RNN call retains BPTT gradients.
-        distribution = self.actor.forward_train(
-            flat_to_obs(b["observations"]), rnn_init_state=None, return_state=False)
+        with self.profiler.measure("actor_forward_ms", device=True):
+            distribution = self.actor.forward_train(
+                flat_to_obs(b["observations"]), rnn_init_state=None, return_state=False)
         for parameter in self.critic.parameters():
             parameter.requires_grad_(False)
         try:
-            expected, q1, tensors, _ = full_sequence_component_mean_q(
-                self.critic, b["observations"], distribution,
-                self.action_scale, self.action_offset)
+            with self.profiler.measure("actor_q_forward_ms", device=True):
+                expected, q1, tensors, _ = full_sequence_component_mean_q(
+                    self.critic, b["observations"], distribution,
+                    self.action_scale, self.action_offset)
             actor_rl = -expected.mean()
             if not torch.isfinite(actor_rl):
-                raise FloatingPointError("Non-finite Stage3-v4 Actor loss")
-            self.actor_optimizer.zero_grad(set_to_none=True)
-            actor_rl.backward()
+                raise FloatingPointError("Non-finite Stage3-v5 Actor loss")
+            with self.profiler.measure("actor_backward_ms", device=True):
+                self.actor_optimizer.zero_grad(set_to_none=True)
+                actor_rl.backward()
             actor_grad = grad_norm(self.actor.parameters()) if collect_metrics else None
             head_grads = {}
             if collect_metrics:
@@ -294,7 +316,8 @@ class RecurrentGMMTD3:
                     head_grads[f"actor_grad_norm_{label}"] = grad_norm(
                         value for name, value in named.items() if token in name)
             torch.nn.utils.clip_grad_norm_(self.actor.parameters(), float(self.config["actor_max_grad_norm"]))
-            self.actor_optimizer.step()
+            with self.profiler.measure("actor_optimizer_ms", device=True):
+                self.actor_optimizer.step()
         finally:
             for parameter in self.critic.parameters():
                 parameter.requires_grad_(True)
@@ -363,31 +386,57 @@ class RecurrentGMMTD3:
         return q1.cpu().numpy().reshape(-1), q2.cpu().numpy().reshape(-1)
 
     @torch.no_grad()
-    def fixed_td_diagnostic(self, online, sample_count):
-        batch = online.sample_sequences(min(int(sample_count), 256), 1)
-        b = self._tensor_batch({key: value[:, 0] for key, value in batch.items()})
+    def q_values_for_episodes(self, episodes, chunk_size=4096):
+        lengths = [len(episode["actions"]) for episode in episodes]
+        states = np.concatenate([episode["observations"] for episode in episodes])
+        actions = np.concatenate([episode["actions"] for episode in episodes])
+        outputs = []
+        for first in range(0, len(states), chunk_size):
+            s = torch.as_tensor(states[first:first+chunk_size], dtype=torch.float32, device=self.device)
+            a = torch.as_tensor(actions[first:first+chunk_size], dtype=torch.float32, device=self.device)
+            q1, q2 = self.critic(s, a)
+            outputs.append(torch.cat((q1, q2), dim=1).cpu().numpy())
+        values = np.concatenate(outputs)
+        splits = np.split(values, np.cumsum(lengths)[:-1])
+        return [(row[:, 0], row[:, 1]) for row in splits]
+
+    @torch.no_grad()
+    def fixed_td_diagnostic(self, batch):
+        b = self._tensor_batch({key: value[:, -1] for key, value in batch.items()
+                                if key in ("observations", "actions", "rewards", "terminals")})
+        td_target, _, _, _, _ = self.bellman_target(b, batch)
         q1, q2 = self.critic(b["observations"], b["actions"])
-        target = b["rewards"]
-        error = torch.minimum(q1, q2) - target
+        # This is the same Case-A Bellman target used by critic_update.  The
+        # loader maps terminated to terminals and leaves truncation bootstrapable.
+        error = torch.minimum(q1, q2) - td_target
         return {"q1": q1.cpu().numpy().reshape(-1), "q2": q2.cpu().numpy().reshape(-1),
-                "td_target": target.cpu().numpy().reshape(-1),
+                "td_target": td_target.cpu().numpy().reshape(-1),
                 "td_mae": float(error.abs().mean().cpu()), "td_mse": float(error.square().mean().cpu())}
 
     @torch.no_grad()
-    def ood_action_stress(self, online, radii):
-        batch = online.sample_sequences(min(128, max(1, len(online.episodes))), 1)
-        states = torch.as_tensor(batch["observations"][:, 0], dtype=torch.float32, device=self.device)
-        actions = torch.as_tensor(batch["actions"][:, 0], dtype=torch.float32, device=self.device)
+    def ood_action_stress(self, batch, fixed_noise):
+        count = fixed_noise.shape[1]
+        states = torch.as_tensor(batch["observations"][:count, -1], dtype=torch.float32, device=self.device)
+        actions = torch.as_tensor(batch["actions"][:count, -1], dtype=torch.float32, device=self.device)
         reference = torch.minimum(*self.critic(states, actions))
         scale, offset = self.action_scale.reshape(-1), self.action_offset.reshape(-1)
         normalized = (actions - offset) / scale
-        excess = []
-        for radius in radii:
-            noise = torch.empty_like(normalized).uniform_(-float(radius), float(radius))
-            perturbed = (normalized + noise).clamp(-1.0, 1.0) * scale + offset
-            excess.append((torch.minimum(*self.critic(states, perturbed)) - reference).cpu().numpy())
-        values = np.concatenate(excess)
-        return {"mean": float(values.mean()), "p95": float(np.percentile(values, 95)), "max": float(values.max())}
+        noise = torch.as_tensor(fixed_noise, dtype=torch.float32, device=self.device)
+        perturbed = (normalized[None] + noise).clamp(-1.0, 1.0) * scale + offset
+        repeated = states[None].expand(len(noise), -1, -1).reshape(-1, 59)
+        values = torch.minimum(*self.critic(repeated, perturbed.reshape(-1, 14)))
+        values = values.reshape(len(noise), count, 1) - reference[None]
+        # Near-zero Q: regularize relative denominator by the reference std.
+        qstd = reference.std(unbiased=False).clamp_min(1e-6)
+        relative = values / (reference.abs()[None] + qstd + 1e-6)
+        normalized_excess = values / qstd
+        host = torch.stack((values, relative, normalized_excess), dim=-1).cpu().numpy().reshape(-1, 3)
+        result = {}
+        for i, prefix in enumerate(("", "relative_", "normalized_")):
+            result.update({prefix+"mean": float(host[:, i].mean()),
+                           prefix+"p95": float(np.percentile(host[:, i], 95)),
+                           prefix+"max": float(host[:, i].max())})
+        return result
 
     @torch.no_grad()
     def gmm_diagnostics(self, sequences):

@@ -38,6 +38,9 @@ def arguments():
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--compile-backend", choices=("none", "torchair"), default=None)
     parser.add_argument("--no-prefetch", action="store_true")
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--benchmark-mode", choices=("A", "B", "C", "D"))
+    parser.add_argument("--benchmark-warmup-steps", type=int, default=1024)
     return parser.parse_args()
 
 
@@ -145,6 +148,7 @@ def checkpoint_payload(agent, config, group, env_steps, generations,
     return {
         "stage": "stage3-v5", "group": group, "env_steps": int(env_steps),
         "updates": int(agent.critic_updates), "actor_updates": int(agent.actor_updates),
+        "actor_enabled_critic_updates": int(agent.actor_enabled_critic_updates),
         "actor": agent.actor.state_dict(), "target_actor": agent.target_actor.state_dict(),
         "q1_q2": agent.critic.state_dict(), "target_q1_q2": agent.target_critic.state_dict(),
         "q1": agent.critic.q1.state_dict(), "q2": agent.critic.q2.state_dict(),
@@ -162,6 +166,8 @@ def checkpoint_payload(agent, config, group, env_steps, generations,
         "successes": int(successes), "online_replay_transitions": int(online.transitions),
         "training_state": handoff.state.serialize() if handoff else None,
         "update_credit": float(update_credit),
+        "pipeline_state": agent.pipeline.metrics() if hasattr(agent, "pipeline") else None,
+        "rollout_snapshot_state": agent.rollout_executor.metrics() if hasattr(agent, "rollout_executor") else None,
         "offline_sampler_state": offline.state_dict() if offline and hasattr(offline, "state_dict") else None,
         "resume_semantics": "partial vector episodes are discarded and reset",
     }
@@ -187,7 +193,7 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
         raise RuntimeError("Resume Actor source differs")
     for key in ("objective_revision", "rl_policy_expectation", "adaptive_bc_enabled", "bc_weight",
                 "actor_q_scale_normalization", "boundary_aligned_sequence_sampling",
-                "policy_delay", "utd", "updates_every_n_env_steps",
+                "policy_delay", "utd",
                 "recurrent_replay"):
         if payload["config"].get(key) != config.get(key):
             raise RuntimeError(f"Resume training objective differs: {key}")
@@ -198,6 +204,7 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
     agent.actor_optimizer.load_state_dict(payload["actor_optimizer"])
     agent.critic_optimizer.load_state_dict(payload["critic_optimizer"])
     agent.critic_updates = int(payload["updates"]); agent.actor_updates = int(payload["actor_updates"])
+    agent.actor_enabled_critic_updates = int(payload.get("actor_enabled_critic_updates", 0))
     agent.actor_gate_open = bool(payload["actor_gate_open"])
     agent.gate_open_step = payload["gate_open_step"]
     online = OnlineSequenceReplay.load(payload["online_sequence_replay"])
@@ -224,14 +231,18 @@ def main():
     parallel = config["parallel_env"]
     num_envs = int(args.num_envs or parallel["num_envs"])
     total = int(args.total_env_steps or config["total_env_steps"])
+    if args.smoke and args.benchmark_mode:
+        raise RuntimeError("Smoke and benchmark are separate runs")
+    if args.benchmark_mode and (num_envs not in (2,4,8,16) or total <= args.benchmark_warmup_steps):
+        raise RuntimeError("Benchmark needs 2/4/8/16 envs and a measured window after warmup")
     if args.smoke:
         if num_envs > 2 or total > 12000:
             raise RuntimeError("Smoke requires <=2 envs and <=12000 aggregate steps")
-    elif num_envs != 16:
+    elif not args.benchmark_mode and num_envs != 16:
         raise RuntimeError("Formal Stage3-v5 requires exactly 16 environments")
     config["resolved_num_envs"] = num_envs
     config["resolved_total_env_steps"] = total
-    config["run_type"] = "SMOKE" if args.smoke else "FORMAL"
+    config["run_type"] = "BENCHMARK" if args.benchmark_mode else ("SMOKE" if args.smoke else "FORMAL")
     if args.smoke:
         # Smoke alters only timing/thresholds to exercise all FSM edges; the
         # immutable JSON remains the formal configuration.
@@ -245,6 +256,10 @@ def main():
         config["smoke_warmup_steps"] = 4
 
     group_dir = pair / args.group
+    if args.benchmark_mode:
+        group_dir = group_dir / "benchmarks" / f"{args.benchmark_mode}_{num_envs}_{time.time_ns()}"
+    elif args.smoke:
+        group_dir = group_dir / "smokes" / str(time.time_ns())
     for name in ("checkpoints", "evaluations", "diagnostics"):
         (group_dir / name).mkdir(parents=True, exist_ok=True)
     vector = eval_env = None
@@ -252,7 +267,7 @@ def main():
 
     def stop(signum, _frame):
         nonlocal stop_requested
-        print(f"[STAGE3-V4] signal {signum}; stopping after vector round", flush=True)
+        print(f"[STAGE3-V5] signal {signum}; stopping after vector round", flush=True)
         stop_requested = True
 
     previous_int = signal.signal(signal.SIGINT, stop)
@@ -267,12 +282,12 @@ def main():
             startup_parallelism=int(parallel["startup_parallelism"]))
 
         import torch
-        from stage3_v3_actor import BatchedGMMExecutor, load_exact_actor, module_hash, obs_to_flat
+        from stage3_v5_actor import load_exact_actor, module_hash, obs_to_flat
         from stage3_v5_agent import RecurrentGMMTD3, strict_stage2_load
         from stage3_v3_evaluation import build_env, close_env, evaluate_actor
         from stage3_v5_replay import (Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations, OnlineSequenceReplay,
                                      final_transition, symmetric_sequence_batch,
-                                     aligned_sequence_batch, _sample_aligned)
+                                     aligned_sequence_batch, _sample_aligned, source_sample_metrics)
 
         device = resolve_device(args.device, torch)
         seed_all(config["training_seed"], torch)
@@ -289,9 +304,16 @@ def main():
                                  dtype=torch.float32, device=device).reshape(1, 1, 1, 14)
         critic, _ = strict_stage2_load(actual, device)
         agent = RecurrentGMMTD3(actor, critic, config, device, scale, offset)
+        agent.profiler.enabled = bool(args.profile or args.smoke or args.benchmark_mode)
+        profiler = agent.profiler
+        if args.benchmark_mode in ("A", "B"):
+            profiler.device = None
         from stage3_v5_execution import prepare_round_batches, enable_npu_compile
         from stage3_v5_schedule import CriticHandoff, HandoffState, TrainingState
         from stage3_v5_readiness import replay_metrics
+        from stage3_v5_pipeline import TransitionCredit, overlap_burst, interval_overlap
+        from stage3_v5_rollout import BoundarySnapshotExecutor
+        from stage3_v5_diagnostics import isolated_training_rng
         handoff = CriticHandoff(config)
         critic_lr_ready = float(config["critic_lr"])
         update_credit = 0.0
@@ -309,11 +331,14 @@ def main():
             if any(path is None for path in paths):
                 raise RuntimeError("multi_q requires BC-RNN, BC-Transformer and BC-GMM replay sources")
             offline = BalancedOfflineDemonstrations(paths, config["training_seed"])
-        fixed_diagnostics = _sample_aligned(
-            offline, 64, int(config["recurrent_replay"]["train_seq_len"]), 10)
+        with isolated_training_rng(offline=offline):
+            fixed_diagnostics = _sample_aligned(
+                offline, 64, int(config["recurrent_replay"]["train_seq_len"]), 10, purpose="diagnostic")
         online = OnlineSequenceReplay(config["online_sequence_capacity"], config["training_seed"])
-        executor = BatchedGMMExecutor(actor, scale, offset, num_envs, 10)
-        eval_env = build_env(config["expert_dataset"])
+        executor = BoundarySnapshotExecutor(actor, scale, offset, num_envs, 10)
+        # Do not allocate a separate evaluation simulator until the Critic
+        # handoff reaches JOINT_RL and an evaluation is actually due.
+        eval_env = None
 
         observations = list(vector.initial_observations)
         generations = [0] * num_envs
@@ -326,13 +351,23 @@ def main():
             successes = int(saved["successes"])
             generations = [int(value) + 1 for value in saved["generations"]]
             contexts = [new_context(config, num_envs, i, generations[i]) for i in range(num_envs)]
-            for env_id in range(num_envs):
-                observations[env_id] = vector.reset(env_id, contexts[env_id]["seed"])
+            observations_by_env = vector.reset_many(
+                {env_id: contexts[env_id]["seed"] for env_id in range(num_envs)})
+            observations = [observations_by_env[env_id] for env_id in range(num_envs)]
             executor.reset_indices(range(num_envs))
             handoff = CriticHandoff(config, HandoffState.restore(saved["training_state"]))
             update_credit = float(saved.get("update_credit", 0.0))
             if saved.get("offline_sampler_state") and hasattr(offline, "load_state_dict"):
                 offline.load_state_dict(saved["offline_sampler_state"])
+
+        credit = TransitionCredit(config["utd"], parallel["max_collector_lag_transitions"], update_credit)
+        if args.resume and saved.get("pipeline_state"):
+            for key in ("collector_transition_head", "learner_consumed_transition_equivalent",
+                        "max_collector_lag_seen", "collector_throttle_count"):
+                if key in saved["pipeline_state"]:
+                    setattr(credit, key, saved["pipeline_state"][key])
+        agent.pipeline = credit
+        agent.rollout_executor = executor
 
         write_json(group_dir / "runtime_audit.json", {
             "stage": "stage3-v5", "group": args.group, "run_type": config["run_type"],
@@ -347,6 +382,9 @@ def main():
             "handoff": "CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL; evaluation only in JOINT_RL",
             "online_replay_capacity_configured": int(config["online_replay_capacity"]),
             "online_sequence_capacity_effective": int(config["online_sequence_capacity"]),
+            "offline_sources": config.get("offline_source_metadata", config["offline_sources"]),
+            "offline_sampler": ("RNN-only" if args.group == "rnn_q"
+                                 else "balanced RNN/Transformer/GMM rotation"),
             "actor": metadata, "execution": config["exploration"]["execution"],
             "objective_revision": config["objective_revision"],
             "td_target": "r + gamma*(1-terminal)*sum_k p'_k*min(Q1',Q2')(s',mu'_k)",
@@ -364,6 +402,7 @@ def main():
             "actor_update_std_contract": "Actor is in train mode and computes learned std, but raw-Q RL objective uses only categorical probabilities and component means; std head has no direct RL gradient.",
             "target_actor_contract": "Independent frozen Polyak-updated Actor remains eval with low_noise_eval=True; Bellman target enumerates component means under no_grad.",
             "replay_action_contract": "The exact denormalized action array returned by BatchedGMMExecutor is passed to vector.step and online.add; no external noise or clipping.",
+            "rollout_snapshot_contract": "Separate rollout snapshots synchronize only at per-env recurrent reset boundaries; hidden and weights remain consistent for the entire block.",
             "online_cql": False, "critic_checkpoint": actual,
             "actor_checkpoint_sha256": file_hash(config["bc_rnn_checkpoint"]),
         })
@@ -373,14 +412,18 @@ def main():
                             if args.smoke else config["evaluation"]["seeds"])
         checkpoint_steps = set(range(int(config["checkpoint_interval_steps"]), total + 1,
                                      int(config["checkpoint_interval_steps"]))) | {total}
+        if args.benchmark_mode:
+            checkpoint_steps.add(int(args.benchmark_warmup_steps))
         best_success = -1.0
 
         def run_evaluation(step):
-            nonlocal best_success
+            nonlocal best_success, eval_env
             evaluation_started = time.monotonic()
             saved_rng = rng_state(torch)
             seed_all(config["training_seed"] + 7000000 + int(step), torch)
             try:
+                if eval_env is None:
+                    eval_env = build_env(config["expert_dataset"])
                 report = evaluate_actor(
                     actor, scale, offset, eval_env, evaluation_seeds,
                     config["horizon"], config["sim_error_handling"]["evaluation_retry_count"],
@@ -401,21 +444,21 @@ def main():
                 best_success = report["success_rate"]
                 save_checkpoint(group_dir / "checkpoints" / "best_success.pth", agent,
                                 config, args.group, step, generations, episodes,
-                                successes, online, torch, handoff, update_credit)
+                                successes, online, torch, handoff, credit.pending, offline)
             log_jsonl(group_dir / "gate_metrics.jsonl", {
                 "env_steps": int(step), "eval_success_count": report["success_count"],
                 "eval_success_rate": report["success_rate"], "competence_pass": True,
                 "training_state": handoff.state.state.value,
                 "gate_open": agent.actor_gate_open})
 
-        if env_steps == 0:
+        if env_steps == 0 and not args.benchmark_mode:
             save_checkpoint(group_dir / "checkpoints" / "step0_transfer.pth", agent,
                             config, args.group, 0, generations, episodes, successes,
-                            online, torch, handoff, update_credit)
+                            online, torch, handoff, credit.pending, offline)
             if 0 in evaluation_steps and not args.smoke:
                 run_evaluation(0)
 
-        print(f"[STAGE3-V4] group={args.group} num_envs={num_envs} "
+        print(f"[STAGE3-V5] group={args.group} num_envs={num_envs} "
               f"total_aggregate_env_steps={total} UTD={config['utd']} "
               f"policy_delay={int(config['policy_delay'])} mode={config['run_type']}", flush=True)
         metric_rows = []
@@ -424,49 +467,150 @@ def main():
         last_report_step, last_report_time = env_steps, time.monotonic()
         last_report_critic_updates = agent.critic_updates
         last_report_actor_updates = agent.actor_updates
+        prefetched_one = None
+        def learn_once():
+            nonlocal metric_rows, prefetched_one
+            learn_once.last_device_interval = None
+            length = int(config["recurrent_replay"]["critic_context_length"])
+            if not online.can_sample(length):
+                return False
+            schedule = handoff.schedule(env_steps, critic_lr_ready)
+            agent.set_learning_rates(schedule["actor_lr"], schedule["critic_lr"])
+            agent.set_actor_training_enabled(schedule["actor_enabled"], env_steps)
+            if args.benchmark_mode:
+                agent.set_actor_training_enabled(False)
+            actor_ready = agent.actor_gate_open and online.can_sample(10)
+            # A single atomic burst cannot strand unused prefetched batches.
+            with profiler.measure("learner_total_ms", device=True):
+                if prefetched_one is not None:
+                    critics, actors = prefetched_one
+                    prefetched_one = None
+                else:
+                    with profiler.measure("batch_prefetch_ms", device=True):
+                        critics, actors = prepare_round_batches(
+                            offline, online, 0, config, device, actor_ready,
+                            update_count=1, critic_updates=agent.critic_updates,
+                            profiler=profiler, transfer=args.benchmark_mode != "B" and prefetch)
+                if args.benchmark_mode == "B":
+                    benchmark_counts["replay_updates"] += 1
+                    return True
+                profiler.synchronize()
+                device_learner_started = time.perf_counter()
+                collect_metrics = (agent.critic_updates + 1) % int(config["train_metrics_interval_updates"]) == 0
+                with profiler.measure("critic_total_ms", device=True):
+                    metrics = agent.critic_update(*critics[0], collect_metrics=collect_metrics)
+                if 0 in actors:
+                    with profiler.measure("actor_total_ms", device=True):
+                        metrics.update(agent.actor_update(actors[0], env_steps,
+                                                          collect_metrics=collect_metrics))
+                with profiler.measure("polyak_ms", device=True):
+                    agent.polyak_update()
+                learn_once.last_device_interval = (device_learner_started, time.perf_counter())
+            executor.train_policy_version = agent.actor_updates
+            metrics.update({"env_steps": env_steps, "updates": agent.critic_updates,
+                            "actor_updates": agent.actor_updates,
+                            "actor_gate_open": agent.actor_gate_open,
+                            "gate_open_step": agent.gate_open_step,
+                            "offline_batch_fraction": 0.5, "online_batch_fraction": 0.5,
+                            "actual_utd": agent.critic_updates / max(1, credit.collector_transition_head),
+                            "online_samples": int(agent.critic_updates * 128),
+                            **source_sample_metrics(offline), **credit.metrics(),
+                            **executor.metrics()})
+            if collect_metrics:
+                metric_rows.append(metrics)
+                log_jsonl(group_dir / "train_metrics.jsonl", aggregate(metric_rows))
+                metric_rows = []
+            return True
+
+        def catch_up():
+            credit.collector_throttle_count += 1
+            with profiler.measure("collector_wait_ms", device=True):
+                while credit.updates_due:
+                    if not learn_once():
+                        raise RuntimeError("Replay cannot satisfy pending credit; collector cannot advance safely")
+                    credit.consume()
+
+        benchmark_counts = {"replay_updates": 0}
+        measured_overlap_ms = 0.0
+        overlap_update_count = 0
+        training_started = time.monotonic()
+        training_start_steps = env_steps
+        training_start_updates = agent.critic_updates
+        training_start_actor_updates = agent.actor_updates
+        benchmark_measuring = not args.benchmark_mode
+        from stage3_v5_profile import cpu_snapshot, cpu_measurement
+        cpu_start = cpu_snapshot(vector.processes)
         while env_steps < total and not stop_requested:
             round_started = time.perf_counter()
             boundaries = [step for step in evaluation_steps | checkpoint_steps | {total}
                           if step > env_steps]
             boundary = min(boundaries) if boundaries else total
             count = min(num_envs, total - env_steps, boundary - env_steps)
-            profile_round = env_steps // 1000 != (env_steps + count) // 1000
+            if args.benchmark_mode != "A" and credit.must_throttle(count):
+                catch_up()
+            profile_round = profiler.enabled
             profile = {}
             active = [(active_cursor + index) % num_envs for index in range(count)]
             active_cursor = (active_cursor + count) % num_envs
-            if profile_round:
-                profile_started = profile_clock(torch, device)
-            # Environment samples a categorical mode then its low-noise Gaussian.
-            # RL enumerates all component means, approximating std=1e-4 sampling.
-            actions = executor.actions_for(
-                active, [observations[index] for index in active],
-                config["exploration"]["external_action_noise_std"],
-                vector.action_low if config["exploration"]["clip_to_env_bounds"] else None,
-                vector.action_high if config["exploration"]["clip_to_env_bounds"] else None)
-            if profile_round:
-                profile["actor_inference_ms"] = 1000 * (
-                    profile_clock(torch, device) - profile_started)
+            async_mode = args.benchmark_mode in (None, "D")
+            if async_mode and prefetch and credit.updates_due and online.can_sample(11):
+                schedule = handoff.schedule(env_steps, critic_lr_ready)
+                agent.set_learning_rates(schedule["actor_lr"], schedule["critic_lr"])
+                agent.set_actor_training_enabled(schedule["actor_enabled"] and not args.benchmark_mode, env_steps)
+                # Prepare the guaranteed first atomic update before dispatch.
+                # Its compute can start immediately while workers simulate,
+                # rather than missing short env windows during sampling.
+                with profiler.measure("batch_prefetch_ms", device=True):
+                    prefetched_one = prepare_round_batches(
+                        offline, online, 0, config, device,
+                        agent.actor_gate_open and online.can_sample(10), update_count=1,
+                        critic_updates=agent.critic_updates, profiler=profiler)
+            with profiler.measure("actor_inference_ms", device=True):
+                if args.benchmark_mode in ("A", "B"):
+                    # A/B run a fixed, preloaded Stage1 action stream. No
+                    # Actor or Critic device forward occurs in the timed loop.
+                    episode = offline.episodes[0]
+                    actions = [episode["actions"][contexts[i]["length"] % len(episode["actions"])]
+                               for i in active]
+                else:
+                    actions = executor.actions_for(
+                        active, [observations[index] for index in active],
+                        config["exploration"]["external_action_noise_std"],
+                        vector.action_low if config["exploration"]["clip_to_env_bounds"] else None,
+                        vector.action_high if config["exploration"]["clip_to_env_bounds"] else None,
+                        train_policy_version=agent.actor_updates)
             states = {env_id: obs_to_flat(observations[env_id]) for env_id in active}
-            if profile_round:
-                profile_started = time.perf_counter()
-            results = vector.step(actions, active)
-            if profile_round:
-                profile["vector_env_step_ms"] = 1000 * (
-                    time.perf_counter() - profile_started)
-            action_by_env = dict(zip(active, actions))
             round_critic_start, round_actor_start = agent.critic_updates, agent.actor_updates
-            prepared_critics, prepared_actors = [], []
-            update_index = 0
-            if (prefetch and env_steps >= config["min_online_replay_size"]
-                    and online.can_sample(config["recurrent_replay"]["critic_context_length"])):
-                if profile_round:
-                    prefetch_started = profile_clock(torch, device)
-                prepared_critics, prepared_actors = prepare_round_batches(
-                    offline, online, count, config, device,
-                    actor_ready=agent.actor_gate_open and online.can_sample(
-                        config["recurrent_replay"]["train_seq_len"]))
-                if profile_round:
-                    profile["round_replay_prepare_ms"] = 1000 * (profile_clock(torch, device) - prefetch_started)
+            with profiler.measure("env_dispatch_ms"):
+                vector.step_async(actions, active)
+            collector_dispatch_started = time.perf_counter()
+            action_by_env = dict(zip(active, actions))
+            learner_intervals = []
+            if async_mode and credit.updates_due:
+                used = overlap_burst(vector, credit, learn_once,
+                                     max(1, int(math.ceil(count * config["utd"]))),
+                                     learner_intervals)
+                overlap_update_count += used
+            elif async_mode:
+                with profiler.measure("learner_wait_ms"):
+                    pass
+            with profiler.measure("env_wait_ms"):
+                results = vector.step_wait(active)
+            if profiler.enabled:
+                wait_ms = profiler.totals.get("env_wait_ms", 0.0)
+                profiler.totals["learner_wait_ms"] = wait_ms
+                profiler.counts["learner_wait_ms"] = profiler.counts.get("env_wait_ms", 1)
+            elapsed_env_ms = (time.perf_counter() - collector_dispatch_started) * 1000
+            profiler.totals["vector_round_ms"] = profiler.totals.get("vector_round_ms", 0.0) + elapsed_env_ms
+            profiler.counts["vector_round_ms"] = profiler.counts.get("vector_round_ms", 0) + 1
+            # Device-complete timings are captured only by profile/smoke/benchmark.
+            overlap_ms = interval_overlap(learner_intervals, results) if profiler.enabled else 0.0
+            measured_overlap_ms += overlap_ms
+            profile.update({"vector_env_step_ms": elapsed_env_ms,
+                            "collector_learner_overlap_ms": overlap_ms,
+                            "round_critic_updates": agent.critic_updates - round_critic_start})
+            pending_resets = {}
+            pending_rebuilds = {}
             for env_id, message in results:
                 context = contexts[env_id]
                 if message[0] == "FATAL":
@@ -478,8 +622,7 @@ def main():
                     online.abort(env_id); generations[env_id] += 1
                     context = new_context(config, num_envs, env_id, generations[env_id])
                     contexts[env_id] = context
-                    observations[env_id] = vector.reset(env_id, context["seed"], rebuild=True)
-                    executor.reset_indices([env_id])
+                    pending_rebuilds[env_id] = context["seed"]
                     if fatal_counts[env_id] >= config["sim_error_handling"]["max_consecutive_fatal_errors"]:
                         raise RuntimeError(f"env_id={env_id} fatal error limit")
                     continue
@@ -493,97 +636,19 @@ def main():
                 terminal = bool((config["terminate_on_success"] and won)
                                 or (raw_done and not truncated))
                 next_flat = obs_to_flat(next_observation)
-                online.add(env_id, states[env_id], action_by_env[env_id], reward,
-                           next_flat, terminal, step_in_episode)
+                if args.benchmark_mode != "A":
+                    with profiler.measure("online_replay_insert_ms"):
+                        online.add(env_id, states[env_id], action_by_env[env_id], reward,
+                                   next_flat, terminal, step_in_episode,
+                                   terminated=terminal, truncated=truncated)
                 env_steps += 1
 
-                if handoff.state.state == TrainingState.CRITIC_ONLY and module_hash(actor) != initial_actor_hash:
-                    raise RuntimeError("Actor parameter drift detected during CRITIC_ONLY")
                 schedule = handoff.schedule(env_steps, critic_lr_ready)
                 agent.set_learning_rates(schedule["actor_lr"], schedule["critic_lr"])
                 agent.set_actor_training_enabled(schedule["actor_enabled"], env_steps)
-                if env_steps >= config["min_online_replay_size"]:
-                    update_credit += float(config["utd"])
+                if args.benchmark_mode != "A" and env_steps >= config["min_online_replay_size"]:
+                    credit.collect(1)
 
-                context_length = int(config["recurrent_replay"]["critic_context_length"])
-                if (env_steps >= config["min_online_replay_size"]
-                        and update_credit >= 1.0
-                        and online.can_sample(context_length)):
-                    profile_critic = profile_round and "critic_update_ms" not in profile
-                    if profile_critic:
-                        profile_started = profile_clock(torch, device)
-                    if update_index < len(prepared_critics):
-                        critic_batch, critic_sequences = prepared_critics[update_index]
-                    else:
-                        critic_sequences = symmetric_sequence_batch(
-                            offline, online, config["batch_size"], context_length)
-                        critic_batch = final_transition(critic_sequences)
-                    if profile_critic:
-                        profile["critic_replay_ms"] = 1000 * (
-                            profile_clock(torch, device) - profile_started)
-                        profile_started = profile_clock(torch, device)
-                    collect_metrics = (
-                        (agent.critic_updates + 1)
-                        % int(config["train_metrics_interval_updates"]) == 0
-                    )
-                    metrics = agent.critic_update(
-                        critic_batch, critic_sequences,
-                        collect_metrics=collect_metrics)
-                    update_credit -= 1.0
-                    if profile_critic:
-                        profile["critic_update_ms"] = 1000 * (
-                            profile_clock(torch, device) - profile_started)
-                    actor_metrics = {}
-                    actor_length = (int(config["recurrent_replay"]["burn_in"])
-                                    + int(config["recurrent_replay"]["train_seq_len"]))
-                    if (agent.actor_gate_open
-                            and agent.critic_updates % int(config["policy_delay"]) == 0
-                            and online.can_sample(actor_length)):
-                        profile_actor = profile_round and "actor_update_ms" not in profile
-                        if profile_actor:
-                            profile_started = profile_clock(torch, device)
-                        if update_index < len(prepared_actors):
-                            actor_sequences = prepared_actors[update_index]
-                        else:
-                            actor_sequences = aligned_sequence_batch(
-                                offline, online,
-                                int(config["recurrent_replay"]["actor_sequence_batch_size"]),
-                                actor_length, horizon=10)
-                        if profile_actor:
-                            profile["actor_replay_ms"] = 1000 * (
-                                profile_clock(torch, device) - profile_started)
-                            profile_started = profile_clock(torch, device)
-                        actor_metrics = agent.actor_update(
-                            actor_sequences, env_steps,
-                            collect_metrics=collect_metrics)
-                        if profile_actor:
-                            profile["actor_update_ms"] = 1000 * (
-                                profile_clock(torch, device) - profile_started)
-                    profile_polyak = profile_critic
-                    if profile_polyak:
-                        profile_started = profile_clock(torch, device)
-                    agent.polyak_update()
-                    update_index += 1
-                    if profile_polyak:
-                        profile["polyak_update_ms"] = 1000 * (
-                            profile_clock(torch, device) - profile_started)
-                    metrics.update(actor_metrics)
-                    metrics.update({"env_steps": env_steps, "updates": agent.critic_updates,
-                                    "actor_updates": agent.actor_updates,
-                                    "actor_gate_open": agent.actor_gate_open,
-                                    "gate_open_step": agent.gate_open_step,
-                                    "offline_batch_fraction": 0.5,
-                                    "online_batch_fraction": 0.5,
-                                    "actual_utd": agent.critic_updates / max(
-                                        1, env_steps - config["min_online_replay_size"] + 1),
-                                    "offline_rnn_samples": (offline.sources[0].samples_drawn if hasattr(offline, "sources") else offline.samples_drawn),
-                                    "offline_transformer_samples": (offline.sources[1].samples_drawn if hasattr(offline, "sources") else 0),
-                                    "offline_gmm_samples": (offline.sources[2].samples_drawn if hasattr(offline, "sources") else 0),
-                                    "online_samples": int(agent.critic_updates * 128)})
-                    metric_rows.append(metrics)
-                    if len(metric_rows) >= config["train_metrics_interval_updates"]:
-                        log_jsonl(group_dir / "train_metrics.jsonl", aggregate(metric_rows))
-                        metric_rows = []
 
                 observations[env_id] = next_observation
                 if terminal or truncated:
@@ -597,46 +662,87 @@ def main():
                     generations[env_id] += 1
                     context = new_context(config, num_envs, env_id, generations[env_id])
                     contexts[env_id] = context
-                    observations[env_id] = vector.reset(env_id, context["seed"])
-                    executor.reset_indices([env_id])
+                    pending_resets[env_id] = context["seed"]
 
                 # Readiness metrics are defined on complete online episodes;
                 # before the first one, defer the scheduled check rather than
                 # treating a missing diagnostic sample as a training failure.
-                if handoff.readiness_due(env_steps) and online.episodes:
-                    readiness = replay_metrics(agent, online, episodes, successes, config,
-                                               handoff.state.readiness_history, env_steps=env_steps)
+                if not args.benchmark_mode and handoff.readiness_due(env_steps) and online.episodes:
+                    if credit.updates_due:
+                        catch_up()
+                    with profiler.measure("readiness_ms", device=True):
+                        readiness = replay_metrics(agent, online, episodes, successes, config,
+                                                   handoff.state.readiness_history, env_steps=env_steps, offline=offline)
                     record = handoff.submit_readiness(readiness)
                     log_jsonl(group_dir / "readiness_metrics.jsonl", record)
                     if record["critic_ready"]:
                         save_checkpoint(group_dir / "checkpoints" / "critic_ready.pth", agent,
                                         config, args.group, env_steps, generations, episodes,
-                                        successes, online, torch, handoff, update_credit)
-                if handoff.fail_if_timed_out(env_steps):
+                                        successes, online, torch, handoff, credit.pending, offline)
+                if not args.benchmark_mode and handoff.fail_if_timed_out(env_steps):
                     save_checkpoint(group_dir / "checkpoints" / "critic_not_ready.pth", agent,
                                     config, args.group, env_steps, generations, episodes,
-                                    successes, online, torch, handoff, update_credit)
+                                    successes, online, torch, handoff, credit.pending, offline)
                     stop_requested = True
                 # Evaluations are prohibited until the warm-up completes.  The
                 # transition itself schedules the first one immediately.
-                if handoff.evaluation_due(env_steps):
+                if not args.benchmark_mode and handoff.evaluation_due(env_steps):
+                    if credit.updates_due:
+                        catch_up()
                     run_evaluation(env_steps)
-                if env_steps in checkpoint_steps:
+                if not args.benchmark_mode and env_steps in checkpoint_steps:
                     save_checkpoint(group_dir / "checkpoints" / f"step_{env_steps:07d}.pth",
                                     agent, config, args.group, env_steps, generations,
-                                    episodes, successes, online, torch, handoff, update_credit)
+                                    episodes, successes, online, torch, handoff, credit.pending, offline)
+
+            # Reset all completed workers in one pipe round.  This avoids a
+            # serial reset barrier when several of the 16 environments finish
+            # in the same collector batch.
+            reset_ids = []
+            if pending_rebuilds:
+                with profiler.measure("reset_many_ms"):
+                    rebuilt = vector.reset_many(pending_rebuilds, rebuild=True)
+                for env_id, observation in rebuilt.items():
+                    observations[env_id] = observation
+                reset_ids.extend(pending_rebuilds)
+            if pending_resets:
+                with profiler.measure("reset_many_ms"):
+                    reset = vector.reset_many(pending_resets)
+                for env_id, observation in reset.items():
+                    observations[env_id] = observation
+                reset_ids.extend(pending_resets)
+            if reset_ids:
+                executor.reset_indices(sorted(set(reset_ids)))
+
+            if args.benchmark_mode in ("B", "C"):
+                while credit.updates_due:
+                    if not learn_once():
+                        break
+                    credit.consume()
+            if args.benchmark_mode and not benchmark_measuring and env_steps >= args.benchmark_warmup_steps:
+                if credit.updates_due:
+                    catch_up()
+                benchmark_measuring = True
+                profiler.totals.clear(); profiler.counts.clear()
+                measured_overlap_ms = 0.0; overlap_update_count = 0
+                training_started = time.monotonic()
+                training_start_steps, training_start_updates = env_steps, agent.critic_updates
+                training_start_actor_updates = agent.actor_updates
+                cpu_start = cpu_snapshot(vector.processes)
 
             if profile_round:
                 log_jsonl(group_dir / "stage_timing.jsonl", {
                     "env_steps": env_steps, "group": args.group,
                     "policy_delay": int(config["policy_delay"]),
                     "sampled_vector_envs": count,
-                    "sampled_critic_updates": int("critic_update_ms" in profile),
-                    "sampled_actor_updates": int("actor_update_ms" in profile),
+                    "sampled_critic_updates": agent.critic_updates - round_critic_start,
+                    "sampled_actor_updates": agent.actor_updates - round_actor_start,
                     "round_critic_updates": agent.critic_updates - round_critic_start,
                     "round_actor_updates": agent.actor_updates - round_actor_start,
                     "round_wall_ms": 1000 * (time.perf_counter() - round_started),
                     "timing_semantics": "one sampled vector round; device synchronized at measured boundaries",
+                    **credit.metrics(), **executor.metrics(),
+                    "cumulative_profile": profiler.report(),
                     **profile,
                 })
             if env_steps - last_report_step >= 1000:
@@ -651,18 +757,48 @@ def main():
                                               / max(now - last_report_time, 1e-9),
                     "actor_updates_per_sec": (agent.actor_updates - last_report_actor_updates)
                                              / max(now - last_report_time, 1e-9),
-                    "phase": "actor_active" if agent.actor_gate_open else "actor_frozen",
+                    "phase": handoff.state.state.value,
                     "num_envs": num_envs})
                 last_report_step, last_report_time = env_steps, now
                 last_report_critic_updates = agent.critic_updates
                 last_report_actor_updates = agent.actor_updates
 
+        if args.benchmark_mode != "A" and credit.updates_due:
+            catch_up()
+        measured_seconds = time.monotonic() - training_started
+        measured_steps = env_steps - training_start_steps
+        measured_updates = agent.critic_updates - training_start_updates
+        run_measurements = {
+            "measurement_seconds": measured_seconds,
+            "aggregate_steps_per_sec": measured_steps / max(measured_seconds, 1e-9),
+            "collector_steps_per_sec": measured_steps / max(measured_seconds, 1e-9),
+            "critic_updates_per_sec": measured_updates / max(measured_seconds, 1e-9),
+            "actor_updates_per_sec": (agent.actor_updates - training_start_actor_updates) / max(measured_seconds, 1e-9),
+            "effective_utd": agent.critic_updates / max(1, credit.collector_transition_head),
+            "configured_policy_delay": int(config["policy_delay"]),
+            "measured_overlap_ms": measured_overlap_ms,
+            "overlap_critic_updates": overlap_update_count,
+            "profile": profiler.report(), **credit.metrics(), **executor.metrics(),
+            **source_sample_metrics(offline),
+            "benchmark_mode": args.benchmark_mode, "num_envs": num_envs,
+            "output_dir": str(group_dir),
+            "measured_transitions": measured_steps,
+            "action_stream": "preloaded Stage1" if args.benchmark_mode in ("A", "B") else "BC recurrent snapshot",
+            "cpu": cpu_measurement(cpu_start, cpu_snapshot(vector.processes)),
+            "effective_policy_delay": (agent.actor_enabled_critic_updates / agent.actor_updates
+                                        if agent.actor_updates else None),
+            "actor_enabled_critic_updates": agent.actor_enabled_critic_updates,
+        }
+        write_json(group_dir / "measurements.json", run_measurements)
+        print(json.dumps({"measurements": run_measurements}), flush=True)
+        if args.benchmark_mode:
+            return
         if metric_rows:
             log_jsonl(group_dir / "train_metrics.jsonl", aggregate(metric_rows))
         status = "INTERRUPTED" if stop_requested and env_steps < total else "COMPLETE"
         last_path = group_dir / "checkpoints" / "last.pth"
         save_checkpoint(last_path, agent, config, args.group, env_steps,
-                        generations, episodes, successes, online, torch, handoff, update_credit, offline)
+                        generations, episodes, successes, online, torch, handoff, credit.pending, offline)
         if args.smoke:
             roundtrip = torch.load(last_path, map_location=device)
             replay_roundtrip = OnlineSequenceReplay.load(roundtrip["online_sequence_replay"])
@@ -674,12 +810,14 @@ def main():
                 "critic_state_entries": len(roundtrip["q1_q2"]) == len(critic.state_dict()),
                 "sequence_replay_load": replay_roundtrip.transitions == online.transitions,
                 "sequence_boundary_policy": config["recurrent_replay"]["boundary_policy"] == "same_episode_only",
-                "actor_frozen_below_10k": (True if env_steps >= 10000 else module_hash(actor) == initial_actor_hash),
-                "critic_updated_during_warmup": module_hash(critic) != initial_critic_hash,
-                "gate_contract": agent.actor_gate_open == (env_steps >= 10000),
-                "actor_updated_after_gate": (env_steps < 10000 or
-                                              (agent.actor_updates > 0 and
-                                               module_hash(actor) != initial_actor_hash)),
+                "actor_not_updated_before_handoff": (agent.actor_updates == 0 or agent.gate_open_step is not None),
+                "critic_updated": module_hash(critic) != initial_critic_hash,
+                "state_machine_present": handoff.state.state.value in {"CRITIC_ONLY", "ACTOR_WARMUP", "JOINT_RL", "CRITIC_NOT_READY"},
+                "utd_contract": float(config["utd"]) == 0.25,
+                "policy_delay_contract": int(config["policy_delay"]) == 4,
+                "actual_cpu_learner_overlap": measured_overlap_ms > 0 and overlap_update_count > 0,
+                "bounded_collector_lag": credit.max_collector_lag_seen <= credit.limit,
+                "bounded_rollout_policy_lag": executor.max_policy_version_lag <= executor.max_policy_lag,
                 "case_a_objective": config["objective_revision"] == "case-a-low-noise-component-mean-q",
                 "finite_training": all(math.isfinite(float(value)) for value in
                                        (env_steps, agent.critic_updates, agent.actor_updates)),
@@ -688,7 +826,7 @@ def main():
                 "status": "PASS" if all(smoke_checks.values()) else "FAIL",
                 "checks": smoke_checks, "resume_supported": True})
             if not all(smoke_checks.values()):
-                raise RuntimeError("Stage3-v4 smoke roundtrip failed")
+                raise RuntimeError("Stage3-v5 smoke roundtrip failed")
         write_json(group_dir / "summary.json", {
             "stage": "stage3-v5", "status": status, "run_type": config["run_type"],
             "group": args.group, "env_steps": env_steps,

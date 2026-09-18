@@ -83,9 +83,10 @@ class CriticHandoff:
             step = int(metrics["env_steps"])
             self.state.critic_ready = True
             self.state.critic_ready_step = step
-            self.state.actor_warmup_steps = (int(self.config.get("smoke_warmup_steps", 0))
-                                             if self.config.get("run_type") == "SMOKE" else 0)
-            if not self.state.actor_warmup_steps:
+            if self.config.get("run_type") == "SMOKE":
+                self.state.actor_warmup_steps = max(
+                    1, int(self.config.get("smoke_warmup_steps", 4)))
+            else:
                 self.state.actor_warmup_steps = min(300000, max(100000, step))
             self.state.joint_rl_start_step = step + self.state.actor_warmup_steps
             self.state.next_evaluation_step = self.state.joint_rl_start_step

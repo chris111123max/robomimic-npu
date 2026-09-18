@@ -2,7 +2,7 @@ import tempfile, unittest, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h5py, numpy as np
-from stage3_v5_replay import CANONICAL_KEYS, Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations
+from stage3_v5_replay import CANONICAL_KEYS, Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations, OnlineSequenceReplay
 
 def make_file(path):
  with h5py.File(path,"w") as f:
@@ -14,6 +14,16 @@ def make_file(path):
     for key,width in zip(CANONICAL_KEYS,dims): parent.create_dataset(key,data=np.zeros((n,width),np.float32))
 
 class TestReplay(unittest.TestCase):
+ def test_online_termination_truncation_survive_save(self):
+  replay=OnlineSequenceReplay(100,7)
+  replay.add(0,np.zeros(59),np.zeros(14),1,np.ones(59),False,0,terminated=False,truncated=True)
+  replay.finish(0,success=False)
+  with tempfile.TemporaryDirectory() as d:
+   path=str(Path(d)/"online.npy"); replay.save(path); restored=OnlineSequenceReplay.load(path)
+   last=restored.episodes[0]
+   self.assertFalse(last["terminated"][-1]); self.assertTrue(last["truncated"][-1])
+   self.assertTrue(last["dones"][-1]); self.assertEqual(last["terminals"][-1],0)
+
  def test_native_loader_and_rotation(self):
   with tempfile.TemporaryDirectory() as d:
    paths=[str(Path(d)/f"{i}.h5") for i in range(3)]
