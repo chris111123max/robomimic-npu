@@ -199,8 +199,7 @@ def main():
         "training_seed": int(config["training_seed"]),
         "train_seed_base": int(config["train_seed_base"]),
         "train_seed_rule": "train_seed_base + generation * num_envs + env_id",
-        "evaluation_seeds": config["evaluation_seeds"],
-        "competence_evaluation_seeds": config["competence_evaluation_seeds"],
+        "evaluation_seeds": config["evaluation"]["seeds"],
     }
     fairness = {
         "stage": "stage3-v5", "status": "PREPARED",

@@ -357,8 +357,8 @@ def main():
             "boundary_evidence": "BatchedGMMExecutor resets hidden at episode timestep mod 10 == 0 and episode reset; replay stores contiguous episode_steps from 0; Actor windows begin at 0,10,... and never cross episodes",
             "rollout_std_contract": "BatchedGMMExecutor temporarily calls actor.eval(); checkpoint low_noise_eval=True fixes Gaussian component std to 1e-4; categorical mode is sampled.",
             "fixed_evaluation_std_contract": "evaluate_actor uses BatchedGMMExecutor, so eval mode and Gaussian std 1e-4 match online rollout.",
-            "evaluation_seeds": list(config["smoke_evaluation_seeds"] if args.smoke
-                                     else config["evaluation_seeds"]),
+            "evaluation_seeds": list(config.get("smoke_evaluation_seeds", config["evaluation"]["seeds"][:2]) if args.smoke
+                                     else config["evaluation"]["seeds"]),
             "smoke_evaluation_policy": ("2 seeds at final 12k only" if args.smoke
                                          else "10 fixed seeds at configured milestones"),
             "actor_update_std_contract": "Actor is in train mode and computes learned std, but raw-Q RL objective uses only categorical probabilities and component means; std head has no direct RL gradient.",
@@ -369,8 +369,8 @@ def main():
         })
 
         evaluation_steps = set()  # V5 gates formal evaluation through CriticHandoff.
-        evaluation_seeds = (config["smoke_evaluation_seeds"] if args.smoke
-                            else config["evaluation_seeds"])
+        evaluation_seeds = (config.get("smoke_evaluation_seeds", config["evaluation"]["seeds"][:2])
+                            if args.smoke else config["evaluation"]["seeds"])
         checkpoint_steps = set(range(int(config["checkpoint_interval_steps"]), total + 1,
                                      int(config["checkpoint_interval_steps"]))) | {total}
         best_success = -1.0
