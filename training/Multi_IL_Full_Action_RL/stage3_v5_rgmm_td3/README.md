@@ -24,8 +24,8 @@ offline total, split 43/43/42 across BC-RNN, BC-Transformer and BC-GMM, with the
 remainder rotated over time.
 
 Stage1 HDF5 replay is loaded natively from `/episodes`, retaining
-`terminated`, `truncated`, and `dones`. A truncation bootstraps the Bellman
-target; only a true termination masks it. The vector collector dispatches
+`terminated`, `truncated`, and `dones`. Both a true termination and a
+truncation mask the Bellman target; neither episode boundary bootstraps. The vector collector dispatches
 worker steps asynchronously and consumes previous-round credits with actual
 forward/backward/optimizer/Polyak work while workers simulate. Each atomic
 update is followed by a readiness poll; an already-ready round waits at most

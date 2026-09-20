@@ -55,7 +55,11 @@ class Stage1OfflineSequenceReplay:
         def scalar(name, default):
             value = group.attrs[name] if name in group.attrs else (group[name][()] if name in group else default)
             return np.asarray(value).reshape(-1)[0].item()
-        return {"observations":obs,"next_observations":nxt,"actions":actions,"rewards":np.asarray(group["rewards"][...],np.float32).reshape(-1,1),"dones":dones,"terminated":terminated,"truncated":truncated,"terminals":terminated.astype(np.float32),"episode_steps":np.arange(length,dtype=np.int64),"episode_id":int(scalar("episode_id",-1)),"seed":int(scalar("initial_seed",-1)),"success":bool(scalar("episode_success",False))}
+        # ``dones`` retains the source boundary record, while ``terminals`` is
+        # the Bellman mask: neither a true termination nor a time-limit reset
+        # has a valid in-episode successor to bootstrap from.
+        terminals = (terminated | truncated).astype(np.float32)
+        return {"observations":obs,"next_observations":nxt,"actions":actions,"rewards":np.asarray(group["rewards"][...],np.float32).reshape(-1,1),"dones":dones,"terminated":terminated,"truncated":truncated,"terminals":terminals,"episode_steps":np.arange(length,dtype=np.int64),"episode_id":int(scalar("episode_id",-1)),"seed":int(scalar("initial_seed",-1)),"success":bool(scalar("episode_success",False))}
 
     def sample_sequences(self, count, length, aligned=False, horizon=10, purpose="critic"):
         eligible = [ep for ep in self.episodes if len(ep["actions"]) >= int(length)]
@@ -166,15 +170,18 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
     def add(self, env_id, observation, action, reward, next_observation, terminal,
             episode_step, terminated=None, truncated=None):
         """Append a transition while retaining Gym termination semantics."""
+        terminated_value = bool(terminal if terminated is None else terminated)
+        truncated_value = bool(False if truncated is None else truncated)
+        terminal_for_td = terminated_value or truncated_value
         super().add(env_id, observation, action, reward, next_observation,
-                    terminal, episode_step)
+                    terminal_for_td, episode_step)
         episode = self.current[int(env_id)]
         episode.setdefault("terminated", []).append(
-            np.asarray([bool(terminal if terminated is None else terminated)], bool))
+            np.asarray([terminated_value], bool))
         episode.setdefault("truncated", []).append(
-            np.asarray([bool(False if truncated is None else truncated)], bool))
+            np.asarray([bool(truncated_value)], bool))
         episode.setdefault("dones", []).append(
-            np.asarray([bool(terminal or (False if truncated is None else truncated))], bool))
+            np.asarray([terminal_for_td], bool))
 
     def sample_sequences(self, count, length):
         return _sample_sequence_batch(

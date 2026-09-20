@@ -407,7 +407,7 @@ class RecurrentGMMTD3:
         td_target, _, _, _, _ = self.bellman_target(b, batch)
         q1, q2 = self.critic(b["observations"], b["actions"])
         # This is the same Case-A Bellman target used by critic_update.  The
-        # loader maps terminated to terminals and leaves truncation bootstrapable.
+        # The replay maps both terminal boundaries to ``terminals``.
         error = torch.minimum(q1, q2) - td_target
         return {"q1": q1.cpu().numpy().reshape(-1), "q2": q2.cpu().numpy().reshape(-1),
                 "td_target": td_target.cpu().numpy().reshape(-1),

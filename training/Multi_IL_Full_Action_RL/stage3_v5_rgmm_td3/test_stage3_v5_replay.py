@@ -22,13 +22,13 @@ class TestReplay(unittest.TestCase):
    path=str(Path(d)/"online.npy"); replay.save(path); restored=OnlineSequenceReplay.load(path)
    last=restored.episodes[0]
    self.assertFalse(last["terminated"][-1]); self.assertTrue(last["truncated"][-1])
-   self.assertTrue(last["dones"][-1]); self.assertEqual(last["terminals"][-1],0)
+   self.assertTrue(last["dones"][-1]); self.assertEqual(last["terminals"][-1],1)
 
  def test_native_loader_and_rotation(self):
   with tempfile.TemporaryDirectory() as d:
    paths=[str(Path(d)/f"{i}.h5") for i in range(3)]
    for p in paths: make_file(p)
-   one=Stage1OfflineSequenceReplay(paths[0],"rnn"); self.assertTrue(one.episodes[0]["terminated"][-1]); self.assertTrue(one.episodes[1]["truncated"][-1])
+   one=Stage1OfflineSequenceReplay(paths[0],"rnn"); self.assertTrue(one.episodes[0]["terminated"][-1]); self.assertTrue(one.episodes[1]["truncated"][-1]); self.assertEqual(one.episodes[1]["terminals"][-1],1)
    multi=BalancedOfflineDemonstrations(paths,1); totals=np.zeros(3,int)
    for _ in range(3):
     ids=multi.sample_sequences(128,10)["source_id"]; self.assertEqual(len(ids),128); totals += [(ids==i).sum() for i in range(3)]

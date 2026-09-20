@@ -217,15 +217,17 @@ class TestDiagnosticMath(unittest.TestCase):
         history = [{"td_mae":v, "qmin_mean":1., "qmin_std":1.} for v in (1.,1.01,1.02)]
         self.assertTrue(stability(history, CONFIG["critic_readiness"])[0])
 
-    def test_shared_target_termination_and_truncation_bootstrap(self):
+    def test_shared_target_termination_and_truncation_do_not_bootstrap(self):
         agent = RecurrentGMMTD3(ToyActor(), ConstantTwin(), CONFIG, torch.device("cpu"), torch.ones(14), torch.zeros(14))
         batch = {key:np.stack([episode()[key][:11]]*2) for key in
                  ("observations","next_observations","actions","rewards","terminals","episode_steps")}
-        batch["terminals"][0,-1] = 1
+        # Index 0 is a true termination and index 1 represents a truncation
+        # already mapped by replay to the same Bellman terminal mask.
+        batch["terminals"][:, -1] = 1
         final = {key:value[:,-1] for key,value in batch.items() if key in
                  ("observations","actions","rewards","terminals")}
         target = agent.bellman_target(agent._tensor_batch(final), batch)[0]
-        np.testing.assert_allclose(target.numpy().reshape(-1), [1.,2.98], atol=1e-6)
+        np.testing.assert_allclose(target.numpy().reshape(-1), [1.,1.], atol=1e-6)
         np.testing.assert_allclose(agent.fixed_td_diagnostic(batch)["td_target"], target.numpy().reshape(-1))
 
     def test_actor_prefetch_exact_indices_and_critic_source_log_is_clean(self):
