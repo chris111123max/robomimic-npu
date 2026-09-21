@@ -4,7 +4,7 @@ import copy,json,tempfile,unittest
 from pathlib import Path
 import numpy as np
 import torch
-from evaluation import auc,corr,ranks
+from evaluation import auc,corr,ranks,evaluate
 from finite_diagnostics import gradient_statistics,numpy_batch_stats
 from history_critic import build_critic,checkpoint_payload,load_checkpoint
 from sequence_dataset import previous_actions,POLICIES
@@ -59,12 +59,14 @@ class TemporalTests(unittest.TestCase):
   one=LegacyWindowSampler(datasets(),32,16,700,CONFIG["training_seed"],True);two=LegacyWindowSampler(datasets(),32,16,700,CONFIG["training_seed"],True)
   for _ in range(5):a=one.sample(16);b=two.sample(16)
   for key in ("policy","seed","episode_id","start","stop","observations"):np.testing.assert_array_equal(a[key],b[key])
+ def test_12_evaluation_restores_training_mode(self):
+  self.m.train();evaluate(self.m,datasets(),torch.device("cpu"),700);self.assertTrue(self.m.training)
 
 class MetricTests(unittest.TestCase):
- def test_12_average_rank_ties(self):np.testing.assert_allclose(ranks(np.array([1,1,3,2])),[.5,.5,3,2])
- def test_13_all_equal_and_duplicate_spearman(self):
+ def test_13_average_rank_ties(self):np.testing.assert_allclose(ranks(np.array([1,1,3,2])),[.5,.5,3,2])
+ def test_14_all_equal_and_duplicate_spearman(self):
   self.assertIsNone(corr(ranks(np.ones(5)),ranks(np.arange(5))));self.assertAlmostEqual(corr(ranks(np.array([0,0,1,1])),ranks(np.array([0,0,1,1]))),1.)
- def test_14_auc_score_ties(self):
+ def test_15_auc_score_ties(self):
   self.assertAlmostEqual(auc(np.array([0.,0.,1.,1.]),np.array([0,1,0,1],bool)),.5);self.assertAlmostEqual(auc(np.array([0.,1.,2.,3.]),np.array([0,0,1,1],bool)),1.)
 
 if __name__=="__main__":unittest.main()

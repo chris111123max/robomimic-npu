@@ -33,7 +33,7 @@ def metrics(q1,q2,target,success,progress):
 
 @torch.no_grad()
 def evaluate(model,datasets,device,horizon=700):
-    model.eval(); output={}
+    was_training=model.training;model.eval(); output={}
     for policy in POLICIES:
         q1s=[];q2s=[];targets=[];labels=[];progress=[]
         for e in datasets[policy].episodes:
@@ -43,4 +43,5 @@ def evaluate(model,datasets,device,horizon=700):
             targets.append(e.returns);labels.append(np.full(e.length,e.success));progress.append(np.arange(e.length)/float(horizon))
         output[policy]=metrics(np.concatenate(q1s),np.concatenate(q2s),np.concatenate(targets),np.concatenate(labels).astype(bool),np.concatenate(progress))
     output["balanced_aggregate"]={key:float(np.mean([output[p][key] for p in POLICIES])) for key in ("q1_mse","q2_mse","twin_mean_mse","mae")}
+    model.train(was_training)
     return output

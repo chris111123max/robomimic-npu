@@ -68,6 +68,7 @@ def main():
         sampler=SequenceSampler(train,config["legacy_replay_burn_in_length"],config["learning_sequence_length"],config["horizon"],seed,"multi_q" in label)
         best=float("inf");last_metric=None
         for step in range(1,int(config["max_updates"])+1):
+            model.train()
             started=time.perf_counter();batch=sampler.sample(config["sequence_batch_size"]);sample_ms=(time.perf_counter()-started)*1000
             stats=numpy_batch_stats(batch)
             if not all(item["isfinite"] for item in stats.values()):dump_failure(out,step,"input",batch,{"tensor_statistics":stats},model,opt)
@@ -92,7 +93,7 @@ def main():
             bad_state=optimizer_non_finite(opt)
             if bad_state:dump_failure(out,step,"optimizer_state",batch,{"non_finite_optimizer_state":bad_state},model,opt)
             total_ms=sample_ms+forward_ms+backward_ms+optimizer_ms
-            row={"step":step,"q1_loss":float(loss1),"q2_loss":float(loss2),"sample_ms":sample_ms,"forward_ms":forward_ms,"backward_ms":backward_ms,"optimizer_ms":optimizer_ms,"effective_timesteps":effective,"effective_timesteps_per_second":effective*1000.0/total_ms,"sampling":sampler.proportions(),**grad,**parameters}
+            row={"step":step,"model_training":bool(model.training),"q1_loss":float(loss1),"q2_loss":float(loss2),"sample_ms":sample_ms,"forward_ms":forward_ms,"backward_ms":backward_ms,"optimizer_ms":optimizer_ms,"effective_timesteps":effective,"effective_timesteps_per_second":effective*1000.0/total_ms,"sampling":sampler.proportions(),**grad,**parameters}
             if step%int(config["eval_interval"])==0 or step==int(config["max_updates"]):
                 evaluation=evaluate(model,val,device,config["horizon"])
                 try:finite_metrics(evaluation)
