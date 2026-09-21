@@ -7,6 +7,17 @@ import torch
 from history_critic import load_checkpoint
 from sequence_dataset import load_splits,previous_actions,POLICIES
 
+def select_device(name):
+    name=str(name)
+    if name.startswith("npu"):
+        try:
+            import torch_npu  # noqa: F401
+        except ImportError as exc:
+            raise RuntimeError("NPU requested but torch_npu cannot be imported") from exc
+        if not hasattr(torch,"npu") or not torch.npu.is_available():raise RuntimeError("NPU requested but unavailable")
+        torch.npu.set_device(name)
+    return torch.device(name)
+
 def neighborhood_report(features,targets,progress,success,k):
     scale=np.maximum(features.std(0,keepdims=True),1e-6);x=(features-features.mean(0,keepdims=True))/scale
     values=[]; progress_spread=[]; success_mismatch=[]
@@ -17,7 +28,7 @@ def neighborhood_report(features,targets,progress,success,k):
             "mean_absolute_progress_gap":float(np.mean(progress_spread)),
             "success_label_mismatch_rate":float(np.mean(success_mismatch))}
 def main():
-    p=argparse.ArgumentParser();p.add_argument("--config",required=True);p.add_argument("--checkpoint",required=True);p.add_argument("--output",required=True);p.add_argument("--device",default="cpu");p.add_argument("--max-samples",type=int,default=2048);p.add_argument("--neighbors",type=int,default=16);a=p.parse_args();c=json.loads(Path(a.config).read_text());device=torch.device(a.device)
+    p=argparse.ArgumentParser();p.add_argument("--config",required=True);p.add_argument("--checkpoint",required=True);p.add_argument("--output",required=True);p.add_argument("--device",default="cpu");p.add_argument("--max-samples",type=int,default=2048);p.add_argument("--neighbors",type=int,default=16);a=p.parse_args();c=json.loads(Path(a.config).read_text());device=select_device(a.device)
     _,val=load_splits(c["dataset_root"],range(c["train_seed_start"],c["train_seed_end"]+1),range(c["val_seed_start"],c["val_seed_end"]+1),c["gamma"]);model,_=load_checkpoint(a.checkpoint,c,device);model.eval();rows=[]
     with torch.no_grad():
         for policy in POLICIES:

@@ -17,6 +17,17 @@ def args():
 def write(path,value): path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value,indent=2,sort_keys=True)+"\n")
 def append(path,value):
     with path.open("a") as f:f.write(json.dumps(value,sort_keys=True)+"\n")
+def select_device(name):
+    name=str(name)
+    if name.startswith("npu"):
+        try:
+            import torch_npu  # noqa: F401 - registers the Ascend device with PyTorch
+        except ImportError as exc:
+            raise RuntimeError("NPU requested but torch_npu cannot be imported") from exc
+        if not hasattr(torch,"npu") or not torch.npu.is_available():
+            raise RuntimeError("NPU requested but torch.npu is unavailable")
+        torch.npu.set_device(name)
+    return torch.device(name)
 def synchronize(device):
     if device.type=="npu" and hasattr(torch,"npu"): torch.npu.synchronize(device)
 def main():
@@ -24,7 +35,8 @@ def main():
     for k,v in (("dataset_root",a.dataset_root),("output_root",a.output_root),("max_updates",a.max_updates)):
         if v is not None:config[k]=v
     if config["sequence_batch_size"]*config["learning_sequence_length"]!=256:raise RuntimeError("effective supervised batch must equal Stage2.1 batch 256")
-    seed=config["training_seed"];random.seed(seed);np.random.seed(seed);torch.manual_seed(seed);device=torch.device(a.device)
+    device=select_device(a.device);seed=config["training_seed"];random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
+    if device.type=="npu":torch.npu.manual_seed_all(seed)
     train,val=load_splits(config["dataset_root"],range(config["train_seed_start"],config["train_seed_end"]+1),range(config["val_seed_start"],config["val_seed_end"]+1),config["gamma"])
     run=Path(config["output_root"])/(a.run_id or f"stage2_2_history_critic_{datetime.now():%Y%m%d_%H%M%S}")
     if run.exists():raise FileExistsError(run)
