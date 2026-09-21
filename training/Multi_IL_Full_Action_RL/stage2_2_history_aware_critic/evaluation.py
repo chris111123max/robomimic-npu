@@ -5,7 +5,13 @@ import torch
 from sequence_dataset import POLICIES, previous_actions
 
 def ranks(x):
-    order=np.argsort(x,kind="mergesort"); out=np.empty(len(x),float); out[order]=np.arange(len(x)); return out
+    """Zero-based average ranks with exact tie handling."""
+    x=np.asarray(x);order=np.argsort(x,kind="mergesort");out=np.empty(len(x),float);start=0
+    while start<len(x):
+        end=start+1
+        while end<len(x) and x[order[end]]==x[order[start]]:end+=1
+        out[order[start:end]]=(start+end-1)/2.0;start=end
+    return out
 def corr(a,b):
     return None if len(a)<2 or np.std(a)==0 or np.std(b)==0 else float(np.corrcoef(a,b)[0,1])
 def auc(scores,labels):

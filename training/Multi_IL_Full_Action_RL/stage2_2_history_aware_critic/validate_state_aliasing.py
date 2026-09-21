@@ -39,6 +39,7 @@ def main():
     rng=np.random.default_rng(c["training_seed"]);rows=[rows[i] for i in rng.choice(len(rows),min(len(rows),a.max_samples),replace=False)];obs=np.stack([r[0] for r in rows]);act=np.stack([r[1] for r in rows]);z=np.stack([r[2] for r in rows]);target=np.array([r[3] for r in rows])
     progress=np.array([r[4] for r in rows]);success=np.array([r[6] for r in rows],bool)
     report={"samples":len(rows),"neighbors":a.neighbors,
+            "interpretation_warning":"The learned history latent is optimized using MC-return supervision. Lower latent-neighborhood target variance is auxiliary evidence only and cannot independently establish causal state aliasing.",
             "memoryless_neighborhood":neighborhood_report(np.c_[obs,act],target,progress,success,a.neighbors),
             "history_neighborhood":neighborhood_report(np.c_[z,act],target,progress,success,a.neighbors)}
     report["mean_target_variance_ratio_history_over_memoryless"]=report["history_neighborhood"]["target_variance"]["mean"]/max(report["memoryless_neighborhood"]["target_variance"]["mean"],1e-12)

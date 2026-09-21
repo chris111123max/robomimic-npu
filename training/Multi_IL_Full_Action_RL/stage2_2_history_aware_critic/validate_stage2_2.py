@@ -21,10 +21,20 @@ def main():
  subprocess.run([sys.executable,str(HERE/"validate_temporal_alignment.py")],check=True)
  with tempfile.TemporaryDirectory() as d:
   root=Path(d);data=root/"data";out=root/"out";fixture(data)
+  subprocess.run([sys.executable,str(HERE/"audit_stage2_2_dataset.py"),"--dataset-root",str(data)],check=True,stdout=subprocess.DEVNULL)
+  bad=root/"bad";fixture(bad)
+  with h5py.File(bad/"bc_rnn"/"transitions.hdf5","r+") as f:
+   for episode in f["episodes"].values():episode["actions"][0,0]=np.nan
+  failed=subprocess.run([sys.executable,str(HERE/"audit_stage2_2_dataset.py"),"--dataset-root",str(bad)],stdout=subprocess.DEVNULL)
+  assert failed.returncode!=0
+  bad_train=subprocess.run([sys.executable,str(HERE/"train_stage2_2.py"),"--dataset-root",str(bad),"--output-root",str(out),"--device","cpu","--mode","rnn_q","--max-updates","1","--run-id","nan_failfast"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+  assert bad_train.returncode!=0;assert list((out/"nan_failfast"/"rnn_q"/"diagnostics").glob("failure_step_*.json"))
   subprocess.run([sys.executable,str(HERE/"train_stage2_2.py"),"--dataset-root",str(data),"--output-root",str(out),"--device","cpu","--mode","both","--max-updates","3","--run-id","smoke"],check=True)
+  subprocess.run([sys.executable,str(HERE/"train_stage2_2.py"),"--dataset-root",str(data),"--output-root",str(out),"--device","cpu","--mode","matched_both","--max-updates","2","--run-id","matched_smoke"],check=True)
   run=out/"smoke"
   for group in ("rnn_q","multi_q"):
    assert (run/group/"checkpoints"/"best.pth").is_file();assert (run/group/"final_validation.json").is_file();assert (run/group/"performance.json").is_file()
   ratios=json.loads((run/"multi_q"/"sampling_audit.json").read_text())["ratios"];assert max(ratios.values())-min(ratios.values())<1e-12
- print(json.dumps({"status":"PASS","scope":"synthetic CPU temporal + rnn_q/multi_q smoke"}))
+  for group in ("matched_rnn_q","matched_multi_q"):assert (out/"matched_smoke"/group/"checkpoints"/"best.pth").is_file()
+ print(json.dumps({"status":"PASS","scope":"synthetic CPU audit/fail-fast contracts + recurrent and matched smokes"}))
 if __name__=="__main__":main()

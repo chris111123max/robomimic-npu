@@ -28,6 +28,12 @@ class HistoryQNetwork(nn.Module):
         encoded, state = self.lstm(self._tokens(observations, previous_actions, progress), state)
         return encoded, state
 
+    def diagnostic_forward(self, observations, previous_actions, progress, current_actions):
+        token = self._tokens(observations, previous_actions, progress)
+        context, state = self.lstm(token)
+        q = self.q_from_context(context, current_actions)
+        return q, {"token_embedding":token,"context":context,"final_hidden":state[0],"final_cell":state[1]}
+
     def q_from_context(self, context, action):
         if action.ndim == context.ndim:
             return self.q_head(torch.cat((context, action), dim=-1))
@@ -73,26 +79,59 @@ class HistoryAwareTwinQ(nn.Module):
         q2, _ = self.q2.forward_sequence(observations, previous_actions, progress, actions, burn_in=burn_in)
         return q1, q2
 
+    def diagnostic_forward(self,observations,previous_actions,progress,actions):
+        q1,d1=self.q1.diagnostic_forward(observations,previous_actions,progress,actions)
+        q2,d2=self.q2.diagnostic_forward(observations,previous_actions,progress,actions)
+        return (q1,q2),(d1,d2)
+
+
+class MatchedMemorylessQ(nn.Module):
+    """Matched control: current token plus candidate action, without history."""
+    def __init__(self,obs_dim=59,action_dim=14,hidden_dims=(240,256)):
+        super().__init__();self.obs_dim=int(obs_dim);self.action_dim=int(action_dim)
+        first,second=map(int,hidden_dims)
+        self.feature_encoder=nn.Sequential(nn.Linear(self.obs_dim+self.action_dim+1+self.action_dim,first),nn.LayerNorm(first),nn.ReLU(),nn.Linear(first,second),nn.LayerNorm(second),nn.ReLU())
+        self.q_head=nn.Linear(second,1)
+
+    def forward_sequence(self,observations,previous_actions,progress,actions):
+        return self.q_head(self.feature_encoder(torch.cat((observations,previous_actions,progress,actions),-1)))
+
+    def diagnostic_forward(self,observations,previous_actions,progress,actions):
+        feature=self.feature_encoder(torch.cat((observations,previous_actions,progress,actions),-1));q=self.q_head(feature)
+        return q,{"token_embedding":feature,"context":feature,"final_hidden":feature[:,-1:],"final_cell":feature[:,-1:]}
+
+
+class MatchedMemorylessTwinQ(nn.Module):
+    def __init__(self,**kwargs):super().__init__();self.q1=MatchedMemorylessQ(**kwargs);self.q2=MatchedMemorylessQ(**kwargs)
+    def forward_sequence(self,observations,previous_actions,progress,actions,burn_in=0):
+        del burn_in;return self.q1.forward_sequence(observations,previous_actions,progress,actions),self.q2.forward_sequence(observations,previous_actions,progress,actions)
+    def diagnostic_forward(self,observations,previous_actions,progress,actions):
+        q1,d1=self.q1.diagnostic_forward(observations,previous_actions,progress,actions);q2,d2=self.q2.diagnostic_forward(observations,previous_actions,progress,actions);return (q1,q2),(d1,d2)
+
 
 def architecture_config(config):
     return {key: config[key] for key in ("obs_dim", "action_dim", "token_dim", "lstm_hidden_dim",
-            "lstm_layers", "head_hidden_dim", "burn_in_length", "learning_sequence_length")}
+            "lstm_layers", "head_hidden_dim", "legacy_replay_burn_in_length", "learning_sequence_length","history_semantics","matched_hidden_dims")}
 
 
-def build_critic(config, device=None):
-    model = HistoryAwareTwinQ(obs_dim=config["obs_dim"], action_dim=config["action_dim"],
-        token_dim=config["token_dim"], hidden_dim=config["lstm_hidden_dim"],
-        layers=config["lstm_layers"], head_hidden_dim=config["head_hidden_dim"])
+def build_critic(config, device=None, critic_type="history_aware_twin_q"):
+    if critic_type=="matched_memoryless_twin_q":
+        model=MatchedMemorylessTwinQ(obs_dim=config["obs_dim"],action_dim=config["action_dim"],hidden_dims=config["matched_hidden_dims"])
+    elif critic_type=="history_aware_twin_q":
+        model = HistoryAwareTwinQ(obs_dim=config["obs_dim"], action_dim=config["action_dim"],token_dim=config["token_dim"], hidden_dim=config["lstm_hidden_dim"],layers=config["lstm_layers"], head_hidden_dim=config["head_hidden_dim"])
+    else:raise ValueError(f"unknown critic_type {critic_type}")
     return model if device is None else model.to(device)
 
 
-def checkpoint_payload(model, optimizer, config, step, metric):
-    return {"stage_version":"2.2", "critic_type":"history_aware_twin_q",
+def checkpoint_payload(model, optimizer, config, step, checkpoint_metric, best_metric=None,critic_type="history_aware_twin_q"):
+    return {"stage_version":"2.2", "critic_type":critic_type,
             "architecture":architecture_config(config), "critic_state_dict":model.state_dict(),
-            "optimizer_state_dict":optimizer.state_dict(), "step":int(step), "validation_metric":float(metric),
+            "optimizer_state_dict":optimizer.state_dict(), "step":int(step),"checkpoint_step":int(step),
+            "checkpoint_validation_metric":None if checkpoint_metric is None else float(checkpoint_metric),
+            "best_validation_metric":None if best_metric is None else float(best_metric),
             "normalization":copy.deepcopy(config["normalization"]), "token_schema":list(config["token_schema"]),
             "horizon":int(config["horizon"]), "training_target":config["training_target"],
-            "loss":config["loss"], "dataset_sources":{
+            "loss":config["loss"],"gamma":float(config["gamma"]),"history_semantics":config["history_semantics"], "dataset_sources":{
                 name:f'{config["dataset_root"]}/{name}/transitions.hdf5'
                 for name in ("bc_rnn","bc_transformer","bc_gmm")},
             "sampling_ratios":{"rnn_q":[1,0,0],"multi_q":[1/3,1/3,1/3]},
@@ -100,14 +139,16 @@ def checkpoint_payload(model, optimizer, config, step, metric):
             "terminated_truncated_semantics":config["terminated_truncated_semantics"]}
 
 
-def load_checkpoint(path, config, device="cpu"):
+def load_checkpoint(path, config, device="cpu",critic_type="history_aware_twin_q"):
     payload = torch.load(path, map_location=device)
-    expected = {"stage_version":"2.2", "critic_type":"history_aware_twin_q",
+    expected = {"stage_version":"2.2", "critic_type":critic_type,
                 "architecture":architecture_config(config), "normalization":config["normalization"],
-                "token_schema":config["token_schema"], "horizon":int(config["horizon"])}
+                "token_schema":config["token_schema"], "horizon":int(config["horizon"]),
+                "training_target":config["training_target"],"loss":config["loss"],"gamma":float(config["gamma"]),
+                "terminated_truncated_semantics":config["terminated_truncated_semantics"],"history_semantics":config["history_semantics"]}
     for key, value in expected.items():
         if payload.get(key) != value:
             raise RuntimeError(f"Stage2.2 checkpoint contract mismatch for {key}: {payload.get(key)!r} != {value!r}")
-    model = build_critic(config, device)
+    model = build_critic(config, device,critic_type)
     model.load_state_dict(payload["critic_state_dict"], strict=True)
     return model, payload

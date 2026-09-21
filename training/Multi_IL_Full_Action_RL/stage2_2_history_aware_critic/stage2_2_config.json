@@ -10,7 +10,8 @@
   "lstm_hidden_dim": 96,
   "lstm_layers": 1,
   "head_hidden_dim": 128,
-  "burn_in_length": 32,
+  "matched_hidden_dims": [240, 256],
+  "legacy_replay_burn_in_length": 32,
   "learning_sequence_length": 16,
   "sequence_batch_size": 16,
   "effective_training_timesteps_per_batch": 256,
@@ -29,5 +30,6 @@
   "token_schema": ["observation_t", "previous_executed_action_t", "normalized_episode_progress_t"],
   "training_target": "finite_episode_monte_carlo_return_no_bootstrap",
   "loss": "mse_q1_plus_mse_q2",
+  "history_semantics": "full_episode_prefix_unroll_learning_mask",
   "terminated_truncated_semantics": "both_end_finite_episode_no_bootstrap"
 }

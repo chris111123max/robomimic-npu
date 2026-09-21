@@ -10,6 +10,13 @@ python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/validate_t
 python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/audit_stage2_2_dataset.py
 ```
 
+Replay the two legacy failure batches without changing data:
+
+```bash
+python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/replay_stage2_2_bad_batch.py --mode rnn_q --step 1626 --dataset-root "$DATASET_ROOT" --output rnn_1626.json --dump-npz rnn_1626.npz
+python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/replay_stage2_2_bad_batch.py --mode multi_q --step 1161 --dataset-root "$DATASET_ROOT" --output multi_1161.json --dump-npz multi_1161.npz
+```
+
 After the real dataset audit, run a short sequential smoke on one device:
 
 ```bash
@@ -17,5 +24,8 @@ python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/train_stag
 python training/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/train_stage2_2.py --device npu:0 --mode multi_q --max-updates 10 --run-id smoke_multi_<timestamp>
 ```
 
-Do not start a 50K formal run until both smokes, checkpoint round-trip, sampling
-audit, shared holdout evaluation, progress slices, and aliasing report pass.
+After the two 10-update smokes, run at most 2000 stability updates. A 50K run is
+forbidden until the finite audit, exact replay, both smokes, all finite guards,
+checkpoint round-trip, sampling audit, shared holdout evaluation and the 2K
+stability run pass. Train the matched controls with `--mode matched_rnn_q` or
+`--mode matched_multi_q`; they are Stage2.2-only experimental controls.
