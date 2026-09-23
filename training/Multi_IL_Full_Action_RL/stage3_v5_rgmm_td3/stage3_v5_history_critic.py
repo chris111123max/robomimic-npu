@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 import torch
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2_2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_2_history_aware_critic"
@@ -35,17 +34,10 @@ def previous_actions(actions, episode_steps):
     return result
 
 
-def _packed_context(network, observations, previous, progress, sequence_lengths):
-    """Run one recurrent branch over right-padded episode prefixes."""
-    encoded = network._tokens(observations, previous, progress)
-    packed = pack_padded_sequence(
-        encoded, sequence_lengths.detach().cpu(), batch_first=True,
-        enforce_sorted=False)
-    packed_context, _ = network.lstm(packed)
-    context, _ = pad_packed_sequence(
-        packed_context, batch_first=True, total_length=observations.shape[1])
+def _padded_context(network, observations, previous, progress):
+    """Dense full-prefix unroll; right padding is ignored by final-state gathering."""
+    context, _ = network.encode_history(observations, previous, progress)
     return context
-
 
 def encode_replay_contexts(critic, observations, actions, episode_steps,
                            horizon, next_observations=None, sequence_lengths=None):
@@ -88,8 +80,8 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
         sequence_lengths = sequence_lengths + 1
     progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
     return (
-        _packed_context(critic.q1, tokens, prior, progress, sequence_lengths),
-        _packed_context(critic.q2, tokens, prior, progress, sequence_lengths),
+        _padded_context(critic.q1, tokens, prior, progress),
+        _padded_context(critic.q2, tokens, prior, progress),
     )
 
 
@@ -100,75 +92,6 @@ def final_contexts(contexts, sequence_lengths):
     rows = torch.arange(len(lengths), device=contexts[0].device)
     indices = lengths - 1
     return contexts[0][rows, indices], contexts[1][rows, indices]
-
-
-def _gather_tail(value, sequence_lengths, width):
-    lengths = torch.as_tensor(sequence_lengths, dtype=torch.long, device=value.device)
-    if torch.any(lengths < int(width)):
-        raise ValueError("Critic sampling prefix is shorter than the gradient window")
-    offsets = torch.arange(int(width), device=value.device).unsqueeze(0)
-    indices = lengths.unsqueeze(1) - int(width) + offsets
-    expand = indices
-    for _ in range(value.ndim - 2):
-        expand = expand.unsqueeze(-1)
-    expand = expand.expand(value.shape[0], int(width), *value.shape[2:])
-    return torch.gather(value, 1, expand)
-
-
-def _detached_prefix_state(network, observations, previous, progress,
-                           prefix_lengths):
-    """Reconstruct exact prefix state without retaining a backward graph."""
-    lengths = torch.as_tensor(prefix_lengths, dtype=torch.long,
-                              device=observations.device)
-    batch = observations.shape[0]
-    layers = network.lstm.num_layers
-    hidden = network.lstm.hidden_size
-    h = torch.zeros((layers, batch, hidden), dtype=observations.dtype,
-                    device=observations.device)
-    c = torch.zeros_like(h)
-    active = lengths > 0
-    if not bool(active.any()):
-        return h, c
-    max_prefix = int(lengths.max().item())
-    with torch.no_grad():
-        encoded = network._tokens(
-            observations[active, :max_prefix],
-            previous[active, :max_prefix],
-            progress[active, :max_prefix])
-        packed = pack_padded_sequence(
-            encoded, lengths[active].detach().cpu(), batch_first=True,
-            enforce_sorted=False)
-        _, state = network.lstm(packed)
-    h[:, active] = state[0].detach()
-    c[:, active] = state[1].detach()
-    return h, c
-
-
-def final_contexts_with_detached_prefix(critic, observations, actions,
-                                        episode_steps, horizon,
-                                        sequence_lengths, gradient_window):
-    """Full-history final states with gradients only through the tail window.
-
-    Prefix tokens reconstruct the Stage2.2 recurrent state under no_grad.
-    Only the final gradient_window tokens retain a backward graph.
-    """
-    lengths = torch.as_tensor(sequence_lengths, dtype=torch.long,
-                              device=observations.device)
-    width = int(gradient_window)
-    previous = previous_actions(actions, episode_steps)
-    progress = episode_steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
-    prefix_lengths = lengths - width
-    tail_obs = _gather_tail(observations, lengths, width)
-    tail_prev = _gather_tail(previous, lengths, width)
-    tail_progress = _gather_tail(progress, lengths, width)
-    finals = []
-    for network in (critic.q1, critic.q2):
-        state = _detached_prefix_state(
-            network, observations, previous, progress, prefix_lengths)
-        tail_context, _ = network.encode_history(
-            tail_obs, tail_prev, tail_progress, state)
-        finals.append(tail_context[:, -1])
-    return tuple(finals)
 
 
 def component_mean_q(critic, contexts, distribution, action_scale, action_offset,
