@@ -318,8 +318,19 @@ class RecurrentGMMTD3:
         # Replay guarantees starts at step 0,10,...; no internal reset exists
         # within this window. A single native RNN call retains BPTT gradients.
         with self.profiler.measure("actor_forward_ms", device=True):
-            distribution = self.actor.forward_train(
+            sequence_distribution = self.actor.forward_train(
                 flat_to_obs(b["observations"]), rnn_init_state=None, return_state=False)
+            # The Actor reset block and the Critic sliding window coincide only
+            # at the block's final transition. Keep Actor BPTT over all 10
+            # observations, but construct the RL objective from that final
+            # distribution so the Critic sees exactly the Stage2.2 horizon-10
+            # context used during pretraining.
+            base = sequence_distribution.component_distribution.base_dist
+            final_distribution = torch.distributions.MixtureSameFamily(
+                torch.distributions.Categorical(
+                    logits=sequence_distribution.mixture_distribution.logits[:, -1]),
+                torch.distributions.Independent(
+                    torch.distributions.Normal(base.loc[:, -1], base.scale[:, -1]), 1))
         for parameter in self.critic.parameters():
             parameter.requires_grad_(False)
         try:
@@ -328,14 +339,15 @@ class RecurrentGMMTD3:
                     contexts = encode_replay_contexts(
                         self.critic, b["observations"], b["actions"],
                         b["episode_steps"], self.config["horizon"])
+                    final_contexts = (contexts[0][:, -1], contexts[1][:, -1])
                     expected, q1, _, tensors, _ = component_mean_q(
-                        self.critic, contexts, distribution,
+                        self.critic, final_contexts, final_distribution,
                         self.action_scale, self.action_offset, twin_min=False)
                 else:
                     contexts = None
-                    expected, q1, tensors, _ = full_sequence_component_mean_q(
-                        self.critic, b["observations"], distribution,
-                        self.action_scale, self.action_offset)
+                    expected, q1, tensors, _ = self._expected_q(
+                        self.critic, b["observations"][:, -1],
+                        final_distribution, twin_min=False)
             actor_rl = -expected.mean()
             if not torch.isfinite(actor_rl):
                 raise FloatingPointError("Non-finite Stage3-v5 Actor loss")
@@ -428,20 +440,36 @@ class RecurrentGMMTD3:
 
     @torch.no_grad()
     def q_values_for_episode(self, episode):
-        states = torch.as_tensor(episode["observations"], dtype=torch.float32,
-                                 device=self.device)
-        actions = torch.as_tensor(episode["actions"], dtype=torch.float32,
-                                  device=self.device)
+        states_np = np.asarray(episode["observations"], dtype=np.float32)
+        actions_np = np.asarray(episode["actions"], dtype=np.float32)
+        states = torch.as_tensor(states_np, dtype=torch.float32, device=self.device)
+        actions = torch.as_tensor(actions_np, dtype=torch.float32, device=self.device)
         if hasattr(self.critic, "encode_history"):
-            steps = torch.as_tensor(
-                episode.get("episode_steps", np.arange(len(actions))),
-                dtype=torch.long, device=self.device).reshape(1, -1)
+            length = len(actions_np); context_length = int(
+                self.config["recurrent_replay"]["critic_context_length"])
+            obs_windows = np.zeros((length, context_length, 59), np.float32)
+            action_windows = np.zeros((length, context_length, 14), np.float32)
+            step_windows = np.zeros((length, context_length), np.int64)
+            final_indices = np.empty(length, np.int64)
+            episode_steps = np.asarray(
+                episode.get("episode_steps", np.arange(length)), dtype=np.int64)
+            for target in range(length):
+                start = max(0, target - context_length + 1)
+                n = target - start + 1
+                obs_windows[target, :n] = states_np[start:target + 1]
+                action_windows[target, :n] = actions_np[start:target + 1]
+                step_windows[target, :n] = episode_steps[start:target + 1]
+                final_indices[target] = n - 1
             contexts = encode_replay_contexts(
-                self.critic, states.unsqueeze(0), actions.unsqueeze(0), steps,
+                self.critic,
+                torch.as_tensor(obs_windows, device=self.device),
+                torch.as_tensor(action_windows, device=self.device),
+                torch.as_tensor(step_windows, device=self.device),
                 self.config["horizon"])
-            q1, q2 = self.critic.q_from_context(
-                contexts, actions.unsqueeze(0))
-            q1, q2 = q1[0], q2[0]
+            rows = torch.arange(length, device=self.device)
+            indices = torch.as_tensor(final_indices, device=self.device)
+            final_contexts = (contexts[0][rows, indices], contexts[1][rows, indices])
+            q1, q2 = self.critic.q_from_context(final_contexts, actions)
         else:
             q1, q2 = self.critic(states, actions)
         return q1.cpu().numpy().reshape(-1), q2.cpu().numpy().reshape(-1)
