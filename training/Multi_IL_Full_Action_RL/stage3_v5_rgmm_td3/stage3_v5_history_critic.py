@@ -68,10 +68,24 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
     else:
         if next_observations.shape != observations.shape:
             raise ValueError("next_observations must match observations")
-        tokens = next_observations
-        # At successor state t+1, the previous executed action is exactly a_t.
-        prior = actions
-        steps = episode_steps + 1
+        # Exact successor history:
+        #   (o_0, 0), (o_1, a_0), ... , (o_{t+1}, a_t)
+        # rather than the old shifted window that dropped the episode-start token.
+        batch, time_steps = observations.shape[:2]
+        tokens = torch.zeros(
+            (batch, time_steps + 1, observations.shape[-1]),
+            dtype=observations.dtype, device=observations.device)
+        prior = torch.zeros(
+            (batch, time_steps + 1, actions.shape[-1]),
+            dtype=actions.dtype, device=actions.device)
+        steps = torch.zeros(
+            (batch, time_steps + 1), dtype=episode_steps.dtype,
+            device=episode_steps.device)
+        tokens[:, 0] = observations[:, 0]
+        tokens[:, 1:] = next_observations
+        prior[:, 1:] = actions
+        steps[:, 1:] = episode_steps + 1
+        sequence_lengths = sequence_lengths + 1
     progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
     return (
         _packed_context(critic.q1, tokens, prior, progress, sequence_lengths),
