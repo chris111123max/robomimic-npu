@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train Stage2.2 with full-prefix semantics and mandatory finite guards."""
+"""Train Stage2.2 with actor-aligned 10-step Critic history and finite guards."""
 from __future__ import annotations
 import argparse,copy,json,random,time
 from datetime import datetime
@@ -53,7 +53,8 @@ def main():
         config["resume_checkpoint"]=str(Path(a.resume_checkpoint).resolve())
         config["resume_sampler_restore"]="deterministic_fast_forward_from_training_seed"
     config["periodic_checkpoint_interval"]=int(a.checkpoint_interval)
-    if config["history_semantics"]!="full_episode_prefix_unroll_learning_mask":raise RuntimeError("unsupported history semantics")
+    if config["history_semantics"]!="sliding_horizon_10_zero_state_final_step_supervision":raise RuntimeError("unsupported history semantics")
+    if int(config["recurrent_context_length"])!=10:raise RuntimeError("Stage2.2 Critic context must be 10 steps")
     device=select_device(a.device);seed=int(config["training_seed"]);random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
     if device.type=="npu":torch.npu.manual_seed_all(seed)
     train,val=load_splits(config["dataset_root"],range(config["train_seed_start"],config["train_seed_end"]+1),range(config["val_seed_start"],config["val_seed_end"]+1),config["gamma"])
@@ -76,7 +77,7 @@ def main():
         else:
             model=build_critic(config,device,kind);model.load_state_dict(copy.deepcopy(initial_states[kind]))
         opt=torch.optim.AdamW(model.parameters(),lr=config["critic_lr"],weight_decay=config["weight_decay"])
-        sampler=SequenceSampler(train,config["legacy_replay_burn_in_length"],config["learning_sequence_length"],config["horizon"],seed,"multi_q" in label)
+        sampler=SequenceSampler(train,config["legacy_replay_burn_in_length"],config["recurrent_context_length"],config["horizon"],seed,"multi_q" in label)
         best=float("inf");last_metric=None;start_step=1
         if resume_payload is not None:
             opt.load_state_dict(resume_payload["optimizer_state_dict"])
@@ -118,7 +119,7 @@ def main():
             total_ms=sample_ms+forward_ms+backward_ms+optimizer_ms
             row={"step":step,"model_training":bool(model.training),"q1_loss":float(loss1),"q2_loss":float(loss2),"sample_ms":sample_ms,"forward_ms":forward_ms,"backward_ms":backward_ms,"optimizer_ms":optimizer_ms,"effective_timesteps":effective,"effective_timesteps_per_second":effective*1000.0/total_ms,"sampling":sampler.proportions(),**grad,**parameters}
             if step%int(config["eval_interval"])==0 or step==int(config["max_updates"]):
-                evaluation=evaluate(model,val,device,config["horizon"])
+                evaluation=evaluate(model,val,device,config["horizon"],config["recurrent_context_length"])
                 try:finite_metrics(evaluation)
                 except FloatingPointError as exc:dump_failure(out,step,"validation",batch,{"error":str(exc),"validation":evaluation},model,opt)
                 metric=evaluation["bc_rnn"]["twin_mean_mse"] if "rnn_q" in label and "multi_q" not in label else evaluation["balanced_aggregate"]["twin_mean_mse"]
@@ -130,8 +131,8 @@ def main():
             append(out/"train_metrics.jsonl",row)
         torch.save(checkpoint_payload(model,opt,config,config["max_updates"],last_metric,best,kind),out/"checkpoints"/"last.pth")
         best_payload=torch.load(out/"checkpoints"/"best.pth",map_location=device);model.load_state_dict(best_payload["critic_state_dict"],strict=True)
-        final=evaluate(model,val,device,config["horizon"]);finite_metrics(final);write(out/"final_validation.json",final);write(out/"sampling_audit.json",{"counts":sampler.counts,"ratios":sampler.proportions()})
+        final=evaluate(model,val,device,config["horizon"],config["recurrent_context_length"]);finite_metrics(final);write(out/"final_validation.json",final);write(out/"sampling_audit.json",{"counts":sampler.counts,"ratios":sampler.proportions()})
         peak=torch.npu.max_memory_allocated(device) if device.type=="npu" else 0
-        write(out/"performance.json",{"q1_parameters":sum(p.numel() for p in model.q1.parameters()),"q2_parameters":sum(p.numel() for p in model.q2.parameters()),"total_parameters":sum(p.numel() for p in model.parameters()),"peak_device_memory_bytes":int(peak),"history_semantics":config["history_semantics"],"burn_in_length":"variable_episode_prefix_from_step_0","legacy_replay_burn_in_length":config["legacy_replay_burn_in_length"],"learning_sequence_length":config["learning_sequence_length"]})
+        write(out/"performance.json",{"q1_parameters":sum(p.numel() for p in model.q1.parameters()),"q2_parameters":sum(p.numel() for p in model.q2.parameters()),"total_parameters":sum(p.numel() for p in model.parameters()),"peak_device_memory_bytes":int(peak),"history_semantics":config["history_semantics"],"recurrent_context_length":config["recurrent_context_length"],"window_initial_state":"zero","window_first_previous_action":"zero","supervision":"final_valid_transition_only","legacy_replay_burn_in_length":config["legacy_replay_burn_in_length"]})
     print(json.dumps({"status":"COMPLETE","run_dir":str(run)},indent=2))
 if __name__=="__main__":main()
