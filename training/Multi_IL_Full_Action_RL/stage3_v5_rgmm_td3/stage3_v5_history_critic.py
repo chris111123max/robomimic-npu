@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import torch
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 ROOT = Path(__file__).resolve().parents[3]
 STAGE2_2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_2_history_aware_critic"
@@ -25,24 +26,41 @@ def load_stage2_2_critic_checkpoint(path, device):
 
 
 def previous_actions(actions, episode_steps):
-    """Build a_(t-1) for a contiguous replay window without crossing resets."""
+    """Build exact a_(t-1) for episode-prefix replay."""
     if actions.ndim != 3 or episode_steps.shape != actions.shape[:2]:
         raise ValueError("History Critic expects actions [B,T,A] and steps [B,T]")
     result = torch.zeros_like(actions)
     result[:, 1:] = actions[:, :-1]
-    # A sampled window can start after step zero. Its unavailable predecessor is
-    # deliberately zero-initialized, matching the zero recurrent state used at
-    # the beginning of the fixed 11-step Stage3-v5 context. True episode starts
-    # are also exactly zero by the Stage2.2 token contract.
     result = result.masked_fill(episode_steps.eq(0).unsqueeze(-1), 0.0)
     return result
 
 
+def _packed_context(network, observations, previous, progress, sequence_lengths):
+    """Run one recurrent branch over right-padded episode prefixes."""
+    encoded = network._tokens(observations, previous, progress)
+    packed = pack_padded_sequence(
+        encoded, sequence_lengths.detach().cpu(), batch_first=True,
+        enforce_sorted=False)
+    packed_context, _ = network.lstm(packed)
+    context, _ = pad_packed_sequence(
+        packed_context, batch_first=True, total_length=observations.shape[1])
+    return context
+
+
 def encode_replay_contexts(critic, observations, actions, episode_steps,
-                           horizon, next_observations=None):
-    """Encode current or successor replay histories with Stage2.2 token semantics."""
+                           horizon, next_observations=None, sequence_lengths=None):
+    """Encode current or successor histories using Stage2.2 full-prefix semantics."""
     if observations.ndim != 3 or actions.ndim != 3:
         raise ValueError("History Critic replay inputs must be rank-three sequences")
+    if sequence_lengths is None:
+        sequence_lengths = torch.full(
+            (observations.shape[0],), observations.shape[1],
+            dtype=torch.long, device=observations.device)
+    else:
+        sequence_lengths = torch.as_tensor(
+            sequence_lengths, dtype=torch.long, device=observations.device)
+    if torch.any(sequence_lengths <= 0) or torch.any(sequence_lengths > observations.shape[1]):
+        raise ValueError("Invalid full-prefix sequence lengths")
     if next_observations is None:
         tokens = observations
         prior = previous_actions(actions, episode_steps)
@@ -51,12 +69,23 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
         if next_observations.shape != observations.shape:
             raise ValueError("next_observations must match observations")
         tokens = next_observations
-        # next_observation_t is conditioned on the action executed at t.
+        # At successor state t+1, the previous executed action is exactly a_t.
         prior = actions
         steps = episode_steps + 1
     progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
-    contexts, _ = critic.encode_history(tokens, prior, progress)
-    return contexts
+    return (
+        _packed_context(critic.q1, tokens, prior, progress, sequence_lengths),
+        _packed_context(critic.q2, tokens, prior, progress, sequence_lengths),
+    )
+
+
+def final_contexts(contexts, sequence_lengths):
+    """Gather each row's final valid recurrent state from a padded prefix batch."""
+    lengths = torch.as_tensor(sequence_lengths, dtype=torch.long,
+                              device=contexts[0].device)
+    rows = torch.arange(len(lengths), device=contexts[0].device)
+    indices = lengths - 1
+    return contexts[0][rows, indices], contexts[1][rows, indices]
 
 
 def component_mean_q(critic, contexts, distribution, action_scale, action_offset,
