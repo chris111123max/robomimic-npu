@@ -18,8 +18,8 @@ from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean
                                  single_expected_q, sequence_expected_q,
                                  full_sequence_component_mean_q)
 from stage3_v5_history_critic import (component_mean_q, encode_replay_contexts,
-                                      final_contexts, load_stage2_2_critic_checkpoint,
-                                      sampled_q)
+                                      final_contexts, final_contexts_with_detached_prefix,
+                                      load_stage2_2_critic_checkpoint, sampled_q)
 from stage3_v5_profile import StageProfiler
 
 
@@ -223,11 +223,18 @@ class RecurrentGMMTD3:
         length = int(self.config["recurrent_replay"]["critic_context_length"])
         if starts.ndim != 1:
             raise ValueError("sample_window_starts are required for target Actor alignment")
-        next_obs = np.stack([
-            np.asarray(sequence["next_observations"])[row, start:start + length]
-            for row, start in enumerate(starts)])
+        source = sequence["next_observations"]
+        if torch.is_tensor(source):
+            next_obs = torch.stack([
+                source[row, int(start):int(start) + length]
+                for row, start in enumerate(starts)])
+        else:
+            next_obs = np.stack([
+                np.asarray(source)[row, int(start):int(start) + length]
+                for row, start in enumerate(starts)])
+        steps_source = np.asarray(sequence["episode_steps"])
         steps = np.stack([
-            np.asarray(sequence["episode_steps"])[row, start:start + length]
+            steps_source[row, int(start):int(start) + length]
             for row, start in enumerate(starts)])
         return next_obs, steps
 
@@ -238,8 +245,10 @@ class RecurrentGMMTD3:
         actor_next_obs, actor_steps = self._target_actor_window(target_sequence)
         target_starts = _last_reset_starts_from_numpy(actor_steps, horizon)
         with self.profiler.measure("host_to_device_ms", device=True):
-            actor_target = torch.as_tensor(
-                actor_next_obs, dtype=torch.float32, device=self.device)
+            actor_target = (actor_next_obs.to(self.device, dtype=torch.float32)
+                            if torch.is_tensor(actor_next_obs) else
+                            torch.as_tensor(actor_next_obs, dtype=torch.float32,
+                                            device=self.device))
         distribution, _ = target_final_distribution_vectorized(
             self.target_actor, actor_target,
             horizon=horizon, starts=target_starts)
@@ -274,9 +283,14 @@ class RecurrentGMMTD3:
              target_contexts) = self.bellman_target(b, target_sequence)
         with self.profiler.measure("critic_forward_ms", device=True):
             if hasattr(self.critic, "encode_history"):
-                contexts = self._history_contexts(self.critic, target_sequence)
-                current_final = final_contexts(
-                    contexts, target_sequence["sequence_lengths"])
+                values = self._tensor_batch({
+                    key: target_sequence[key]
+                    for key in ("observations", "actions", "episode_steps")})
+                current_final = final_contexts_with_detached_prefix(
+                    self.critic, values["observations"], values["actions"],
+                    values["episode_steps"], self.config["horizon"],
+                    target_sequence["sequence_lengths"],
+                    self.config["recurrent_replay"]["critic_context_length"])
                 q1, q2 = self.critic.q_from_context(current_final, b["actions"])
             else:
                 q1, q2 = self.critic(b["observations"], b["actions"])
