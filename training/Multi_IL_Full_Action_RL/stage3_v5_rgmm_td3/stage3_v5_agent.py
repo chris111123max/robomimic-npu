@@ -18,8 +18,8 @@ from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean
                                  single_expected_q, sequence_expected_q,
                                  full_sequence_component_mean_q)
 from stage3_v5_history_critic import (component_mean_q, encode_replay_contexts,
-                                      final_contexts, final_contexts_with_detached_prefix,
-                                      load_stage2_2_critic_checkpoint, sampled_q)
+                                      final_contexts, load_stage2_2_critic_checkpoint,
+                                      sampled_q)
 from stage3_v5_profile import StageProfiler
 
 
@@ -284,14 +284,9 @@ class RecurrentGMMTD3:
              target_contexts) = self.bellman_target(b, target_sequence)
         with self.profiler.measure("critic_forward_ms", device=True):
             if hasattr(self.critic, "encode_history"):
-                values = self._tensor_batch({
-                    key: target_sequence[key]
-                    for key in ("observations", "actions", "episode_steps")})
-                current_final = final_contexts_with_detached_prefix(
-                    self.critic, values["observations"], values["actions"],
-                    values["episode_steps"], self.config["horizon"],
-                    target_sequence["sequence_lengths"],
-                    self.config["recurrent_replay"]["critic_bptt_length"])
+                contexts = self._history_contexts(self.critic, target_sequence)
+                current_final = final_contexts(
+                    contexts, target_sequence["sequence_lengths"])
                 q1, q2 = self.critic.q_from_context(current_final, b["actions"])
             else:
                 q1, q2 = self.critic(b["observations"], b["actions"])
