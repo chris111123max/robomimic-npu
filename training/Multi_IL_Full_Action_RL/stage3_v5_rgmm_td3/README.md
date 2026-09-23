@@ -25,13 +25,21 @@ Replay remains 256 transitions per Critic update: 128 offline + 128 online.
 offline total, split 43/43/42 across BC-RNN, BC-Transformer and BC-GMM, with the
 remainder rotated over time.
 
-The Critic token is `[observation_t, previous_executed_action_t, t/700]`. Each
-Stage3 update encodes the existing contiguous 11-transition replay context; the
-successor target uses the shifted next-observation window and the action executed
-at each source transition as its previous-action token. Actor-Q, target-Q,
-readiness, OOD stress, and full-episode diagnostics share this same adapter. The
-readiness thresholds, consecutive-pass rule, warm-up schedule, and unfreeze
-criteria are unchanged.
+The Critic token is `[observation_t, previous_executed_action_t, t/700]`.
+Stage3 now preserves the Stage2.2 **full episode prefix** history contract. The
+legacy 11-transition span is used only to preserve the old distribution over
+which final transition is sampled; Critic recurrence is reconstructed from
+episode step 0 through that transition. The successor target explicitly encodes
+`(o_0,0),(o_1,a_0),...,(o_{t+1},a_t)`, so the executed action advances history
+and the candidate target action still enters only the Q head. Actor-Q keeps the
+Actor's own 10-step recurrent window, but queries the Critic using full-prefix
+contexts for those same timesteps. Training TD diagnostics, readiness, OOD
+stress, and full-episode diagnostics therefore use one Critic history contract.
+The first correctness version uses dense padded full-prefix LSTM unrolls; this
+may be slower than the former 11-step Critic path and should be benchmarked on
+the Ascend server before formal training. Readiness thresholds, TD math,
+learning rates, UTD, Polyak updates, warm-up schedule, and unfreeze criteria are
+otherwise unchanged.
 
 Stage1 HDF5 replay is loaded natively from `/episodes`, retaining
 `terminated`, `truncated`, and `dones`. Both a true termination and a

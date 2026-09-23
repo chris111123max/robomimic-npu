@@ -33,29 +33,40 @@ def prepare_round_batches(offline, online, count, config, device, actor_ready,
     if profiler:
         profiler.synchronize()
     transfer_started = time.perf_counter()
-    # One transfer per field for the whole round; each optimizer still sees
-    # its own original-sized minibatch and the latest model parameters.
-    fields = {key: torch.as_tensor(np.stack([batch[key] for batch, _ in critics]),
-                                  dtype=torch.float32, device=device)
-              for key in critics[0][0]}
-    sequence_fields = {
-        key: torch.as_tensor(np.stack([seq[key] for _, seq in critics]),
-                             dtype=torch.float32, device=device)
-        for key in ("observations", "actions", "next_observations")
-    }
+    # Full-prefix batches have variable padded time dimensions across updates,
+    # so transfer each prepared critic batch independently instead of stacking
+    # different prefix lengths into one round tensor.
     prepared = []
-    for index, (_, seq) in enumerate(critics):
-        prepared.append(({key: value[index] for key, value in fields.items()},
-                         {**{key: value[index] for key, value in sequence_fields.items()},
-                          "episode_steps": seq["episode_steps"]}))
-    actor_fields = {}
-    if actors:
-        actor_fields = {key: torch.as_tensor(np.stack([batch[key] for batch in actors.values()]),
-                                            dtype=torch.long if key == "episode_steps" else torch.float32,
-                                            device=device)
-                        for key in ("observations", "actions", "episode_steps")}
-    actor_prepared = {update_index: {key: value[position] for key, value in actor_fields.items()}
-                      for position, update_index in enumerate(actors)}
+    for batch, seq in critics:
+        prepared_batch = {
+            key: torch.as_tensor(value, dtype=torch.float32, device=device)
+            for key, value in batch.items()
+        }
+        prepared_sequence = {
+            key: torch.as_tensor(seq[key], dtype=torch.float32, device=device)
+            for key in ("observations", "actions", "next_observations")
+        }
+        prepared_sequence.update({
+            "episode_steps": seq["episode_steps"],
+            "sequence_lengths": seq["sequence_lengths"],
+            "sample_window_starts": seq["sample_window_starts"],
+        })
+        prepared.append((prepared_batch, prepared_sequence))
+    actor_prepared = {}
+    for update_index, batch in actors.items():
+        prepared_actor = {
+            key: torch.as_tensor(
+                batch[key],
+                dtype=torch.long if key in ("episode_steps", "critic_episode_steps")
+                else torch.float32,
+                device=device)
+            for key in ("observations", "actions", "episode_steps",
+                        "critic_observations", "critic_actions",
+                        "critic_episode_steps")
+        }
+        prepared_actor["critic_sequence_lengths"] = batch["critic_sequence_lengths"]
+        prepared_actor["actor_window_starts"] = batch["actor_window_starts"]
+        actor_prepared[update_index] = prepared_actor
     if profiler and profiler.enabled:
         profiler.synchronize()
         name = "host_to_device_ms"

@@ -3,6 +3,7 @@ import copy
 from contextlib import contextmanager
 import random
 import numpy as np
+from stage3_v5_replay import _pad_prefix_batch, _sample_prefix_sequence_batch
 
 
 @contextmanager
@@ -46,12 +47,14 @@ def frozen_set(online, config, sample_count=256):
         return None
     seed = int(config["training_seed"]) + 734911
     rng = np.random.default_rng(seed)
-    indices = [(int(rng.integers(len(eligible))), None) for _ in range(min(256, int(sample_count)))]
-    indices = [(index, int(rng.integers(len(eligible[index]["actions"]) - length + 1)))
-               for index, _ in indices]
-    keys = ("observations", "actions", "rewards", "next_observations", "terminals", "episode_steps")
-    sequences = {key: np.stack([eligible[index][key][start:start + length]
-                                for index, start in indices]) for key in keys}
+    count = min(256, int(sample_count))
+    # Use an independent RNG exactly as before, but retain episode prefixes so
+    # readiness TD diagnostics use the same recurrent state semantics as training.
+    sequences = _pad_prefix_batch(
+        _sample_prefix_sequence_batch(eligible, rng, count, length))
+    indices = list(zip(
+        np.zeros(count, dtype=np.int64),
+        sequences["sample_window_starts"].tolist()))
     radii = rules["ood_radii"]
     count = min(128, len(indices))
     noise = np.stack([rng.uniform(-radius, radius, (count, 14)).astype(np.float32)

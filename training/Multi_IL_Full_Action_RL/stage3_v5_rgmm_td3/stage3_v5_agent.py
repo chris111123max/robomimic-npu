@@ -18,7 +18,8 @@ from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean
                                  single_expected_q, sequence_expected_q,
                                  full_sequence_component_mean_q)
 from stage3_v5_history_critic import (component_mean_q, encode_replay_contexts,
-                                      load_stage2_2_critic_checkpoint, sampled_q)
+                                      final_contexts, load_stage2_2_critic_checkpoint,
+                                      sampled_q)
 from stage3_v5_profile import StageProfiler
 
 
@@ -196,36 +197,79 @@ class RecurrentGMMTD3:
         return encode_replay_contexts(
             critic, values["observations"], values["actions"],
             values["episode_steps"], self.config["horizon"],
-            next_observations=(values["next_observations"] if successor else None))
+            next_observations=(values["next_observations"] if successor else None),
+            sequence_lengths=sequence.get("sequence_lengths"))
+
+    def _final_history_contexts(self, critic, sequence, successor=False):
+        contexts = self._history_contexts(critic, sequence, successor=successor)
+        lengths = sequence.get("sequence_lengths")
+        if lengths is None:
+            lengths = np.full(len(sequence["actions"]), sequence["actions"].shape[1],
+                              dtype=np.int64)
+        return final_contexts(contexts, lengths)
+
+    @staticmethod
+    def _final_transition_from_sequence(sequence):
+        lengths = np.asarray(sequence.get("sequence_lengths"), dtype=np.int64)
+        if lengths.ndim != 1:
+            raise ValueError("Full-prefix Critic sequence_lengths are required")
+        rows = np.arange(len(lengths)); indices = lengths - 1
+        return {key: np.asarray(sequence[key])[rows, indices]
+                for key in ("observations", "actions", "rewards", "terminals")}
+
+    def _target_actor_window(self, sequence):
+        """Recover the exact legacy 11-step target-Actor window from a full prefix."""
+        starts = np.asarray(sequence.get("sample_window_starts"), dtype=np.int64)
+        length = int(self.config["recurrent_replay"]["critic_context_length"])
+        if starts.ndim != 1:
+            raise ValueError("sample_window_starts are required for target Actor alignment")
+        source = sequence["next_observations"]
+        if torch.is_tensor(source):
+            next_obs = torch.stack([
+                source[row, int(start):int(start) + length]
+                for row, start in enumerate(starts)])
+        else:
+            next_obs = np.stack([
+                np.asarray(source)[row, int(start):int(start) + length]
+                for row, start in enumerate(starts)])
+        steps_source = np.asarray(sequence["episode_steps"])
+        steps = np.stack([
+            steps_source[row, int(start):int(start) + length]
+            for row, start in enumerate(starts)])
+        return next_obs, steps
 
     @torch.no_grad()
     def bellman_target(self, b, target_sequence):
         """Shared Case-A target for training and frozen readiness samples."""
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
-        target_starts = _last_reset_starts_from_numpy(
-            target_sequence["episode_steps"], horizon)
-        target_keys = ["next_observations"]
-        if hasattr(self.target_critic, "encode_history"):
-            target_keys += ["observations", "actions", "episode_steps"]
+        actor_next_obs, actor_steps = self._target_actor_window(target_sequence)
+        target_starts = _last_reset_starts_from_numpy(actor_steps, horizon)
         with self.profiler.measure("host_to_device_ms", device=True):
-            target = self._tensor_batch({key: target_sequence[key]
-                                         for key in target_keys})
+            actor_target = (actor_next_obs.to(self.device, dtype=torch.float32)
+                            if torch.is_tensor(actor_next_obs) else
+                            torch.as_tensor(actor_next_obs, dtype=torch.float32,
+                                            device=self.device))
         distribution, _ = target_final_distribution_vectorized(
-            self.target_actor, target["next_observations"],
+            self.target_actor, actor_target,
             horizon=horizon, starts=target_starts)
         if hasattr(self.target_critic, "encode_history"):
-            target_contexts = encode_replay_contexts(
-                self.target_critic, target["observations"], target["actions"],
-                target["episode_steps"], self.config["horizon"],
-                next_observations=target["next_observations"])
+            target_contexts = self._history_contexts(
+                self.target_critic, target_sequence, successor=True)
+            target_lengths = np.asarray(
+                target_sequence["sequence_lengths"], dtype=np.int64) + 1
+            target_final = final_contexts(target_contexts, target_lengths)
             expected_next, _, _, _, _ = component_mean_q(
-                self.target_critic,
-                (target_contexts[0][:, -1], target_contexts[1][:, -1]),
+                self.target_critic, target_final,
                 distribution, self.action_scale, self.action_offset)
         else:
             target_contexts = None
+            final = self._final_transition_from_sequence(target_sequence)
             expected_next, _, _, _, _ = self._expected_q(
-                self.target_critic, target["next_observations"][:, -1], distribution)
+                self.target_critic,
+                torch.as_tensor(final["observations"], dtype=torch.float32,
+                                device=self.device),
+                distribution)
+        target = {"next_observations": actor_target}
         td_target = b["rewards"] + float(self.config["gamma"]) * (
             1.0 - b["terminals"]) * expected_next.reshape(-1, 1)
         return (td_target, distribution, expected_next, target, target_starts,
@@ -241,8 +285,9 @@ class RecurrentGMMTD3:
         with self.profiler.measure("critic_forward_ms", device=True):
             if hasattr(self.critic, "encode_history"):
                 contexts = self._history_contexts(self.critic, target_sequence)
-                q1, q2 = self.critic.q_from_context(
-                    (contexts[0][:, -1], contexts[1][:, -1]), b["actions"])
+                current_final = final_contexts(
+                    contexts, target_sequence["sequence_lengths"])
+                q1, q2 = self.critic.q_from_context(current_final, b["actions"])
             else:
                 q1, q2 = self.critic(b["observations"], b["actions"])
             loss_q1 = torch.nn.functional.mse_loss(q1, td_target)
@@ -271,7 +316,9 @@ class RecurrentGMMTD3:
                 if target_contexts is not None:
                     sampled_diagnostic, _, _, _, _ = sampled_q(
                         self.target_critic,
-                        (target_contexts[0][:, -1], target_contexts[1][:, -1]),
+                        final_contexts(
+                            target_contexts,
+                            np.asarray(target_sequence["sequence_lengths"], dtype=np.int64) + 1),
                         learned_distribution, self.action_scale, self.action_offset,
                         samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
                 else:
@@ -324,9 +371,27 @@ class RecurrentGMMTD3:
         try:
             with self.profiler.measure("actor_q_forward_ms", device=True):
                 if hasattr(self.critic, "encode_history"):
-                    contexts = encode_replay_contexts(
-                        self.critic, b["observations"], b["actions"],
-                        b["episode_steps"], self.config["horizon"])
+                    critic_values = self._tensor_batch({
+                        "observations": sequences["critic_observations"],
+                        "actions": sequences["critic_actions"],
+                        "episode_steps": sequences["critic_episode_steps"],
+                    })
+                    full_contexts = encode_replay_contexts(
+                        self.critic, critic_values["observations"],
+                        critic_values["actions"], critic_values["episode_steps"],
+                        self.config["horizon"],
+                        sequence_lengths=sequences["critic_sequence_lengths"])
+                    starts = torch.as_tensor(
+                        sequences["actor_window_starts"], dtype=torch.long,
+                        device=self.device)
+                    offsets = torch.arange(horizon, device=self.device).unsqueeze(0)
+                    positions = starts.unsqueeze(1) + offsets
+                    rows = torch.arange(
+                        positions.shape[0], device=self.device).unsqueeze(1)
+                    contexts = (
+                        full_contexts[0][rows, positions],
+                        full_contexts[1][rows, positions],
+                    )
                     expected, q1, _, tensors, _ = component_mean_q(
                         self.critic, contexts, distribution,
                         self.action_scale, self.action_offset, twin_min=False)
@@ -466,14 +531,13 @@ class RecurrentGMMTD3:
 
     @torch.no_grad()
     def fixed_td_diagnostic(self, batch):
-        b = self._tensor_batch({key: value[:, -1] for key, value in batch.items()
-                                if key in ("observations", "actions", "rewards",
-                                           "terminals")})
+        final = self._final_transition_from_sequence(batch)
+        b = self._tensor_batch(final)
         td_target, _, _, _, _, _ = self.bellman_target(b, batch)
         if hasattr(self.critic, "encode_history"):
             contexts = self._history_contexts(self.critic, batch)
-            q1, q2 = self.critic.q_from_context(
-                (contexts[0][:, -1], contexts[1][:, -1]), b["actions"])
+            current_final = final_contexts(contexts, batch["sequence_lengths"])
+            q1, q2 = self.critic.q_from_context(current_final, b["actions"])
         else:
             q1, q2 = self.critic(b["observations"], b["actions"])
         error = torch.minimum(q1, q2) - td_target
@@ -486,16 +550,16 @@ class RecurrentGMMTD3:
     @torch.no_grad()
     def ood_action_stress(self, batch, fixed_noise):
         count = fixed_noise.shape[1]
-        actions = torch.as_tensor(batch["actions"][:count, -1],
-                                  dtype=torch.float32, device=self.device)
+        sliced = {key: value[:count] for key, value in batch.items()}
+        final = self._final_transition_from_sequence(sliced)
+        actions = torch.as_tensor(final["actions"], dtype=torch.float32,
+                                  device=self.device)
         if hasattr(self.critic, "encode_history"):
-            sliced = {key: value[:count] for key, value in batch.items()
-                      if key in ("observations", "actions", "episode_steps")}
             contexts = self._history_contexts(self.critic, sliced)
-            contexts = (contexts[0][:, -1], contexts[1][:, -1])
+            contexts = final_contexts(contexts, sliced["sequence_lengths"])
             reference = torch.minimum(*self.critic.q_from_context(contexts, actions))
         else:
-            states = torch.as_tensor(batch["observations"][:count, -1],
+            states = torch.as_tensor(final["observations"],
                                      dtype=torch.float32, device=self.device)
             contexts = None
             reference = torch.minimum(*self.critic(states, actions))
