@@ -345,7 +345,7 @@ class RecurrentGMMTD3:
                         self.action_scale, self.action_offset, twin_min=False)
                 else:
                     contexts = None
-                    expected, q1, tensors, _ = self._expected_q(
+                    expected, q1, _, tensors, _ = self._expected_q(
                         self.critic, b["observations"][:, -1],
                         final_distribution, twin_min=False)
             actor_rl = -expected.mean()
