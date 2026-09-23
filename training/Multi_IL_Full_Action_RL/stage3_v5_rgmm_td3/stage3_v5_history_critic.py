@@ -25,15 +25,13 @@ def load_stage2_2_critic_checkpoint(path, device):
 
 
 def previous_actions(actions, episode_steps):
-    """Build a_(t-1) for a contiguous replay window without crossing resets."""
+    """Build window-local previous actions for the Stage2.2 horizon-10 contract."""
     if actions.ndim != 3 or episode_steps.shape != actions.shape[:2]:
         raise ValueError("History Critic expects actions [B,T,A] and steps [B,T]")
     result = torch.zeros_like(actions)
     result[:, 1:] = actions[:, :-1]
-    # A sampled window can start after step zero. Its unavailable predecessor is
-    # deliberately zero-initialized, matching the zero recurrent state used at
-    # the beginning of the fixed 11-step Stage3-v5 context. True episode starts
-    # are also exactly zero by the Stage2.2 token contract.
+    # Every Stage2.2 sliding context starts from zero recurrent state, so its
+    # first token must also zero the unavailable predecessor action.
     result = result.masked_fill(episode_steps.eq(0).unsqueeze(-1), 0.0)
     return result
 
@@ -43,6 +41,8 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
     """Encode current or successor replay histories with Stage2.2 token semantics."""
     if observations.ndim != 3 or actions.ndim != 3:
         raise ValueError("History Critic replay inputs must be rank-three sequences")
+    if observations.shape[1] > 10:
+        raise ValueError("Stage3-v5 Critic context exceeds Stage2.2 horizon=10")
     if next_observations is None:
         tokens = observations
         prior = previous_actions(actions, episode_steps)
@@ -51,8 +51,11 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
         if next_observations.shape != observations.shape:
             raise ValueError("next_observations must match observations")
         tokens = next_observations
-        # next_observation_t is conditioned on the action executed at t.
-        prior = actions
+        # Successor window for [s..t] is [o_(s+1)..o_(t+1)]. It is a fresh
+        # zero-state sliding context, so the first previous action is zero and
+        # later tokens receive a_(s+1)..a_t.
+        prior = torch.zeros_like(actions)
+        prior[:, 1:] = actions[:, 1:]
         steps = episode_steps + 1
     progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
     contexts, _ = critic.encode_history(tokens, prior, progress)
