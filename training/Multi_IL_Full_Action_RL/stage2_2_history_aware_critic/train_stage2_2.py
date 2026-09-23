@@ -9,14 +9,15 @@ import torch
 from evaluation import evaluate
 from finite_diagnostics import (dump_failure,gradient_statistics,numpy_batch_stats,
     optimizer_non_finite,parameter_statistics,tensor_stats)
-from history_critic import build_critic,checkpoint_payload
+from history_critic import build_critic,checkpoint_payload,load_checkpoint
 from sequence_dataset import load_splits
 from sequence_sampler import SequenceSampler
 HERE=Path(__file__).resolve().parent
 
 def arguments():
     p=argparse.ArgumentParser();p.add_argument("--config",default=str(HERE/"stage2_2_config.json"));p.add_argument("--dataset-root");p.add_argument("--output-root");p.add_argument("--device",default="cpu")
-    p.add_argument("--mode",choices=("rnn_q","multi_q","both","matched_rnn_q","matched_multi_q","matched_both"),default="both");p.add_argument("--run-id");p.add_argument("--max-updates",type=int);return p.parse_args()
+    p.add_argument("--mode",choices=("rnn_q","multi_q","both","matched_rnn_q","matched_multi_q","matched_both"),default="both");p.add_argument("--run-id");p.add_argument("--max-updates",type=int)
+    p.add_argument("--resume-checkpoint");p.add_argument("--checkpoint-interval",type=int,default=0);return p.parse_args()
 def write(path,value):path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value,indent=2,sort_keys=True)+"\n")
 def append(path,value):
     with path.open("a") as f:f.write(json.dumps(value,sort_keys=True)+"\n")
@@ -47,6 +48,11 @@ def main():
     a=arguments();config=json.loads(Path(a.config).read_text())
     for key,value in (("dataset_root",a.dataset_root),("output_root",a.output_root),("max_updates",a.max_updates)):
         if value is not None:config[key]=value
+    if a.resume_checkpoint:
+        if len(labels(a.mode)) != 1:raise RuntimeError("resume requires one training mode")
+        config["resume_checkpoint"]=str(Path(a.resume_checkpoint).resolve())
+        config["resume_sampler_restore"]="deterministic_fast_forward_from_training_seed"
+    config["periodic_checkpoint_interval"]=int(a.checkpoint_interval)
     if config["history_semantics"]!="full_episode_prefix_unroll_learning_mask":raise RuntimeError("unsupported history semantics")
     device=select_device(a.device);seed=int(config["training_seed"]);random.seed(seed);np.random.seed(seed);torch.manual_seed(seed)
     if device.type=="npu":torch.npu.manual_seed_all(seed)
@@ -63,11 +69,28 @@ def main():
         initial_states[kind]=copy.deepcopy(build_critic(config,device,kind).state_dict())
         torch.save(initial_states[kind],run/"shared"/f"initial_state_{kind}.pth")
     for label in labels(a.mode):
-        kind=critic_type(label);out=run/label;(out/"checkpoints").mkdir(parents=True);model=build_critic(config,device,kind);model.load_state_dict(copy.deepcopy(initial_states[kind]))
+        kind=critic_type(label);out=run/label;(out/"checkpoints").mkdir(parents=True)
+        resume_payload=None
+        if a.resume_checkpoint:
+            model,resume_payload=load_checkpoint(a.resume_checkpoint,config,device,kind)
+        else:
+            model=build_critic(config,device,kind);model.load_state_dict(copy.deepcopy(initial_states[kind]))
         opt=torch.optim.AdamW(model.parameters(),lr=config["critic_lr"],weight_decay=config["weight_decay"])
         sampler=SequenceSampler(train,config["legacy_replay_burn_in_length"],config["learning_sequence_length"],config["horizon"],seed,"multi_q" in label)
-        best=float("inf");last_metric=None
-        for step in range(1,int(config["max_updates"])+1):
+        best=float("inf");last_metric=None;start_step=1
+        if resume_payload is not None:
+            opt.load_state_dict(resume_payload["optimizer_state_dict"])
+            resume_step=int(resume_payload["checkpoint_step"])
+            if resume_step>=int(config["max_updates"]):raise RuntimeError("resume step must be below max_updates")
+            for _ in range(resume_step):sampler.sample(config["sequence_batch_size"])
+            best=float(resume_payload["best_validation_metric"])
+            last_metric=float(resume_payload["checkpoint_validation_metric"])
+            start_step=resume_step+1
+            resumed=checkpoint_payload(model,opt,config,resume_step,last_metric,best,kind)
+            torch.save(resumed,out/"checkpoints"/"best.pth")
+            torch.save(resumed,out/"checkpoints"/f"step_{resume_step:08d}.pth")
+            write(out/"resume_manifest.json",{"source":str(Path(a.resume_checkpoint).resolve()),"checkpoint_step":resume_step,"optimizer_restored":True,"sampler_restored_by_fast_forward":True})
+        for step in range(start_step,int(config["max_updates"])+1):
             model.train()
             started=time.perf_counter();batch=sampler.sample(config["sequence_batch_size"]);sample_ms=(time.perf_counter()-started)*1000
             stats=numpy_batch_stats(batch)
@@ -102,6 +125,8 @@ def main():
                 last_metric=float(metric);row["validation"]=evaluation
                 if metric<best:
                     best=float(metric);torch.save(checkpoint_payload(model,opt,config,step,metric,best,kind),out/"checkpoints"/"best.pth")
+            if int(a.checkpoint_interval)>0 and step%int(a.checkpoint_interval)==0:
+                torch.save(checkpoint_payload(model,opt,config,step,last_metric,best,kind),out/"checkpoints"/f"step_{step:08d}.pth")
             append(out/"train_metrics.jsonl",row)
         torch.save(checkpoint_payload(model,opt,config,config["max_updates"],last_metric,best,kind),out/"checkpoints"/"last.pth")
         best_payload=torch.load(out/"checkpoints"/"best.pth",map_location=device);model.load_state_dict(best_payload["critic_state_dict"],strict=True)

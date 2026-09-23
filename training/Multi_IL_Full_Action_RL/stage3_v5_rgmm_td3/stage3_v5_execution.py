@@ -38,19 +38,22 @@ def prepare_round_batches(offline, online, count, config, device, actor_ready,
     fields = {key: torch.as_tensor(np.stack([batch[key] for batch, _ in critics]),
                                   dtype=torch.float32, device=device)
               for key in critics[0][0]}
-    next_obs = torch.as_tensor(np.stack([seq["next_observations"] for _, seq in critics]),
-                               dtype=torch.float32, device=device)
+    sequence_fields = {
+        key: torch.as_tensor(np.stack([seq[key] for _, seq in critics]),
+                             dtype=torch.float32, device=device)
+        for key in ("observations", "actions", "next_observations")
+    }
     prepared = []
     for index, (_, seq) in enumerate(critics):
         prepared.append(({key: value[index] for key, value in fields.items()},
-                         {"next_observations": next_obs[index],
+                         {**{key: value[index] for key, value in sequence_fields.items()},
                           "episode_steps": seq["episode_steps"]}))
     actor_fields = {}
     if actors:
         actor_fields = {key: torch.as_tensor(np.stack([batch[key] for batch in actors.values()]),
                                             dtype=torch.long if key == "episode_steps" else torch.float32,
                                             device=device)
-                        for key in ("observations", "episode_steps")}
+                        for key in ("observations", "actions", "episode_steps")}
     actor_prepared = {update_index: {key: value[position] for key, value in actor_fields.items()}
                       for position, update_index in enumerate(actors)}
     if profiler and profiler.enabled:

@@ -17,13 +17,9 @@ from stage3_v5_actor import (distribution_tensors, flat_to_obs, module_hash,
 from stage3_v5_gmm_math import (single_component_mean_q, sequence_component_mean_q,
                                  single_expected_q, sequence_expected_q,
                                  full_sequence_component_mean_q)
+from stage3_v5_history_critic import (component_mean_q, encode_replay_contexts,
+                                      load_stage2_2_critic_checkpoint, sampled_q)
 from stage3_v5_profile import StageProfiler
-
-ROOT = Path(__file__).resolve().parents[3]
-STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_new_critic_pretraining"
-if str(STAGE2) not in sys.path:
-    sys.path.insert(0, str(STAGE2))
-from critic_network import load_stage2_critic_checkpoint  # noqa: E402
 
 
 def _last_reset_starts_from_numpy(episode_steps, horizon):
@@ -108,14 +104,19 @@ def target_final_distribution_vectorized(actor, observations, episode_steps=None
 
 
 def strict_stage2_load(path, device):
-    critic, payload = load_stage2_critic_checkpoint(path, device)
-    expected = {"obs_dim": 59, "action_dim": 14, "hidden_dims": [256, 256],
-                "activation": "relu", "layer_norm": True}
+    critic, payload = load_stage2_2_critic_checkpoint(path, device)
+    expected = {"obs_dim": 59, "action_dim": 14, "token_dim": 64,
+                "lstm_hidden_dim": 96, "lstm_layers": 1,
+                "head_hidden_dim": 128,
+                "history_semantics": "full_episode_prefix_unroll_learning_mask"}
+    architecture = payload.get("architecture", {})
     for key, value in expected.items():
-        if payload["model_config"].get(key) != value:
-            raise RuntimeError(f"Stage2 Critic {key} contract changed")
+        if architecture.get(key) != value:
+            raise RuntimeError(f"Stage2.2 Critic {key} contract changed")
+    if payload.get("critic_type") != "history_aware_twin_q":
+        raise RuntimeError("Stage2.2 Critic type is not history-aware Twin-Q")
     if float(payload.get("gamma", -1)) != 0.99:
-        raise RuntimeError("Stage2 Critic gamma is not 0.99")
+        raise RuntimeError("Stage2.2 Critic gamma is not 0.99")
     return critic, payload
 
 
@@ -187,38 +188,63 @@ class RecurrentGMMTD3:
             critic, states, distribution, self.action_scale, self.action_offset,
             twin_min=twin_min)
 
-    def _expected_q_sequence(self, states, distributions):
-        return sequence_component_mean_q(
-            self.critic, states, distributions, self.action_scale, self.action_offset)
+    def _history_contexts(self, critic, sequence, successor=False):
+        keys = ["observations", "actions", "episode_steps"]
+        if successor:
+            keys.append("next_observations")
+        values = self._tensor_batch({key: sequence[key] for key in keys})
+        return encode_replay_contexts(
+            critic, values["observations"], values["actions"],
+            values["episode_steps"], self.config["horizon"],
+            next_observations=(values["next_observations"] if successor else None))
 
     @torch.no_grad()
     def bellman_target(self, b, target_sequence):
         """Shared Case-A target for training and frozen readiness samples."""
-        # ``episode_steps`` is replay metadata. Keep it on the host and derive
-        # reset boundaries before moving tensors to the NPU; this removes one
-        # synchronizing device->host copy per Critic update.
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         target_starts = _last_reset_starts_from_numpy(
             target_sequence["episode_steps"], horizon)
+        target_keys = ["next_observations"]
+        if hasattr(self.target_critic, "encode_history"):
+            target_keys += ["observations", "actions", "episode_steps"]
         with self.profiler.measure("host_to_device_ms", device=True):
-            target = self._tensor_batch({"next_observations": target_sequence["next_observations"]})
+            target = self._tensor_batch({key: target_sequence[key]
+                                         for key in target_keys})
         distribution, _ = target_final_distribution_vectorized(
             self.target_actor, target["next_observations"],
             horizon=horizon, starts=target_starts)
-        expected_next, _, _, _, _ = self._expected_q(
-            self.target_critic, target["next_observations"][:, -1], distribution)
+        if hasattr(self.target_critic, "encode_history"):
+            target_contexts = encode_replay_contexts(
+                self.target_critic, target["observations"], target["actions"],
+                target["episode_steps"], self.config["horizon"],
+                next_observations=target["next_observations"])
+            expected_next, _, _, _, _ = component_mean_q(
+                self.target_critic,
+                (target_contexts[0][:, -1], target_contexts[1][:, -1]),
+                distribution, self.action_scale, self.action_offset)
+        else:
+            target_contexts = None
+            expected_next, _, _, _, _ = self._expected_q(
+                self.target_critic, target["next_observations"][:, -1], distribution)
         td_target = b["rewards"] + float(self.config["gamma"]) * (
             1.0 - b["terminals"]) * expected_next.reshape(-1, 1)
-        return td_target, distribution, expected_next, target, target_starts
+        return (td_target, distribution, expected_next, target, target_starts,
+                target_contexts)
 
     def critic_update(self, batch, target_sequence, collect_metrics=True):
         with self.profiler.measure("host_to_device_ms", device=True):
             b = self._tensor_batch(batch)
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         with self.profiler.measure("critic_target_ms", device=True):
-            td_target, distribution, expected_next, target, target_starts = self.bellman_target(b, target_sequence)
+            (td_target, distribution, expected_next, target, target_starts,
+             target_contexts) = self.bellman_target(b, target_sequence)
         with self.profiler.measure("critic_forward_ms", device=True):
-            q1, q2 = self.critic(b["observations"], b["actions"])
+            if hasattr(self.critic, "encode_history"):
+                contexts = self._history_contexts(self.critic, target_sequence)
+                q1, q2 = self.critic.q_from_context(
+                    (contexts[0][:, -1], contexts[1][:, -1]), b["actions"])
+            else:
+                q1, q2 = self.critic(b["observations"], b["actions"])
             loss_q1 = torch.nn.functional.mse_loss(q1, td_target)
             loss_q2 = torch.nn.functional.mse_loss(q2, td_target)
             loss = loss_q1 + loss_q2
@@ -228,27 +254,31 @@ class RecurrentGMMTD3:
             self.critic_optimizer.zero_grad(set_to_none=True)
             loss.backward()
             critic_grad = grad_norm(self.critic.parameters()) if collect_metrics else None
-            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(self.config["critic_max_grad_norm"]))
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), float(
+                self.config["critic_max_grad_norm"]))
         with self.profiler.measure("critic_optimizer_ms", device=True):
             self.critic_optimizer.step()
         self.critic_updates += 1
         self.actor_enabled_critic_updates += int(self.actor_gate_open)
         if not collect_metrics:
-            # Avoid synchronizing several NPU scalar tensors back to the host
-            # on every transition. The trainer only needs detailed Critic
-            # diagnostics at train_metrics_interval_updates boundaries.
             return {}
         with torch.no_grad():
-            # Diagnostic counterfactual only. Never enters td_target or backward.
             self.target_actor.low_noise_eval = False
             try:
                 learned_distribution, _ = target_final_distribution_vectorized(
                     self.target_actor, target["next_observations"],
                     horizon=horizon, starts=target_starts)
-                sampled_diagnostic, _, _, _, _ = single_expected_q(
-                    self.target_critic, target["next_observations"][:, -1],
-                    learned_distribution, self.action_scale, self.action_offset,
-                    samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
+                if target_contexts is not None:
+                    sampled_diagnostic, _, _, _, _ = sampled_q(
+                        self.target_critic,
+                        (target_contexts[0][:, -1], target_contexts[1][:, -1]),
+                        learned_distribution, self.action_scale, self.action_offset,
+                        samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
+                else:
+                    sampled_diagnostic, _, _, _, _ = single_expected_q(
+                        self.target_critic, target["next_observations"][:, -1],
+                        learned_distribution, self.action_scale, self.action_offset,
+                        samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
             finally:
                 self.target_actor.low_noise_eval = True
         return read_scalar_metrics({
@@ -278,7 +308,8 @@ class RecurrentGMMTD3:
         self.actor.train()
         with self.profiler.measure("host_to_device_ms", device=True):
             b = self._tensor_batch({key: sequences[key]
-                                    for key in ("observations", "episode_steps")})
+                                    for key in ("observations", "actions",
+                                                "episode_steps")})
         burn = int(self.config["recurrent_replay"]["burn_in"])
         horizon = int(self.config["actor_source_contract"]["rnn_horizon"])
         if burn != 0 or b["observations"].shape[1] != horizon:
@@ -292,9 +323,18 @@ class RecurrentGMMTD3:
             parameter.requires_grad_(False)
         try:
             with self.profiler.measure("actor_q_forward_ms", device=True):
-                expected, q1, tensors, _ = full_sequence_component_mean_q(
-                    self.critic, b["observations"], distribution,
-                    self.action_scale, self.action_offset)
+                if hasattr(self.critic, "encode_history"):
+                    contexts = encode_replay_contexts(
+                        self.critic, b["observations"], b["actions"],
+                        b["episode_steps"], self.config["horizon"])
+                    expected, q1, _, tensors, _ = component_mean_q(
+                        self.critic, contexts, distribution,
+                        self.action_scale, self.action_offset, twin_min=False)
+                else:
+                    contexts = None
+                    expected, q1, tensors, _ = full_sequence_component_mean_q(
+                        self.critic, b["observations"], distribution,
+                        self.action_scale, self.action_offset)
             actor_rl = -expected.mean()
             if not torch.isfinite(actor_rl):
                 raise FloatingPointError("Non-finite Stage3-v5 Actor loss")
@@ -330,12 +370,19 @@ class RecurrentGMMTD3:
         std_values = tensors["scales"].detach().reshape(-1)
         with torch.no_grad():
             # Counterfactual learned-std Q is logged only and has no RL gradient.
-            learn_distributions, _ = recurrent_distributions(
-                self.actor, b["observations"], b["episode_steps"], horizon=horizon)
-            sampled_diagnostic, _, _, _ = sequence_expected_q(
-                self.critic, b["observations"][:, burn:], learn_distributions,
-                self.action_scale, self.action_offset,
-                samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
+            if contexts is not None:
+                sampled_diagnostic, _, _, _, _ = sampled_q(
+                    self.critic, contexts, distribution,
+                    self.action_scale, self.action_offset,
+                    samples=int(self.config["diagnostic_learned_std_samples_per_mode"]),
+                    twin_min=False)
+            else:
+                learn_distributions, _ = recurrent_distributions(
+                    self.actor, b["observations"], b["episode_steps"], horizon=horizon)
+                sampled_diagnostic, _, _, _ = sequence_expected_q(
+                    self.critic, b["observations"][:, burn:], learn_distributions,
+                    self.action_scale, self.action_offset,
+                    samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
             means = tensors["means_normalized"]
             distances = torch.cdist(means, means)
             modes = means.shape[-2]
@@ -380,21 +427,38 @@ class RecurrentGMMTD3:
 
     @torch.no_grad()
     def q_values_for_episode(self, episode):
-        states = torch.as_tensor(episode["observations"], dtype=torch.float32, device=self.device)
-        actions = torch.as_tensor(episode["actions"], dtype=torch.float32, device=self.device)
-        q1, q2 = self.critic(states, actions)
+        states = torch.as_tensor(episode["observations"], dtype=torch.float32,
+                                 device=self.device)
+        actions = torch.as_tensor(episode["actions"], dtype=torch.float32,
+                                  device=self.device)
+        if hasattr(self.critic, "encode_history"):
+            steps = torch.as_tensor(
+                episode.get("episode_steps", np.arange(len(actions))),
+                dtype=torch.long, device=self.device).reshape(1, -1)
+            contexts = encode_replay_contexts(
+                self.critic, states.unsqueeze(0), actions.unsqueeze(0), steps,
+                self.config["horizon"])
+            q1, q2 = self.critic.q_from_context(
+                contexts, actions.unsqueeze(0))
+            q1, q2 = q1[0], q2[0]
+        else:
+            q1, q2 = self.critic(states, actions)
         return q1.cpu().numpy().reshape(-1), q2.cpu().numpy().reshape(-1)
 
     @torch.no_grad()
     def q_values_for_episodes(self, episodes, chunk_size=4096):
+        if hasattr(self.critic, "encode_history"):
+            return [self.q_values_for_episode(episode) for episode in episodes]
         lengths = [len(episode["actions"]) for episode in episodes]
         states = np.concatenate([episode["observations"] for episode in episodes])
         actions = np.concatenate([episode["actions"] for episode in episodes])
         outputs = []
         for first in range(0, len(states), chunk_size):
-            s = torch.as_tensor(states[first:first+chunk_size], dtype=torch.float32, device=self.device)
-            a = torch.as_tensor(actions[first:first+chunk_size], dtype=torch.float32, device=self.device)
-            q1, q2 = self.critic(s, a)
+            state = torch.as_tensor(states[first:first+chunk_size],
+                                    dtype=torch.float32, device=self.device)
+            action = torch.as_tensor(actions[first:first+chunk_size],
+                                     dtype=torch.float32, device=self.device)
+            q1, q2 = self.critic(state, action)
             outputs.append(torch.cat((q1, q2), dim=1).cpu().numpy())
         values = np.concatenate(outputs)
         splits = np.split(values, np.cumsum(lengths)[:-1])
@@ -403,30 +467,51 @@ class RecurrentGMMTD3:
     @torch.no_grad()
     def fixed_td_diagnostic(self, batch):
         b = self._tensor_batch({key: value[:, -1] for key, value in batch.items()
-                                if key in ("observations", "actions", "rewards", "terminals")})
-        td_target, _, _, _, _ = self.bellman_target(b, batch)
-        q1, q2 = self.critic(b["observations"], b["actions"])
-        # This is the same Case-A Bellman target used by critic_update.  The
-        # The replay maps both terminal boundaries to ``terminals``.
+                                if key in ("observations", "actions", "rewards",
+                                           "terminals")})
+        td_target, _, _, _, _, _ = self.bellman_target(b, batch)
+        if hasattr(self.critic, "encode_history"):
+            contexts = self._history_contexts(self.critic, batch)
+            q1, q2 = self.critic.q_from_context(
+                (contexts[0][:, -1], contexts[1][:, -1]), b["actions"])
+        else:
+            q1, q2 = self.critic(b["observations"], b["actions"])
         error = torch.minimum(q1, q2) - td_target
-        return {"q1": q1.cpu().numpy().reshape(-1), "q2": q2.cpu().numpy().reshape(-1),
+        return {"q1": q1.cpu().numpy().reshape(-1),
+                "q2": q2.cpu().numpy().reshape(-1),
                 "td_target": td_target.cpu().numpy().reshape(-1),
-                "td_mae": float(error.abs().mean().cpu()), "td_mse": float(error.square().mean().cpu())}
+                "td_mae": float(error.abs().mean().cpu()),
+                "td_mse": float(error.square().mean().cpu())}
 
     @torch.no_grad()
     def ood_action_stress(self, batch, fixed_noise):
         count = fixed_noise.shape[1]
-        states = torch.as_tensor(batch["observations"][:count, -1], dtype=torch.float32, device=self.device)
-        actions = torch.as_tensor(batch["actions"][:count, -1], dtype=torch.float32, device=self.device)
-        reference = torch.minimum(*self.critic(states, actions))
+        actions = torch.as_tensor(batch["actions"][:count, -1],
+                                  dtype=torch.float32, device=self.device)
+        if hasattr(self.critic, "encode_history"):
+            sliced = {key: value[:count] for key, value in batch.items()
+                      if key in ("observations", "actions", "episode_steps")}
+            contexts = self._history_contexts(self.critic, sliced)
+            contexts = (contexts[0][:, -1], contexts[1][:, -1])
+            reference = torch.minimum(*self.critic.q_from_context(contexts, actions))
+        else:
+            states = torch.as_tensor(batch["observations"][:count, -1],
+                                     dtype=torch.float32, device=self.device)
+            contexts = None
+            reference = torch.minimum(*self.critic(states, actions))
         scale, offset = self.action_scale.reshape(-1), self.action_offset.reshape(-1)
         normalized = (actions - offset) / scale
         noise = torch.as_tensor(fixed_noise, dtype=torch.float32, device=self.device)
         perturbed = (normalized[None] + noise).clamp(-1.0, 1.0) * scale + offset
-        repeated = states[None].expand(len(noise), -1, -1).reshape(-1, 59)
-        values = torch.minimum(*self.critic(repeated, perturbed.reshape(-1, 14)))
-        values = values.reshape(len(noise), count, 1) - reference[None]
-        # Near-zero Q: regularize relative denominator by the reference std.
+        if contexts is not None:
+            candidates = perturbed.transpose(0, 1)
+            q1, q2 = self.critic.q_from_context(contexts, candidates)
+            values = torch.minimum(q1, q2).transpose(0, 1)
+        else:
+            repeated = states[None].expand(len(noise), -1, -1).reshape(-1, 59)
+            values = torch.minimum(*self.critic(
+                repeated, perturbed.reshape(-1, 14))).reshape(len(noise), count, 1)
+        values = values - reference[None]
         qstd = reference.std(unbiased=False).clamp_min(1e-6)
         relative = values / (reference.abs()[None] + qstd + 1e-6)
         normalized_excess = values / qstd

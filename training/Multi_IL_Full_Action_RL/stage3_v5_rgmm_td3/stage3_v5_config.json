@@ -2,7 +2,9 @@
   "stage": "stage3-v5-rgmm-td3",
   "output_root": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3",
   "total_env_steps": 3000000,
-  "obs_dim": 59, "action_dim": 14, "hidden_dims": [256, 256], "activation": "relu", "critic_layer_norm": true,
+  "obs_dim": 59, "action_dim": 14,
+  "critic_architecture": {"token_dim": 64, "lstm_hidden_dim": 96, "lstm_layers": 1, "head_hidden_dim": 128},
+  "critic_source_contract": {"stage_version": "2.2", "critic_type": "history_aware_twin_q", "token_schema": ["observation_t", "previous_executed_action_t", "normalized_episode_progress_t"], "stage3_context": "fixed_contiguous_11_step_replay_window", "target_context": "shifted_successor_window_with_executed_action_as_previous_action"},
   "gamma": 0.99, "tau": 0.005, "critic_lr": 0.0003, "critic_weight_decay": 0.0001, "critic_max_grad_norm": 100.0,
   "actor_lr": 0.000002, "actor_max_grad_norm": 10.0, "batch_size": 256,
   "offline_fraction": 0.5, "online_fraction": 0.5, "utd": 0.25, "policy_delay": 4,
@@ -22,5 +24,5 @@
   "parallel_env": {"num_envs": 16, "startup_parallelism": 4, "env_startup_timeout_sec": 120, "env_command_timeout_sec": 120, "multiprocessing_start_method": "spawn", "max_collector_lag_transitions": 256},
   "training_seed": 20260918, "train_seed_base": 30000,
   "exploration": {"execution": "checkpoint_gmm_categorical_plus_component_sample", "external_action_noise_std": 0.0, "clip_to_env_bounds": false, "evaluation_external_noise_std": 0.0},
-  "forbidden_mechanisms": ["adaptive_bc", "bc_regularization", "q_scale_normalization", "sac_entropy", "alpha_tuning", "target_policy_smoothing", "q_filter", "awac", "handoff_selector", "hybrid_bootstrap", "expert_rnn_proposal_cache", "recurrent_critic"]
+  "forbidden_mechanisms": ["adaptive_bc", "bc_regularization", "q_scale_normalization", "sac_entropy", "alpha_tuning", "target_policy_smoothing", "q_filter", "awac", "handoff_selector", "hybrid_bootstrap", "expert_rnn_proposal_cache"]
 }

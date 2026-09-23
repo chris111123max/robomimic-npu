@@ -1,8 +1,10 @@
 # Stage3-v5: Critic-gated TD3 handoff
 
-Stage3-v5 preserves the audited GMM Actor objective, twin-Q target, recurrent context,
-action normalization, reward/terminal behavior and Polyak update.  It changes
-only training control: `CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL`.
+This Stage3-v5 adaptation preserves the audited GMM Actor objective, twin-Q target,
+action normalization, reward/terminal behavior, Polyak update, and the original
+`CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL` control logic. It changes only the
+Critic representation and initialization source: both branches now load the
+Stage2.2 history-aware Twin-Q architecture.
 
 `CRITIC_ONLY` has UTD 0.25 (`update_credit += 0.25` per eligible online
 transition), Actor LR 0, no Actor optimizer step, and no policy evaluation.
@@ -22,6 +24,14 @@ Replay remains 256 transitions per Critic update: 128 offline + 128 online.
 `rnn_q` draws the offline half from BC-RNN only. `multi_q` uses the same 128
 offline total, split 43/43/42 across BC-RNN, BC-Transformer and BC-GMM, with the
 remainder rotated over time.
+
+The Critic token is `[observation_t, previous_executed_action_t, t/700]`. Each
+Stage3 update encodes the existing contiguous 11-transition replay context; the
+successor target uses the shifted next-observation window and the action executed
+at each source transition as its previous-action token. Actor-Q, target-Q,
+readiness, OOD stress, and full-episode diagnostics share this same adapter. The
+readiness thresholds, consecutive-pass rule, warm-up schedule, and unfreeze
+criteria are unchanged.
 
 Stage1 HDF5 replay is loaded natively from `/episodes`, retaining
 `terminated`, `truncated`, and `dones`. Both a true termination and a

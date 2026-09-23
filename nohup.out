@@ -1,0 +1,9 @@
+usage: train_stage3_v5_vector.py [-h] --group {rnn_q,multi_q} --device DEVICE
+                                 --pair-run-dir PAIR_RUN_DIR
+                                 --critic-init-checkpoint
+                                 CRITIC_INIT_CHECKPOINT [--num-envs NUM_ENVS]
+                                 [--total-env-steps TOTAL_ENV_STEPS]
+                                 [--resume RESUME] [--smoke]
+                                 [--compile-backend {none,torchair}]
+                                 [--no-prefetch]
+train_stage3_v5_vector.py: error: the following arguments are required: --group, --device, --pair-run-dir, --critic-init-checkpoint
