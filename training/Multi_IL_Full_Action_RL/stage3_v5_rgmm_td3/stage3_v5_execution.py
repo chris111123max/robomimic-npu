@@ -52,14 +52,21 @@ def prepare_round_batches(offline, online, count, config, device, actor_ready,
             "sample_window_starts": seq["sample_window_starts"],
         })
         prepared.append((prepared_batch, prepared_sequence))
-    actor_fields = {}
-    if actors:
-        actor_fields = {key: torch.as_tensor(np.stack([batch[key] for batch in actors.values()]),
-                                            dtype=torch.long if key == "episode_steps" else torch.float32,
-                                            device=device)
-                        for key in ("observations", "actions", "episode_steps")}
-    actor_prepared = {update_index: {key: value[position] for key, value in actor_fields.items()}
-                      for position, update_index in enumerate(actors)}
+    actor_prepared = {}
+    for update_index, batch in actors.items():
+        prepared_actor = {
+            key: torch.as_tensor(
+                batch[key],
+                dtype=torch.long if key in ("episode_steps", "critic_episode_steps")
+                else torch.float32,
+                device=device)
+            for key in ("observations", "actions", "episode_steps",
+                        "critic_observations", "critic_actions",
+                        "critic_episode_steps")
+        }
+        prepared_actor["critic_sequence_lengths"] = batch["critic_sequence_lengths"]
+        prepared_actor["actor_window_starts"] = batch["actor_window_starts"]
+        actor_prepared[update_index] = prepared_actor
     if profiler and profiler.enabled:
         profiler.synchronize()
         name = "host_to_device_ms"
