@@ -111,7 +111,9 @@ class MatchedMemorylessTwinQ(nn.Module):
 
 def architecture_config(config):
     return {key: config[key] for key in ("obs_dim", "action_dim", "token_dim", "lstm_hidden_dim",
-            "lstm_layers", "head_hidden_dim", "legacy_replay_burn_in_length", "learning_sequence_length","history_semantics","matched_hidden_dims")}
+            "lstm_layers", "head_hidden_dim", "recurrent_context_length",
+            "legacy_replay_burn_in_length", "learning_sequence_length",
+            "history_semantics", "matched_hidden_dims")}
 
 
 def build_critic(config, device=None, critic_type="history_aware_twin_q"):
