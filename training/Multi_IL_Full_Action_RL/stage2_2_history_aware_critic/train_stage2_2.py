@@ -61,7 +61,7 @@ def main():
     run=Path(config["output_root"])/(a.run_id or f"stage2_2_history_critic_{datetime.now():%Y%m%d_%H%M%S}")
     if run.exists():raise FileExistsError(run)
     (run/"shared").mkdir(parents=True);write(run/"shared"/"config_resolved.json",config)
-    write(run/"shared"/"normalization.json",config["normalization"]);write(run/"shared"/"architecture_contract.json",{"history_semantics":config["history_semantics"],"token_schema":config["token_schema"],"current_action_enters_recurrence":False})
+    write(run/"shared"/"normalization.json",config["normalization"]);write(run/"shared"/"architecture_contract.json",{"history_semantics":config["history_semantics"],"recurrent_context_length":config["recurrent_context_length"],"recurrent_initial_state":"zero_per_context","window_first_previous_action":"zero","token_schema":config["token_schema"],"current_action_enters_recurrence":False})
     write(run/"shared"/"dataset_manifest.json",{"train_seeds":[config["train_seed_start"],config["train_seed_end"]],"validation_seeds":[config["val_seed_start"],config["val_seed_end"]],"sources":{p:train[p].path for p in train}})
     initial_states={}
     for kind in sorted({critic_type(label) for label in labels(a.mode)}):
