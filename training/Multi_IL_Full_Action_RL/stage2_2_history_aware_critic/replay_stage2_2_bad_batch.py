@@ -16,7 +16,7 @@ def main():
     train,_=load_splits(root,range(c["train_seed_start"],c["train_seed_end"]+1),range(c["val_seed_start"],c["val_seed_end"]+1),c["gamma"])
     sampler=LegacyWindowSampler(train,c["legacy_replay_burn_in_length"],c["learning_sequence_length"],c["horizon"],c["training_seed"],a.mode=="multi_q")
     batch=None
-    for _ in range(a.step):batch=sampler.sample(c["sequence_batch_size"])
+    for _ in range(a.step):batch=sampler.sample(c.get("legacy_sequence_batch_size",16))
     metadata=[]
     for i in range(len(batch["start"])):metadata.append({key:(str(batch[key][i]) if key=="policy" else int(batch[key][i])) for key in ("policy","seed","episode_id","start","stop")})
     global_stats=numpy_batch_stats(batch);per_sequence=[]
