@@ -52,6 +52,22 @@ class TestReplay(unittest.TestCase):
    idx=batch["sequence_lengths"]-1
    self.assertTrue(np.array_equal(final["actions"], batch["actions"][rows,idx]))
 
+
+ def test_actor_window_keeps_matching_full_critic_prefix(self):
+  with tempfile.TemporaryDirectory() as d:
+   path=str(Path(d)/"rnn.h5"); make_file(path)
+   replay=Stage1OfflineSequenceReplay(path,"rnn",13)
+   batch=replay.sample_actor_prefixes(16,10,horizon=10)
+   self.assertTrue(np.all(batch["episode_steps"][:,0] % 10 == 0))
+   self.assertTrue(np.array_equal(
+       batch["actor_window_starts"] + 10,
+       batch["critic_sequence_lengths"]))
+   for row,start in enumerate(batch["actor_window_starts"]):
+    self.assertEqual(batch["critic_episode_steps"][row][0],0)
+    self.assertTrue(np.array_equal(
+        batch["critic_actions"][row][start:start+10],
+        batch["actions"][row]))
+
  def test_rnn_source_is_exclusive_and_aligned(self):
   with tempfile.TemporaryDirectory() as d:
    path=str(Path(d)/"rnn.h5"); make_file(path)
