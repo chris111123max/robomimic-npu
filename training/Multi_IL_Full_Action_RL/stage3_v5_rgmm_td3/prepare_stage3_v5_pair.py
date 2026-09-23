@@ -112,10 +112,10 @@ def main():
         if not path.is_file():
             raise FileNotFoundError(path)
         critic, payload = strict_stage2_load(path, torch.device("cpu"))
-        expected_step = {"rnn_q": 4000, "multi_q": 6000}[branch]
+        expected_step = {"rnn_q": 46000, "multi_q": 5000}[branch]
         if int(payload.get("checkpoint_step", -1)) != expected_step:
             raise RuntimeError(
-                f"{branch} must use the selected Stage2.2 {expected_step} checkpoint; "
+                f"{branch} must use the selected horizon-10 Stage2.2 {expected_step} checkpoint; "
                 f"got step {payload.get('checkpoint_step')}")
         critic_sources[branch] = {
             "checkpoint": str(path), "sha256": sha256(path),
