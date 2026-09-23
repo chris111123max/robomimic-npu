@@ -13,8 +13,7 @@ for path in (HERE, STAGE2_2):
         sys.path.insert(0, str(path))
 from history_critic import build_critic
 from stage3_v5_history_critic import (component_mean_q, encode_replay_contexts,
-                                      final_contexts, final_contexts_with_detached_prefix,
-                                      previous_actions, sampled_q)
+                                      final_contexts, previous_actions, sampled_q)
 
 
 class TestHistoryCriticIntegration(unittest.TestCase):
@@ -40,7 +39,7 @@ class TestHistoryCriticIntegration(unittest.TestCase):
         self.assertEqual(target[1].shape, (2, 5, 96))
 
 
-    def test_full_prefix_detached_tail_matches_full_unroll(self):
+    def test_padded_full_prefix_final_matches_individual_unroll(self):
         batch, time_steps = 3, 19
         observations = torch.randn(batch, time_steps, 59)
         actions = torch.randn(batch, time_steps, 14)
@@ -49,12 +48,17 @@ class TestHistoryCriticIntegration(unittest.TestCase):
         full = encode_replay_contexts(
             self.critic, observations, actions, steps, 700,
             sequence_lengths=lengths)
-        expected = final_contexts(full, lengths)
-        actual = final_contexts_with_detached_prefix(
-            self.critic, observations, actions, steps, 700,
-            lengths, gradient_window=11)
-        torch.testing.assert_close(actual[0], expected[0], rtol=1e-5, atol=1e-6)
-        torch.testing.assert_close(actual[1], expected[1], rtol=1e-5, atol=1e-6)
+        gathered = final_contexts(full, lengths)
+        for row, length in enumerate(lengths.tolist()):
+            single = encode_replay_contexts(
+                self.critic,
+                observations[row:row+1, :length],
+                actions[row:row+1, :length],
+                steps[row:row+1, :length], 700)
+            torch.testing.assert_close(
+                gathered[0][row], single[0][0, -1], rtol=1e-5, atol=1e-6)
+            torch.testing.assert_close(
+                gathered[1][row], single[1][0, -1], rtol=1e-5, atol=1e-6)
 
     def test_successor_history_keeps_episode_start_token(self):
         observations = torch.randn(1, 6, 59)
