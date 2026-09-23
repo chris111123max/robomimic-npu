@@ -12,7 +12,7 @@ def main():
     c=json.loads(Path(a.config).read_text());root=Path(a.dataset_root or c["dataset_root"])
     train,val=load_splits(root,range(c["train_seed_start"],c["train_seed_end"]+1),range(c["val_seed_start"],c["val_seed_end"]+1),c["gamma"])
     report={"status":"PASS","read_only":True,"canonical_observation_keys":list(KEYS),"non_finite_count":0,"non_finite_issues":[],"sources":{}}
-    width=c["legacy_replay_burn_in_length"]+c["learning_sequence_length"]
+    width=c["recurrent_context_length"]
     for policy in POLICIES:
         path=root/policy/"transitions.hdf5"
         with h5py.File(path,"r") as f:
