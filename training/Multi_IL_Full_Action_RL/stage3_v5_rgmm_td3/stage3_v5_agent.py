@@ -371,9 +371,27 @@ class RecurrentGMMTD3:
         try:
             with self.profiler.measure("actor_q_forward_ms", device=True):
                 if hasattr(self.critic, "encode_history"):
-                    contexts = encode_replay_contexts(
-                        self.critic, b["observations"], b["actions"],
-                        b["episode_steps"], self.config["horizon"])
+                    critic_values = self._tensor_batch({
+                        "observations": sequences["critic_observations"],
+                        "actions": sequences["critic_actions"],
+                        "episode_steps": sequences["critic_episode_steps"],
+                    })
+                    full_contexts = encode_replay_contexts(
+                        self.critic, critic_values["observations"],
+                        critic_values["actions"], critic_values["episode_steps"],
+                        self.config["horizon"],
+                        sequence_lengths=sequences["critic_sequence_lengths"])
+                    starts = torch.as_tensor(
+                        sequences["actor_window_starts"], dtype=torch.long,
+                        device=self.device)
+                    offsets = torch.arange(horizon, device=self.device).unsqueeze(0)
+                    positions = starts.unsqueeze(1) + offsets
+                    rows = torch.arange(
+                        positions.shape[0], device=self.device).unsqueeze(1)
+                    contexts = (
+                        full_contexts[0][rows, positions],
+                        full_contexts[1][rows, positions],
+                    )
                     expected, q1, _, tensors, _ = component_mean_q(
                         self.critic, contexts, distribution,
                         self.action_scale, self.action_offset, twin_min=False)
