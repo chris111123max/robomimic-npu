@@ -220,7 +220,7 @@ class RecurrentGMMTD3:
     def _target_actor_window(self, sequence):
         """Recover the exact legacy 11-step target-Actor window from a full prefix."""
         starts = np.asarray(sequence.get("sample_window_starts"), dtype=np.int64)
-        length = int(self.config["recurrent_replay"]["critic_context_length"])
+        length = int(self.config["recurrent_replay"]["critic_bptt_length"])
         if starts.ndim != 1:
             raise ValueError("sample_window_starts are required for target Actor alignment")
         source = sequence["next_observations"]
