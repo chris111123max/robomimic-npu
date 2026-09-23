@@ -2,7 +2,9 @@ import tempfile, unittest, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import h5py, numpy as np
-from stage3_v5_replay import CANONICAL_KEYS, Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations, OnlineSequenceReplay
+from stage3_v5_replay import (CANONICAL_KEYS, Stage1OfflineSequenceReplay,
+                              BalancedOfflineDemonstrations, OnlineSequenceReplay,
+                              _pad_prefix_batch, final_transition)
 
 def make_file(path):
  with h5py.File(path,"w") as f:
@@ -33,6 +35,22 @@ class TestReplay(unittest.TestCase):
    for _ in range(3):
     ids=multi.sample_sequences(128,10)["source_id"]; self.assertEqual(len(ids),128); totals += [(ids==i).sum() for i in range(3)]
    self.assertTrue(np.array_equal(totals,[128,128,128]))
+
+
+ def test_critic_prefix_replay_preserves_final_transition_and_episode_start(self):
+  with tempfile.TemporaryDirectory() as d:
+   path=str(Path(d)/"rnn.h5"); make_file(path)
+   replay=Stage1OfflineSequenceReplay(path,"rnn",11)
+   raw=replay.sample_critic_prefixes(16,11)
+   batch=_pad_prefix_batch(raw)
+   self.assertTrue(np.all(batch["episode_steps"][:,0] == 0))
+   self.assertTrue(np.all(batch["sequence_lengths"] >= 11))
+   self.assertTrue(np.array_equal(
+       batch["sample_window_starts"] + 11, batch["sequence_lengths"]))
+   final=final_transition(batch)
+   rows=np.arange(len(batch["sequence_lengths"]))
+   idx=batch["sequence_lengths"]-1
+   self.assertTrue(np.array_equal(final["actions"], batch["actions"][rows,idx]))
 
  def test_rnn_source_is_exclusive_and_aligned(self):
   with tempfile.TemporaryDirectory() as d:
