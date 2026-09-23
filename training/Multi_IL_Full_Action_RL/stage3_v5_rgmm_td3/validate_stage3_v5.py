@@ -20,6 +20,8 @@ def validate(config):
     checks = {}
     checks["utd"] = config["utd"] == .25
     checks["policy_delay"] = config["policy_delay"] == 4
+    checks["critic_context_length"] = config["recurrent_replay"]["critic_context_length"] == 10
+    checks["critic_history_semantics"] = config["recurrent_replay"].get("critic_history_semantics") == "sliding_horizon_10_zero_state_final_step"
     checks["formal_num_envs"] = config["parallel_env"]["num_envs"] == 16
     checks["startup_batch_size"] = config["parallel_env"]["startup_parallelism"] == 4
     handoff = CriticHandoff(copy.deepcopy(config))
