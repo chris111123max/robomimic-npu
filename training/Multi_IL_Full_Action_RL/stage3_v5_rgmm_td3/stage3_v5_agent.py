@@ -108,7 +108,8 @@ def strict_stage2_load(path, device):
     expected = {"obs_dim": 59, "action_dim": 14, "token_dim": 64,
                 "lstm_hidden_dim": 96, "lstm_layers": 1,
                 "head_hidden_dim": 128,
-                "history_semantics": "full_episode_prefix_unroll_learning_mask"}
+                "recurrent_context_length": 10,
+                "history_semantics": "sliding_horizon_10_zero_state_final_step_supervision"}
     architecture = payload.get("architecture", {})
     for key, value in expected.items():
         if architecture.get(key) != value:
