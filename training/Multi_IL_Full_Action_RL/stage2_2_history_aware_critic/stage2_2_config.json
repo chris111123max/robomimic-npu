@@ -13,6 +13,7 @@
   "head_hidden_dim": 128,
   "matched_hidden_dims": [240, 256],
   "legacy_replay_burn_in_length": 32,
+  "legacy_sequence_batch_size": 16,
   "learning_sequence_length": 16,
   "sequence_batch_size": 256,
   "effective_training_timesteps_per_batch": 256,
