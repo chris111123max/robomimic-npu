@@ -2,7 +2,7 @@
 from __future__ import annotations
 import numpy as np
 import torch
-from sequence_dataset import POLICIES, previous_actions
+from sequence_dataset import POLICIES
 
 def ranks(x):
     """Zero-based average ranks with exact tie handling."""
@@ -15,10 +15,10 @@ def ranks(x):
 def corr(a,b):
     return None if len(a)<2 or np.std(a)==0 or np.std(b)==0 else float(np.corrcoef(a,b)[0,1])
 def auc(scores,labels):
-    labels=np.asarray(labels,bool); p=labels.sum(); n=(~labels).sum()
+    labels=np.asarray(labels,bool);p=labels.sum();n=(~labels).sum()
     return None if not p or not n else float((ranks(scores)[labels].sum()-p*(p-1)/2)/(p*n))
 def metrics(q1,q2,target,success,progress):
-    q=np.minimum(q1,q2); error=q-target
+    q=np.minimum(q1,q2);error=q-target
     result={"q1_mse":float(np.mean((q1-target)**2)),"q2_mse":float(np.mean((q2-target)**2)),
       "twin_mean_mse":float((np.mean((q1-target)**2)+np.mean((q2-target)**2))/2),"mae":float(np.mean(np.abs(error))),
       "spearman":corr(ranks(q),ranks(target)),"pearson":corr(q,target),"auc":auc(q,success),
@@ -26,20 +26,35 @@ def metrics(q1,q2,target,success,progress):
       "success_q_mean":float(q[success].mean()) if success.any() else None,"failure_q_mean":float(q[~success].mean()) if (~success).any() else None}
     result["outcome_slices"]={}
     for name,mask in (("success",success),("failure",~success)):
-        if mask.any(): result["outcome_slices"][name]={"count":int(mask.sum()),"q_mean":float(q[mask].mean()),"q_std":float(q[mask].std()),"target_mean":float(target[mask].mean()),"mae":float(np.mean(np.abs(error[mask]))),"mse":float(np.mean(error[mask]**2)),"spearman":corr(ranks(q[mask]),ranks(target[mask]))}
+        if mask.any():result["outcome_slices"][name]={"count":int(mask.sum()),"q_mean":float(q[mask].mean()),"q_std":float(q[mask].std()),"target_mean":float(target[mask].mean()),"mae":float(np.mean(np.abs(error[mask]))),"mse":float(np.mean(error[mask]**2)),"spearman":corr(ranks(q[mask]),ranks(target[mask]))}
     slices={"early":progress<1/3,"middle":(progress>=1/3)&(progress<2/3),"late":progress>=2/3}
     result["progress_slices"]={name:{"count":int(mask.sum()),"mae":float(np.mean(np.abs(error[mask]))),"mse":float(np.mean(error[mask]**2)),"q_mean":float(q[mask].mean()),"target_mean":float(target[mask].mean())} for name,mask in slices.items() if mask.any()}
     return result
 
+def episode_windows(episode,context_length,horizon):
+    """Build one zero-state <=context_length recurrent window for every transition."""
+    length=episode.length;T=int(context_length)
+    o=np.zeros((length,T,59),np.float32);pa=np.zeros((length,T,14),np.float32);a=np.zeros((length,T,14),np.float32);p=np.zeros((length,T,1),np.float32)
+    final=np.zeros(length,np.int64)
+    for target in range(length):
+        start=max(0,target-T+1);stop=target+1;n=stop-start
+        o[target,:n]=episode.observations[start:stop];a[target,:n]=episode.actions[start:stop]
+        if n>1:pa[target,1:n]=episode.actions[start:stop-1]
+        p[target,:n,0]=np.arange(start,stop,dtype=np.float32)/float(horizon)
+        final[target]=n-1
+    return o,pa,p,a,final
+
 @torch.no_grad()
-def evaluate(model,datasets,device,horizon=700):
-    was_training=model.training;model.eval(); output={}
+def evaluate(model,datasets,device,horizon=700,context_length=10):
+    was_training=model.training;model.eval();output={}
     for policy in POLICIES:
         q1s=[];q2s=[];targets=[];labels=[];progress=[]
         for e in datasets[policy].episodes:
-            o=torch.as_tensor(e.observations[None],device=device); p=torch.as_tensor(previous_actions(e.actions)[None],device=device)
-            t=torch.arange(e.length,device=device,dtype=torch.float32)[None,:,None]/float(horizon); a=torch.as_tensor(e.actions[None],device=device)
-            q1,q2=model.forward_sequence(o,p,t,a);q1s.append(q1.cpu().numpy().ravel());q2s.append(q2.cpu().numpy().ravel())
+            o,pa,p,a,final=episode_windows(e,context_length,horizon)
+            q1,q2=model.forward_sequence(torch.as_tensor(o,device=device),torch.as_tensor(pa,device=device),
+                                         torch.as_tensor(p,device=device),torch.as_tensor(a,device=device))
+            rows=torch.arange(e.length,device=device);idx=torch.as_tensor(final,device=device)
+            q1s.append(q1[rows,idx,0].cpu().numpy());q2s.append(q2[rows,idx,0].cpu().numpy())
             targets.append(e.returns);labels.append(np.full(e.length,e.success));progress.append(np.arange(e.length)/float(horizon))
         output[policy]=metrics(np.concatenate(q1s),np.concatenate(q2s),np.concatenate(targets),np.concatenate(labels).astype(bool),np.concatenate(progress))
     output["balanced_aggregate"]={key:float(np.mean([output[p][key] for p in POLICIES])) for key in ("q1_mse","q2_mse","twin_mean_mse","mae")}
