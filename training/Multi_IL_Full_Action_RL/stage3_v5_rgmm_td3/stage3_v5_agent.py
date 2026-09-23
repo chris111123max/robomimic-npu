@@ -255,8 +255,9 @@ class RecurrentGMMTD3:
         if hasattr(self.target_critic, "encode_history"):
             target_contexts = self._history_contexts(
                 self.target_critic, target_sequence, successor=True)
-            target_final = final_contexts(
-                target_contexts, target_sequence["sequence_lengths"])
+            target_lengths = np.asarray(
+                target_sequence["sequence_lengths"], dtype=np.int64) + 1
+            target_final = final_contexts(target_contexts, target_lengths)
             expected_next, _, _, _, _ = component_mean_q(
                 self.target_critic, target_final,
                 distribution, self.action_scale, self.action_offset)
@@ -320,7 +321,9 @@ class RecurrentGMMTD3:
                 if target_contexts is not None:
                     sampled_diagnostic, _, _, _, _ = sampled_q(
                         self.target_critic,
-                        final_contexts(target_contexts, target_sequence["sequence_lengths"]),
+                        final_contexts(
+                            target_contexts,
+                            np.asarray(target_sequence["sequence_lengths"], dtype=np.int64) + 1),
                         learned_distribution, self.action_scale, self.action_offset,
                         samples=int(self.config["diagnostic_learned_std_samples_per_mode"]))
                 else:
