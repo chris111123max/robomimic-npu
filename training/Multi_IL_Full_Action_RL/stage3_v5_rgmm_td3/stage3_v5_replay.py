@@ -80,6 +80,14 @@ class Stage1OfflineSequenceReplay:
         result["source_id"] = np.full(int(count), self.source_id, np.int8)
         return result
 
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        result = _sample_aligned_prefix_batch(
+            self.episodes, self.rng, count, length, horizon)
+        self.samples_drawn += int(count)
+        self.samples_by_purpose[purpose] = self.samples_by_purpose.get(purpose, 0) + int(count)
+        result["source_id"] = np.full(int(count), self.source_id, np.int8)
+        return result
+
     def state_dict(self): return {"rng_state":self.rng.bit_generator.state,"samples_drawn":self.samples_drawn,"samples_by_purpose":dict(self.samples_by_purpose)}
     def load_state_dict(self, value):
         self.rng.bit_generator.state=value["rng_state"]; self.samples_drawn=int(value["samples_drawn"])
@@ -187,6 +195,11 @@ class OfflineDemonstrations(_OfflineDemonstrations):
     def sample_sequences(self, count, length):
         return _sample_sequence_batch(self.episodes, self.rng, count, length)
 
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        del purpose
+        return _sample_aligned_prefix_batch(
+            self.episodes, self.rng, count, length, horizon)
+
 
 class BalancedOfflineDemonstrations:
     """Fixed-size 3-way offline mixture with rotating 43/43/42 remainder."""
@@ -233,6 +246,31 @@ class BalancedOfflineDemonstrations:
         for key in CORE + ("episode_steps",):
             result[key] = [result[key][int(i)] for i in permutation]
         for key in ("sequence_lengths", "sample_window_starts", "source_id"):
+            result[key] = result[key][permutation]
+        return result
+
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        base = int(count) // 3
+        counts = [base, base, base]
+        cursor = self.purpose_cursors.get(purpose, 0)
+        for offset in range(int(count) - 3 * base):
+            counts[(cursor + offset) % 3] += 1
+        self.purpose_cursors[purpose] = (cursor + 1) % 3
+        pieces = [source.sample_actor_prefixes(n, length, horizon, purpose)
+                  for source, n in zip(self.sources, counts)]
+        fixed = CORE + ("episode_steps",)
+        result = {key: np.concatenate([piece[key] for piece in pieces], axis=0)
+                  for key in fixed}
+        for key in tuple(f"critic_{name}" for name in fixed):
+            result[key] = sum((list(piece[key]) for piece in pieces), [])
+        for key in ("critic_sequence_lengths", "actor_window_starts", "source_id"):
+            result[key] = np.concatenate([piece[key] for piece in pieces], axis=0)
+        permutation = self.rng.permutation(int(count))
+        for key in fixed:
+            result[key] = result[key][permutation]
+        for key in tuple(f"critic_{name}" for name in fixed):
+            result[key] = [result[key][int(i)] for i in permutation]
+        for key in ("critic_sequence_lengths", "actor_window_starts", "source_id"):
             result[key] = result[key][permutation]
         return result
 
@@ -295,6 +333,11 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
             list(self.episodes) + list(self.current.values()),
             self.rng, count, length)
 
+    def sample_actor_prefixes(self, count, length, horizon=10):
+        return _sample_aligned_prefix_batch(
+            list(self.episodes) + list(self.current.values()),
+            self.rng, count, length, horizon)
+
     def finish(self, env_id, success=False):
         episode = self.current.pop(int(env_id), None)
         if episode:
@@ -334,6 +377,52 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
         return replay
 
 
+def _sample_aligned_prefix_batch(episodes, rng, count, length, horizon):
+    """Sample Actor windows while retaining full Critic prefixes for those timesteps."""
+    eligible = [episode for episode in episodes if len(episode["actions"]) >= int(length)]
+    if not eligible:
+        raise RuntimeError("No complete boundary-aligned Actor window available")
+    count, length, horizon = int(count), int(length), int(horizon)
+    episode_ids = rng.integers(len(eligible), size=count)
+    window_counts = np.asarray(
+        [(len(episode["actions"]) - length) // horizon + 1
+         for episode in eligible], dtype=np.int64)
+    starts = rng.integers(window_counts[episode_ids], size=count) * horizon
+    actor = {key: [] for key in CORE + ("episode_steps",)}
+    prefix = {key: [] for key in CORE + ("episode_steps",)}
+    lengths = []
+    for episode_id, start in zip(episode_ids, starts):
+        episode = eligible[int(episode_id)]
+        start, stop = int(start), int(start) + length
+        for key in actor:
+            actor[key].append(np.asarray(episode[key][start:stop]))
+            prefix[key].append(np.asarray(episode[key][:stop]))
+        lengths.append(stop)
+    result = {key: np.stack(value) for key, value in actor.items()}
+    result.update({f"critic_{key}": value for key, value in prefix.items()})
+    result["critic_sequence_lengths"] = np.asarray(lengths, dtype=np.int64)
+    result["actor_window_starts"] = np.asarray(starts, dtype=np.int64)
+    return result
+
+
+def _pad_actor_prefix_fields(batch):
+    lengths = np.asarray(batch["critic_sequence_lengths"], dtype=np.int64)
+    max_length = int(lengths.max())
+    result = {
+        "critic_observations": np.zeros((len(lengths), max_length, 59), np.float32),
+        "critic_actions": np.zeros((len(lengths), max_length, 14), np.float32),
+        "critic_episode_steps": np.zeros((len(lengths), max_length), np.int64),
+        "critic_sequence_lengths": lengths,
+        "actor_window_starts": np.asarray(batch["actor_window_starts"], dtype=np.int64),
+    }
+    for row, length in enumerate(lengths):
+        length = int(length)
+        result["critic_observations"][row, :length] = batch["critic_observations"][row]
+        result["critic_actions"][row, :length] = batch["critic_actions"][row]
+        result["critic_episode_steps"][row, :length] = batch["critic_episode_steps"][row]
+    return result
+
+
 def _sample_aligned(source, count, length, horizon, purpose="actor"):
     if isinstance(source, (Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations)):
         return source.sample_sequences(count, length, aligned=True, horizon=horizon, purpose=purpose)
@@ -368,16 +457,26 @@ def aligned_sequence_batch(offline, online, count, length, horizon=10, profiler=
         raise ValueError("Aligned Actor batch requires even count and one RNN horizon")
     half = int(count) // 2
     with profiler.measure("actor_replay_sample_ms") if profiler else nullcontext():
-        left = _sample_aligned(offline, half, int(length), int(horizon))
-        right = _sample_aligned(online, half, int(length), int(horizon))
+        left = offline.sample_actor_prefixes(
+            half, int(length), int(horizon), purpose="actor")
+        right = online.sample_actor_prefixes(
+            half, int(length), int(horizon))
+    fixed = CORE + ("episode_steps",)
     batch = {key: np.concatenate((left[key], right[key]), axis=0)
-             for key in CORE + ("episode_steps",)}
-    batch["is_offline"] = np.concatenate((np.ones(half, np.float32),
-                                           np.zeros(half, np.float32)))
+             for key in fixed}
+    prefix = {}
+    for key in tuple(f"critic_{name}" for name in fixed):
+        prefix[key] = list(left[key]) + list(right[key])
+    prefix["critic_sequence_lengths"] = np.concatenate(
+        (left["critic_sequence_lengths"], right["critic_sequence_lengths"]))
+    prefix["actor_window_starts"] = np.concatenate(
+        (left["actor_window_starts"], right["actor_window_starts"]))
+    batch.update(_pad_actor_prefix_fields(prefix))
+    batch["is_offline"] = np.concatenate(
+        (np.ones(half, np.float32), np.zeros(half, np.float32)))
     if not np.all(batch["episode_steps"][:, 0] % horizon == 0):
         raise RuntimeError("Actor batch starts outside a hidden-state reset boundary")
     return batch
-
 
 def symmetric_sequence_batch(offline, online, count, length, profiler=None):
     if int(count) != 256:
