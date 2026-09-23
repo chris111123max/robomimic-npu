@@ -25,13 +25,17 @@ Replay remains 256 transitions per Critic update: 128 offline + 128 online.
 offline total, split 43/43/42 across BC-RNN, BC-Transformer and BC-GMM, with the
 remainder rotated over time.
 
-The Critic token is `[observation_t, previous_executed_action_t, t/700]`. Each
-Stage3 update encodes the existing contiguous 11-transition replay context; the
-successor target uses the shifted next-observation window and the action executed
-at each source transition as its previous-action token. Actor-Q, target-Q,
-readiness, OOD stress, and full-episode diagnostics share this same adapter. The
-readiness thresholds, consecutive-pass rule, warm-up schedule, and unfreeze
-criteria are unchanged.
+The Critic token is `[observation_t, previous_executed_action_t, t/700]`.
+Stage3 now uses the exact Stage2.2 recurrent contract: a zero-state sliding
+context of at most 10 transitions, with the first previous-action token forced
+to zero. Critic replay is fixed at 10 transitions. The Bellman successor uses
+the corresponding shifted 10-step next-observation context and is also
+zero-state at its first token. Actor BPTT still follows the BC-RNN 10-step reset
+block; the RL Q objective is evaluated only at that block's final transition,
+where the Actor block and Critic sliding window are exactly identical.
+Readiness, OOD stress, TD diagnostics, and episode Q diagnostics all use the
+same horizon-10 Critic adapter. The readiness thresholds, consecutive-pass rule,
+warm-up schedule, and unfreeze criteria are unchanged.
 
 Stage1 HDF5 replay is loaded natively from `/episodes`, retaining
 `terminated`, `truncated`, and `dones`. Both a true termination and a
