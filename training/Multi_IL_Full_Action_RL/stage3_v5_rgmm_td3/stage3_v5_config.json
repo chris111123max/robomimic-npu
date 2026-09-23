@@ -4,7 +4,7 @@
   "total_env_steps": 3000000,
   "obs_dim": 59, "action_dim": 14,
   "critic_architecture": {"token_dim": 64, "lstm_hidden_dim": 96, "lstm_layers": 1, "head_hidden_dim": 128},
-  "critic_source_contract": {"stage_version": "2.2", "critic_type": "history_aware_twin_q", "token_schema": ["observation_t", "previous_executed_action_t", "normalized_episode_progress_t"], "stage3_context": "full_episode_prefix_with_detached_prefix_and_11_step_bptt", "target_context": "full_episode_prefix_successor_with_executed_action_as_previous_action"},
+  "critic_source_contract": {"stage_version": "2.2", "critic_type": "history_aware_twin_q", "token_schema": ["observation_t", "previous_executed_action_t", "normalized_episode_progress_t"], "stage3_context": "full_episode_prefix_dense_unroll", "target_context": "full_episode_prefix_successor_with_executed_action_as_previous_action"},
   "gamma": 0.99, "tau": 0.005, "critic_lr": 0.0003, "critic_weight_decay": 0.0001, "critic_max_grad_norm": 100.0,
   "actor_lr": 0.000002, "actor_max_grad_norm": 10.0, "batch_size": 256,
   "offline_fraction": 0.5, "online_fraction": 0.5, "utd": 0.25, "policy_delay": 4,
