@@ -480,8 +480,33 @@ def main():
     final_polyak = float(polyak["trajectory"][-1]["online"]["spearman_q_return"])
     final_frozen = float(frozen["trajectory"][-1]["online"]["spearman_q_return"])
 
+    validity = {
+        "same_initial_online_hash": bool(
+            polyak["initial_online_hash"] == frozen["initial_online_hash"]),
+        "same_initial_target_critic_hash": bool(
+            polyak["initial_target_critic_hash"]
+            == frozen["initial_target_critic_hash"]),
+        "same_initial_target_actor_hash": bool(
+            polyak["initial_target_actor_hash"]
+            == frozen["initial_target_actor_hash"]),
+        "same_initial_probe_spearman": bool(
+            abs(
+                polyak["trajectory"][0]["online"]["spearman_q_return"]
+                - frozen["trajectory"][0]["online"]["spearman_q_return"]
+            ) <= 1e-12
+        ),
+        "frozen_target_critic_unchanged": bool(
+            not frozen["target_critic_changed"]),
+        "polyak_target_critic_changed": bool(
+            polyak["target_critic_changed"]),
+        "target_actor_unchanged_both": bool(
+            not polyak["target_actor_changed"]
+            and not frozen["target_actor_changed"]),
+    }
+    valid = bool(all(validity.values()))
+
     output = {
-        "status": "PASS",
+        "status": "PASS" if valid else "INVALID",
         "experiment": "stage3_v5_frozen_target_causal",
         "environment_steps_performed": 0,
         "actor_updates_performed": 0,
@@ -498,6 +523,11 @@ def main():
         "updates": int(args.updates),
         "schedule_seed": int(args.seed),
         "same_precomputed_batch_schedule": True,
+        "isolation_scope": (
+            "fixed canonical online replay only; this intentionally isolates "
+            "target-Critic feedback and is not a reproduction of the 50/50 "
+            "offline+online production replay mixture"
+        ),
         "probe_size": int(len(probe_refs)),
         "probe_seed": int(args.seed + 1000003),
         "milestones": list(map(int, milestones)),
@@ -514,6 +544,7 @@ def main():
         "polyak": polyak,
         "frozen": frozen,
         "comparison": comparison,
+        "validity": validity,
         "summary": {
             "initial_online_spearman": initial_spearman,
             "final_polyak_online_spearman": final_polyak,
@@ -554,9 +585,13 @@ def main():
             f"{row['frozen_target_spearman']:.6f}"
         )
 
+    print("\n[VALIDITY]")
+    print(json.dumps(validity, indent=2, sort_keys=True))
     print("\n[SUMMARY]")
     print(json.dumps(output["summary"], indent=2, sort_keys=True))
     print(f"[SAVED] {out_path}", flush=True)
+    if not valid:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
