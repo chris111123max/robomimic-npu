@@ -333,12 +333,27 @@ def branch_run(
     record(0)
 
     milestone_set = set(int(value) for value in milestones)
+    failure = None
+    completed_updates = 0
     for index in range(len(schedule)):
         sequence = stack_sequence_batch(
             episodes, schedule[index], length)
         final = final_transition(sequence)
 
-        agent.critic_update(final, sequence, collect_metrics=False)
+        try:
+            agent.critic_update(final, sequence, collect_metrics=False)
+        except FloatingPointError as exc:
+            failure = {
+                "failed_update": int(index + 1),
+                "exception_type": type(exc).__name__,
+                "message": str(exc),
+            }
+            print(
+                f"[{mode}] NONFINITE at update={index + 1}: {exc}",
+                flush=True,
+            )
+            break
+
         if mode == "polyak":
             # Exact production CRITIC_ONLY behavior: target Critic is Polyak
             # updated every Critic step; target Actor remains frozen because
@@ -348,17 +363,23 @@ def branch_run(
             # Causal intervention: intentionally skip target Critic Polyak.
             pass
 
-        completed = index + 1
-        if completed in milestone_set:
-            record(completed)
+        completed_updates = index + 1
+        if completed_updates in milestone_set:
+            record(completed_updates)
 
+    # If a branch fails between milestones, preserve the last finite model
+    # state after the previous successful optimizer step. Do not attempt to
+    # evaluate a potentially contaminated model after the non-finite update.
     final_target_hash = module_digest(agent.target_critic)
     final_target_actor_hash = module_digest(agent.target_actor)
     final_online_hash = module_digest(agent.critic)
 
     result = {
         "mode": mode,
-        "updates_performed": int(len(schedule)),
+        "updates_requested": int(len(schedule)),
+        "updates_completed": int(completed_updates),
+        "failure": failure,
+        "completed": bool(failure is None and completed_updates == len(schedule)),
         "initial_online_hash": initial_online_hash,
         "final_online_hash": final_online_hash,
         "initial_target_critic_hash": initial_target_hash,
@@ -452,13 +473,20 @@ def main():
         probe_refs, probe_returns, probe_labels, probe_episode_ids,
         device, milestones, args.probe_batch_size)
 
-    if len(polyak["trajectory"]) != len(frozen["trajectory"]):
-        raise RuntimeError("Branch milestone trajectories differ")
+    polyak_by_update = {
+        int(row["update"]): row for row in polyak["trajectory"]
+    }
+    frozen_by_update = {
+        int(row["update"]): row for row in frozen["trajectory"]
+    }
+    common_updates = sorted(set(polyak_by_update) & set(frozen_by_update))
+    if not common_updates:
+        raise RuntimeError("Branches share no recorded milestone")
 
     comparison = []
-    for left, right in zip(polyak["trajectory"], frozen["trajectory"]):
-        if left["update"] != right["update"]:
-            raise RuntimeError("Branch milestone updates differ")
+    for update in common_updates:
+        left = polyak_by_update[update]
+        right = frozen_by_update[update]
         comparison.append({
             "update": int(left["update"]),
             "polyak_online_spearman": float(
@@ -476,9 +504,12 @@ def main():
             "frozen_qmin_mean": float(right["online"]["qmin_mean"]),
         })
 
-    initial_spearman = float(polyak["trajectory"][0]["online"]["spearman_q_return"])
-    final_polyak = float(polyak["trajectory"][-1]["online"]["spearman_q_return"])
-    final_frozen = float(frozen["trajectory"][-1]["online"]["spearman_q_return"])
+    initial_spearman = float(polyak_by_update[0]["online"]["spearman_q_return"])
+    last_common_update = int(common_updates[-1])
+    final_polyak = float(
+        polyak_by_update[last_common_update]["online"]["spearman_q_return"])
+    final_frozen = float(
+        frozen_by_update[last_common_update]["online"]["spearman_q_return"])
 
     validity = {
         "same_initial_online_hash": bool(
@@ -506,12 +537,18 @@ def main():
     valid = bool(all(validity.values()))
 
     output = {
-        "status": "PASS" if valid else "INVALID",
+        "status": (
+            "PASS" if valid and polyak["completed"] and frozen["completed"]
+            else "PARTIAL" if valid
+            else "INVALID"
+        ),
         "experiment": "stage3_v5_frozen_target_causal",
         "environment_steps_performed": 0,
         "actor_updates_performed": 0,
         "training_checkpoints_written": 0,
-        "optimizer_steps_per_branch": int(args.updates),
+        "optimizer_steps_requested_per_branch": int(args.updates),
+        "polyak_optimizer_steps_completed": int(polyak["updates_completed"]),
+        "frozen_optimizer_steps_completed": int(frozen["updates_completed"]),
         "device": str(device),
         "stage2_architecture_checkpoint": str(stage2_path),
         "stage3_step0_checkpoint": str(step0_path),
@@ -544,6 +581,12 @@ def main():
         "polyak": polyak,
         "frozen": frozen,
         "comparison": comparison,
+        "comparison_scope": {
+            "common_milestones": list(map(int, common_updates)),
+            "last_common_update": int(last_common_update),
+            "polyak_failure": polyak["failure"],
+            "frozen_failure": frozen["failure"],
+        },
         "validity": validity,
         "summary": {
             "initial_online_spearman": initial_spearman,
@@ -551,6 +594,7 @@ def main():
             "final_frozen_online_spearman": final_frozen,
             "polyak_change_from_initial": float(final_polyak - initial_spearman),
             "frozen_change_from_initial": float(final_frozen - initial_spearman),
+            "last_common_update": int(last_common_update),
             "final_frozen_minus_polyak": float(final_frozen - final_polyak),
             "frozen_target_critic_unchanged": bool(
                 not frozen["target_critic_changed"]),
