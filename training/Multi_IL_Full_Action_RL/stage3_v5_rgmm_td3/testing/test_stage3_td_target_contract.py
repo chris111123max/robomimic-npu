@@ -119,6 +119,7 @@ def terminal_arrays(episode):
 
 def validate_terminal_contract(episodes):
     total = terminated_count = truncated_count = done_count = 0
+    mismatch_count = 0
     mismatches = []
     terminated_cases = []
     truncated_cases = []
@@ -127,6 +128,7 @@ def validate_terminal_contract(episodes):
         terminated, truncated, dones = terminal_arrays(episode)
         expected = terminated | truncated
         bad = np.flatnonzero(dones != expected)
+        mismatch_count += int(len(bad))
         for target in bad[:20]:
             mismatches.append({
                 "episode_index": int(episode_index),
@@ -149,7 +151,7 @@ def validate_terminal_contract(episodes):
         "terminated_count": int(terminated_count),
         "truncated_count": int(truncated_count),
         "done_count": int(done_count),
-        "mismatch_count": int(len(mismatches)),
+        "mismatch_count": int(mismatch_count),
         "mismatch_examples": mismatches,
         "terminated_cases": terminated_cases,
         "truncated_cases": truncated_cases,
@@ -499,6 +501,7 @@ def load_checkpoint_into_agent(agent, payload):
     agent.target_critic.load_state_dict(payload["target_q1_q2"], strict=True)
     agent.actor.eval()
     agent.target_actor.eval()
+    agent.target_actor.low_noise_eval = True
     agent.target_actor.requires_grad_(False)
     agent.critic.eval()
     agent.target_critic.eval()
