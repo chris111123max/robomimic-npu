@@ -44,7 +44,7 @@ from test_stage3_frozen_target_causal import (  # noqa: E402
 )
 
 
-MILESTONES = (0, 250, 500, 1000)
+MILESTONES = (0, 250, 500, 1000, 2000)
 POLICIES = {
     "baseline": {"tau": 0.005, "period": 1},
     "slow_tau": {"tau": 0.0005, "period": 1},
@@ -57,7 +57,7 @@ def arguments():
     parser.add_argument("--stage3-run-dir", required=True)
     parser.add_argument("--stage2-checkpoint", default=DEFAULT_STAGE2)
     parser.add_argument("--device", default="npu:0")
-    parser.add_argument("--updates", type=int, default=1000)
+    parser.add_argument("--updates", type=int, default=2000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--probe-size", type=int, default=4096)
     parser.add_argument("--probe-batch-size", type=int, default=1024)
@@ -208,8 +208,8 @@ def by_update(branch):
 
 def main():
     args = arguments()
-    if args.updates != 1000:
-        raise ValueError("Keep --updates 1000 for this short diagnostic")
+    if args.updates != 2000:
+        raise ValueError("Keep --updates 2000 for this diagnostic")
     if args.batch_size != 256:
         raise ValueError("Keep production Critic --batch-size 256")
     if args.probe_size < 100:
