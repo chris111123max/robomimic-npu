@@ -81,9 +81,7 @@ def arguments():
     return parser.parse_args()
 
 
-def release(*models, device):
-    for model in models:
-        del model
+def cleanup_device(device):
     gc.collect()
     if device.type == "npu":
         torch.npu.empty_cache()
@@ -278,6 +276,7 @@ def evaluate_checkpoint(
         "terminal": [],
         "closest_component_action_l2": [],
         "weighted_component_action_l2": [],
+        "context_length": [],
     }
 
     for length in range(1, context_length + 1):
@@ -364,14 +363,20 @@ def evaluate_checkpoint(
             outputs["terminal"].append(batch["terminals"])
             outputs["closest_component_action_l2"].append(closest_l2.cpu().numpy())
             outputs["weighted_component_action_l2"].append(weighted_l2.cpu().numpy())
+            outputs["context_length"].append(
+                np.full(len(selected), length, dtype=np.int64))
 
     outputs = {
         key: np.concatenate(value).reshape(-1)
         for key, value in outputs.items()
     }
     nonterminal = outputs["terminal"] < 0.5
+    full_horizon_nonterminal = (
+        nonterminal & (outputs["context_length"] == context_length))
     if not np.any(nonterminal):
         raise RuntimeError("Canonical set contains no non-terminal transitions")
+    if not np.any(full_horizon_nonterminal):
+        raise RuntimeError("Canonical set contains no train-eligible horizon-10 transitions")
 
     all_metrics = {
         "current_q": scalar_metrics(outputs["current_q"], outputs["mc"]),
@@ -380,43 +385,50 @@ def evaluate_checkpoint(
         "target_gap": distribution_gap_metrics(
             outputs["component_td"], outputs["executed_td"]),
     }
-    nonterminal_metrics = {
-        "current_q": scalar_metrics(
-            outputs["current_q"][nonterminal], outputs["mc"][nonterminal]),
-        "component_mean_td": scalar_metrics(
-            outputs["component_td"][nonterminal], outputs["mc"][nonterminal]),
-        "executed_next_action_td": scalar_metrics(
-            outputs["executed_td"][nonterminal], outputs["mc"][nonterminal]),
-        "target_gap": distribution_gap_metrics(
-            outputs["component_td"][nonterminal],
-            outputs["executed_td"][nonterminal],
-        ),
-        "component_next_q": {
-            "mean": float(outputs["component_next_q"][nonterminal].mean()),
-            "std": float(outputs["component_next_q"][nonterminal].std()),
-        },
-        "executed_next_q": {
-            "mean": float(outputs["executed_next_q"][nonterminal].mean()),
-            "std": float(outputs["executed_next_q"][nonterminal].std()),
-        },
-        "action_distance": {
-            "closest_component_mean_l2_mean": float(
-                outputs["closest_component_action_l2"][nonterminal].mean()),
-            "closest_component_mean_l2_p95": float(np.percentile(
-                outputs["closest_component_action_l2"][nonterminal], 95)),
-            "weighted_component_mean_l2_mean": float(
-                outputs["weighted_component_action_l2"][nonterminal].mean()),
-            "weighted_component_mean_l2_p95": float(np.percentile(
-                outputs["weighted_component_action_l2"][nonterminal], 95)),
-        },
-    }
+    def masked_metrics(mask):
+        return {
+            "current_q": scalar_metrics(
+                outputs["current_q"][mask], outputs["mc"][mask]),
+            "component_mean_td": scalar_metrics(
+                outputs["component_td"][mask], outputs["mc"][mask]),
+            "executed_next_action_td": scalar_metrics(
+                outputs["executed_td"][mask], outputs["mc"][mask]),
+            "target_gap": distribution_gap_metrics(
+                outputs["component_td"][mask],
+                outputs["executed_td"][mask],
+            ),
+            "component_next_q": {
+                "mean": float(outputs["component_next_q"][mask].mean()),
+                "std": float(outputs["component_next_q"][mask].std()),
+            },
+            "executed_next_q": {
+                "mean": float(outputs["executed_next_q"][mask].mean()),
+                "std": float(outputs["executed_next_q"][mask].std()),
+            },
+            "action_distance": {
+                "closest_component_mean_l2_mean": float(
+                    outputs["closest_component_action_l2"][mask].mean()),
+                "closest_component_mean_l2_p95": float(np.percentile(
+                    outputs["closest_component_action_l2"][mask], 95)),
+                "weighted_component_mean_l2_mean": float(
+                    outputs["weighted_component_action_l2"][mask].mean()),
+                "weighted_component_mean_l2_p95": float(np.percentile(
+                    outputs["weighted_component_action_l2"][mask], 95)),
+            },
+        }
+
+    nonterminal_metrics = masked_metrics(nonterminal)
+    train_eligible_metrics = masked_metrics(full_horizon_nonterminal)
 
     return {
         "transition_count": int(len(outputs["mc"])),
         "nonterminal_transition_count": int(nonterminal.sum()),
+        "full_horizon_nonterminal_transition_count": int(
+            full_horizon_nonterminal.sum()),
         "terminal_transition_count": int((~nonterminal).sum()),
         "all_transitions": all_metrics,
         "nonterminal_transitions": nonterminal_metrics,
+        "full_horizon_nonterminal_transitions": train_eligible_metrics,
     }
 
 
@@ -526,14 +538,15 @@ def main():
             "target_actor_hash": actor_hashes[name],
             "metrics": metrics,
         }
-        release(online_critic, target_critic, device=device)
+        del online_critic, target_critic
+        cleanup_device(device)
 
     # Compact deltas that directly answer the hypothesis test.
     deltas = {}
     order = ("stage3_step0", "stage3_100k", "stage3_200k")
     for left, right in zip(order, order[1:]):
-        left_m = results[left]["metrics"]["nonterminal_transitions"]
-        right_m = results[right]["metrics"]["nonterminal_transitions"]
+        left_m = results[left]["metrics"]["full_horizon_nonterminal_transitions"]
+        right_m = results[right]["metrics"]["full_horizon_nonterminal_transitions"]
         deltas[f"{left}_to_{right}"] = {
             "current_q_spearman_change": float(
                 right_m["current_q"]["spearman_vs_mc"]
@@ -572,6 +585,10 @@ def main():
         "canonical_transition_count": int(transition_count),
         "canonical_nonterminal_transition_count": int(nonterminal_count),
         "history_contract": "sliding_horizon_10_zero_state",
+        "primary_analysis_subset": (
+            "full_horizon_nonterminal_transitions: exactly the final transition "
+            "of train-eligible length-10 windows"
+        ),
         "production_component_target": (
             "r + gamma*(1-terminal)*sum_k p_k*"
             "min(Q1_target,Q2_target)(s_next,component_mean_k)"
@@ -605,7 +622,7 @@ def main():
     )
     for name in order:
         row = results[name]
-        m = row["metrics"]["nonterminal_transitions"]
+        m = row["metrics"]["full_horizon_nonterminal_transitions"]
         print(
             f"{name}\t{row['critic_updates']}\t"
             f"{m['current_q']['spearman_vs_mc']:.6f}\t"
