@@ -26,13 +26,14 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 STAGE3 = HERE.parent
-ROOT = HERE.parents[4]
+ROOT = STAGE3.parents[2]
 STAGE2 = ROOT / "training" / "Multi_IL_Full_Action_RL" / "stage2_2_history_aware_critic"
 for directory in (STAGE3, STAGE2):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
-from stage3_v5_history_critic import strict_stage2_load, encode_replay_contexts  # noqa: E402
+from stage3_v5_agent import strict_stage2_load  # noqa: E402
+from stage3_v5_history_critic import encode_replay_contexts  # noqa: E402
 from stage3_v5_replay import OnlineSequenceReplay  # noqa: E402
 from stage3_v5_readiness import auc, correlation, discounted_returns  # noqa: E402
 
