@@ -1,0 +1,70 @@
+{
+  "confidence": "partial",
+  "current_best_causal_statement": "Learned-Q bootstrap supervision versus exact MC causes large ranking loss in two original-harness repeats, but evolving target-Critic feedback as the unique mechanism is not isolated because two matched moving-versus-fixed pairs end nearly equal.",
+  "iteration_results": [
+    {
+      "decision": "CONTINUE",
+      "final_oracle_minus_moving": 0.0819387499638502,
+      "initial_qmin_spearman": 0.7263838239951645,
+      "iteration": 1,
+      "moving_final_qmin_mae": 0.07077789571618354,
+      "moving_final_qmin_spearman": 0.6423964451558526,
+      "nonfinite": false,
+      "oracle_final_qmin_mae": 0.03538061002856807,
+      "oracle_final_qmin_spearman": 0.7243351951197028,
+      "status": "PASS",
+      "test": "multi_bootstrap_vs_oracle_mc_causal.json",
+      "updates_completed_per_branch": 2000
+    },
+    {
+      "cross_run_prior_moving_final_qmin_spearman": 0.6423964451558526,
+      "decision": "CONTINUE",
+      "final_fixed_minus_moving": 0.004470522339579008,
+      "fixed_final_qmin_mae": 0.034994505235765416,
+      "fixed_final_qmin_spearman": 0.7308916327292058,
+      "initial_qmin_spearman": 0.7263838239951645,
+      "iteration": 2,
+      "moving_final_qmin_mae": 0.032727055265105776,
+      "moving_final_qmin_spearman": 0.7264211103896268,
+      "nonfinite": false,
+      "status": "PASS",
+      "test": "multi_moving_vs_fixed_qmean_replay_bootstrap.json",
+      "updates_completed_per_branch": 2000
+    },
+    {
+      "decision": "CONTINUE",
+      "final_oracle_minus_moving": 0.08381286672920729,
+      "initial_qmin_spearman": 0.7263838239951645,
+      "iteration": 3,
+      "moving_final_qmin_mae": 0.07155359117792415,
+      "moving_final_qmin_spearman": 0.662765975419608,
+      "nonfinite": false,
+      "oracle_final_qmin_mae": 0.035726351772652265,
+      "oracle_final_qmin_spearman": 0.7465788421488153,
+      "status": "PASS",
+      "test": "multi_bootstrap_vs_oracle_mc_causal_repeat.json",
+      "updates_completed_per_branch": 2000
+    },
+    {
+      "decision": "STOP",
+      "final_fixed_minus_moving": -0.00222157556745628,
+      "fixed_final_qmin_mae": 0.035785051814940516,
+      "fixed_final_qmin_spearman": 0.7252033808606436,
+      "initial_qmin_spearman": 0.7263838239951645,
+      "iteration": 4,
+      "moving_final_qmin_mae": 0.032659179059230325,
+      "moving_final_qmin_spearman": 0.7274249564280999,
+      "nonfinite": false,
+      "status": "PASS",
+      "test": "multi_moving_vs_fixed_qmean_replay_bootstrap_repeat.json",
+      "updates_completed_per_branch": 2000
+    }
+  ],
+  "iterations_completed": 4,
+  "remaining_alternatives": [
+    "The original and fixed-teacher harnesses have different pre-run target-contract evaluation; its effect on update trajectories is unisolated.",
+    "Numerical or runtime variation may change Critic optimization paths.",
+    "Fixed approximate-Q supervision may cause transient or persistent loss under other matched conditions."
+  ],
+  "stopped_early": false
+}

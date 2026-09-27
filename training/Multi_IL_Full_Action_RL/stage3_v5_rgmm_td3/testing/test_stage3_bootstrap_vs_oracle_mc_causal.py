@@ -380,7 +380,11 @@ def branch_run(
     milestones,
     probe_batch_size,
 ):
-    if mode not in ("moving_qmean_replay_bootstrap", "oracle_mc"):
+    if mode not in (
+        "moving_qmean_replay_bootstrap",
+        "fixed_step0_qmean_replay_bootstrap",
+        "oracle_mc",
+    ):
         raise ValueError(mode)
 
     config = step0_payload["config"]
@@ -389,7 +393,10 @@ def branch_run(
     horizon = int(config["horizon"])
     agent = build_agent(stage2_path, step0_payload, device)
 
-    if mode == "moving_qmean_replay_bootstrap":
+    if mode in (
+        "moving_qmean_replay_bootstrap",
+        "fixed_step0_qmean_replay_bootstrap",
+    ):
         agent.bellman_target = types.MethodType(
             replay_qmean_bellman_target, agent)
     else:
@@ -480,10 +487,10 @@ def branch_run(
             )
             break
 
-        # Deliberately identical in both branches. The oracle branch does not
-        # use target_critic to form its target, but still updates it so the
-        # optimization/update schedule differs only in supervision source.
-        agent.polyak_update()
+        # Fixed-teacher intervention: skip target-Critic Polyak feedback.
+        # The original moving and oracle modes retain their behavior.
+        if mode != "fixed_step0_qmean_replay_bootstrap":
+            agent.polyak_update()
 
         completed_updates = int(index + 1)
         if completed_updates in milestone_set:
