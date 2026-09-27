@@ -110,13 +110,13 @@ def mc_return_cache(episodes, gamma):
     }
 
 
-def augment_training_sequence(
+def prepare_training_batch(
     episodes,
     refs,
     length,
     returns_by_episode,
 ):
-    """Attach exact G_t, G_(t+1), and replay a_(t+1) to one fixed batch."""
+    """Return the untouched production sequence plus diagnostic target data."""
     sequence = stack_sequence_batch(episodes, refs, length)
     refs = np.asarray(refs, dtype=np.int64)
 
@@ -147,10 +147,22 @@ def augment_training_sequence(
             next_actions[row] = actions[target + 1]
             mc_next[row] = returns[target + 1]
 
-    sequence["diagnostic_replay_next_actions"] = next_actions
-    sequence["diagnostic_mc_current"] = mc_current
-    sequence["diagnostic_mc_next"] = mc_next
-    return sequence
+    diagnostic = {
+        "replay_next_actions": next_actions,
+        "mc_current": mc_current,
+        "mc_next": mc_next,
+    }
+    return sequence, diagnostic
+
+
+def install_diagnostic_target_data(agent, diagnostic):
+    """Keep diagnostic targets off the production sequence/batch contract."""
+    agent._diagnostic_replay_next_actions = np.asarray(
+        diagnostic["replay_next_actions"], dtype=np.float32)
+    agent._diagnostic_mc_current = np.asarray(
+        diagnostic["mc_current"], dtype=np.float32)
+    agent._diagnostic_mc_next = np.asarray(
+        diagnostic["mc_next"], dtype=np.float32)
 
 
 @torch.no_grad()
@@ -163,7 +175,6 @@ def replay_qmean_bellman_target(self, b, target_sequence):
             "actions",
             "episode_steps",
             "next_observations",
-            "diagnostic_replay_next_actions",
         )
     })
 
@@ -181,7 +192,11 @@ def replay_qmean_bellman_target(self, b, target_sequence):
     )
     q1, q2 = self.target_critic.q_from_context(
         final_context,
-        target["diagnostic_replay_next_actions"],
+        torch.as_tensor(
+            self._diagnostic_replay_next_actions,
+            dtype=torch.float32,
+            device=self.device,
+        ),
     )
     q1 = q1.reshape(-1)
     q2 = q2.reshape(-1)
@@ -211,7 +226,7 @@ def replay_qmean_bellman_target(self, b, target_sequence):
 def oracle_mc_bellman_target(self, b, target_sequence):
     """Exact finite-episode MC target used by Stage2.2: y_t = G_t."""
     oracle = torch.as_tensor(
-        target_sequence["diagnostic_mc_current"],
+        self._diagnostic_mc_current,
         dtype=torch.float32,
         device=self.device,
     ).reshape(-1, 1)
@@ -277,8 +292,12 @@ def target_contract_check(
     returns_by_episode,
 ):
     """Check the first paired batch before either branch performs an update."""
-    sequence = augment_training_sequence(
+    sequence, diagnostic = prepare_training_batch(
         episodes, refs, length, returns_by_episode)
+    install_diagnostic_target_data(
+        bootstrap_agent, diagnostic)
+    install_diagnostic_target_data(
+        oracle_agent, diagnostic)
     final = final_transition(sequence)
 
     b_bootstrap = bootstrap_agent._tensor_batch(final)
@@ -293,12 +312,12 @@ def target_contract_check(
     oracle_td = oracle_out[0].reshape(-1)
 
     mc_current = torch.as_tensor(
-        sequence["diagnostic_mc_current"],
+        diagnostic["mc_current"],
         dtype=torch.float32,
         device=oracle_td.device,
     ).reshape(-1)
     mc_next = torch.as_tensor(
-        sequence["diagnostic_mc_next"],
+        diagnostic["mc_next"],
         dtype=torch.float32,
         device=oracle_td.device,
     ).reshape(-1)
@@ -333,7 +352,8 @@ def target_contract_check(
         "bootstrap_minus_oracle_abs_mean": float(
             gap.abs().mean().item()),
         "bootstrap_minus_oracle_abs_p95": float(
-            torch.quantile(gap.abs(), 0.95).item()),
+            np.percentile(
+                gap.detach().abs().cpu().numpy(), 95)),
         "terminal_bootstrap_equals_reward_max_abs": float(
             (bootstrap_td[terminal_mask] - reward[terminal_mask])
             .abs().max().item()
@@ -435,12 +455,14 @@ def branch_run(
     completed_updates = 0
 
     for index in range(len(schedule)):
-        sequence = augment_training_sequence(
+        sequence, diagnostic = prepare_training_batch(
             episodes,
             schedule[index],
             length,
             returns_by_episode,
         )
+        install_diagnostic_target_data(
+            agent, diagnostic)
         final = final_transition(sequence)
 
         try:
