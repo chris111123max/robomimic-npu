@@ -624,8 +624,36 @@ def main():
                     "conflict_fraction"]),
         }
 
+    validity = {
+        "target_actor_hash_constant": (
+            len(set(actor_hashes.values())) == 1
+        ),
+        "actor_updates_zero_all": all(
+            int(results[name]["actor_updates"]) == 0
+            for name in order
+        ),
+        "mc_identity_max_abs_le_2e_6": all(
+            results[name]["metrics"][
+                "mc_identity_all_transitions"]["abs_max"] <= 2e-6
+            for name in order
+        ),
+        "decomposition_reconstruction_max_abs_le_2e_6": all(
+            results[name]["metrics"][
+                "full_horizon_nonterminal_transitions"
+            ]["target_gap_decomposition"][
+                "decomposition_reconstruction_max_abs"
+            ] <= 2e-6
+            for name in order
+        ),
+        "stage3_step0_is_zero_update": bool(
+            results["stage3_step0"]["env_steps"] == 0
+            and results["stage3_step0"]["critic_updates"] == 0
+        ),
+    }
+    valid = bool(all(validity.values()))
+
     output = {
-        "status": "PASS",
+        "status": "PASS" if valid else "INVALID",
         "read_only": True,
         "environment_steps_performed": 0,
         "optimizer_steps_performed": 0,
@@ -691,6 +719,7 @@ def main():
         },
         "actor_metadata": actor_metadata,
         "target_actor_hashes": actor_hashes,
+        "validity": validity,
         "results": results,
         "deltas": deltas,
     }
@@ -745,7 +774,11 @@ def main():
     for name in order:
         print(f"{name}: {actor_hashes[name]}")
 
+    print("\n[VALIDITY]")
+    print(json.dumps(validity, indent=2, sort_keys=True))
     print(f"\n[SAVED] {out_path}", flush=True)
+    if not valid:
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":
