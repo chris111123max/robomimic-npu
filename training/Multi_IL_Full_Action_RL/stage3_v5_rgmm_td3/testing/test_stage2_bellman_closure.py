@@ -533,6 +533,12 @@ def main():
                 "residual"]["abs_max"] <= 2e-6),
         "closure_algebra_reconstruction_max_abs_le_2e_6": bool(
             max_reconstruction <= 2e-6),
+        "progress_bins_cover_primary": bool(
+            sum(
+                row["count"]
+                for row in metrics["progress_bins"].values()
+            ) == primary["count"]
+        ),
         "finite_primary_metrics": bool(
             all(
                 np.isfinite(
