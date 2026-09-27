@@ -27,11 +27,18 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import sys
 import types
 from pathlib import Path
 
 import numpy as np
 import torch
+
+HERE = Path(__file__).resolve().parent
+STAGE3 = HERE.parent
+for directory in (HERE, STAGE3):
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
 
 from stage3_v5_agent import (
     _last_reset_starts_from_numpy,
