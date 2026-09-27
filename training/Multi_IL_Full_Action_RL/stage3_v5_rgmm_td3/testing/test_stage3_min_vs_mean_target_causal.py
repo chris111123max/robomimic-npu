@@ -89,6 +89,32 @@ def cleanup_device(device):
         torch.cuda.empty_cache()
 
 
+def nested_state_equal(left, right):
+    if torch.is_tensor(left) and torch.is_tensor(right):
+        return bool(
+            left.shape == right.shape
+            and left.dtype == right.dtype
+            and torch.equal(left.detach().cpu(), right.detach().cpu())
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        if set(left) != set(right):
+            return False
+        return all(
+            nested_state_equal(left[key], right[key])
+            for key in left
+        )
+    if isinstance(left, (list, tuple)) and isinstance(
+            right, (list, tuple)):
+        return (
+            len(left) == len(right)
+            and all(
+                nested_state_equal(a, b)
+                for a, b in zip(left, right)
+            )
+        )
+    return left == right
+
+
 @torch.no_grad()
 def mean_bellman_target(self, b, target_sequence):
     """Stage3 production target path with ONLY twin min replaced by twin mean."""
@@ -274,6 +300,7 @@ def target_contract_check(
         final["terminals"], dtype=torch.float32, device=min_td.device)
     nonterminal = (terminal.reshape(-1) < 0.5)
 
+    mean_minus_min = mean_next - min_next
     return {
         "same_actor_distribution_max_abs": actor_distribution_max_abs,
         "min_td_shape": list(min_td.shape),
@@ -281,9 +308,13 @@ def target_contract_check(
         "min_expected_next_mean": float(min_next.mean().item()),
         "mean_expected_next_mean": float(mean_next.mean().item()),
         "mean_minus_min_expected_next_mean": float(
-            (mean_next - min_next).mean().item()),
+            mean_minus_min.mean().item()),
         "mean_minus_min_expected_next_abs_mean": float(
-            (mean_next - min_next).abs().mean().item()),
+            mean_minus_min.abs().mean().item()),
+        "mean_minus_min_expected_next_min": float(
+            mean_minus_min.min().item()),
+        "mean_expected_ge_min_fraction": float(
+            (mean_minus_min >= -1e-7).float().mean().item()),
         "terminal_td_equals_reward_min_max_abs": float(
             (min_td.reshape(-1)[~nonterminal]
              - reward.reshape(-1)[~nonterminal]).abs().max().item()
@@ -532,6 +563,10 @@ def main():
         "same_initial_target_actor_hash": bool(
             module_digest(min_contract_agent.target_actor)
             == module_digest(mean_contract_agent.target_actor)),
+        "same_initial_optimizer_state": nested_state_equal(
+            min_contract_agent.critic_optimizer.state_dict(),
+            mean_contract_agent.critic_optimizer.state_dict(),
+        ),
         "target_semantics": target_contract_check(
             min_contract_agent,
             mean_contract_agent,
@@ -655,6 +690,13 @@ def main():
                 "terminal_td_equals_reward_min_max_abs"] <= 1e-7
             and initial_contract["target_semantics"][
                 "terminal_td_equals_reward_mean_max_abs"] <= 1e-7),
+        "contract_mean_expected_not_below_min": bool(
+            initial_contract["target_semantics"][
+                "mean_minus_min_expected_next_min"] >= -1e-7
+            and initial_contract["target_semantics"][
+                "mean_expected_ge_min_fraction"] >= 1.0),
+        "same_initial_optimizer_state": bool(
+            initial_contract["same_initial_optimizer_state"]),
         "initial_contract_hashes_match": bool(
             initial_contract["same_initial_online_hash"]
             and initial_contract["same_initial_target_critic_hash"]
