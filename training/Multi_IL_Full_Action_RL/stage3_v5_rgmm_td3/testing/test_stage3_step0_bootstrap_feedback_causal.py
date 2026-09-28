@@ -61,7 +61,7 @@ BRANCHES = (
     "oracle_mc",
 )
 EXPECTED_SEMANTICS = "full_episode_prefix_unroll_learning_mask"
-DEFAULT_MILESTONES = (0, 1, 10, 50, 100, 250, 500, 1000)
+DEFAULT_MILESTONES = (0, 1, 10, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 10000)
 
 
 def arguments():
