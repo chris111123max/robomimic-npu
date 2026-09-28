@@ -43,7 +43,7 @@ from stage3_v5_agent import (  # noqa: E402
     _last_reset_starts_from_numpy,
     target_final_distribution_vectorized,
 )
-from stage3_v5_history_critic import component_mean_q, encode_replay_contexts  # noqa: E402
+from stage3_v5_history_critic import component_mean_q  # noqa: E402
 from stage3_v5_readiness import correlation, discounted_returns  # noqa: E402
 from test_stage2_stage3_readiness_compare import resolve_device, sync  # noqa: E402
 from test_stage3_300k_critic_stage_adaptation_matrix import (  # noqa: E402
@@ -277,6 +277,49 @@ def action_norm_tensors(payload, device):
     return scale, offset
 
 
+def encode_diagnostic_contexts(
+    critic,
+    observations,
+    actions,
+    episode_steps,
+    horizon,
+    next_observations=None,
+):
+    """Encode the historical 11-token Stage3 contract for this test.
+
+    The shared Stage3 adapter only accepts at most 10 tokens and its successor
+    path zeroes / shifts the first predecessor-action token. The historical
+    Stage3 11-token successor contract instead feeds actions[s:t+1] directly.
+    This test-local adapter preserves the trained recurrent encoder and progress
+    features while honoring that recorded 11-token contract.
+    """
+    if observations.ndim != 3 or actions.ndim != 3:
+        raise ValueError("diagnostic history inputs must be rank-three")
+    if observations.shape[1] != 11 or actions.shape[:2] != observations.shape[:2]:
+        raise ValueError("historical Stage3 diagnostic requires aligned 11-token windows")
+    if episode_steps.shape != observations.shape[:2]:
+        raise ValueError("episode steps must align with the 11-token window")
+
+    if next_observations is None:
+        tokens = observations
+        predecessor_actions = torch.zeros_like(actions)
+        predecessor_actions[:, 1:] = actions[:, :-1]
+        predecessor_actions = predecessor_actions.masked_fill(
+            episode_steps.eq(0).unsqueeze(-1), 0.0
+        )
+        steps = episode_steps
+    else:
+        if next_observations.shape != observations.shape:
+            raise ValueError("successor observations must match current windows")
+        tokens = next_observations
+        predecessor_actions = actions
+        steps = episode_steps + 1
+
+    progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
+    contexts, _ = critic.encode_history(tokens, predecessor_actions, progress)
+    return contexts
+
+
 @torch.no_grad()
 def policy_expected_values(
     target_critic,
@@ -286,7 +329,7 @@ def policy_expected_values(
     scale,
     offset,
 ):
-    contexts = encode_replay_contexts(
+    contexts = encode_diagnostic_contexts(
         target_critic,
         batch_t["observations"],
         batch_t["actions"],
@@ -317,7 +360,7 @@ def policy_expected_values(
 
 @torch.no_grad()
 def behavior_future_values(target_critic, batch_t, config):
-    contexts = encode_replay_contexts(
+    contexts = encode_diagnostic_contexts(
         target_critic,
         batch_t["observations"],
         batch_t["actions"],
@@ -332,7 +375,7 @@ def behavior_future_values(target_critic, batch_t, config):
 
 
 def online_values(critic, batch_t, config):
-    contexts = encode_replay_contexts(
+    contexts = encode_diagnostic_contexts(
         critic,
         batch_t["observations"],
         batch_t["actions"],
