@@ -115,7 +115,7 @@ def main():
         env["PYTHONUNBUFFERED"] = "1"
         process = subprocess.Popen(
             command,
-            cwd=str(HERE.parents[3]),
+            cwd=str(HERE.parents[2]),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             env=env,
