@@ -36,6 +36,13 @@ def arguments():
     parser.add_argument("--device", required=True, choices=("npu:0", "npu:1", "npu:2", "npu:3"))
     parser.add_argument("--quad-run-dir", required=True)
     parser.add_argument("--critic-init-checkpoint", required=True)
+    parser.add_argument(
+        "--startup-ready-file",
+        help=(
+            "Optional launcher handshake path. Written atomically only after "
+            "the vector env, NPU model, replay and trainer runtime are initialized."
+        ),
+    )
     parser.add_argument("--num-envs", type=int)
     parser.add_argument("--total-env-steps", type=int)
     parser.add_argument("--resume")
@@ -59,6 +66,17 @@ def write_json(path, value):
     with open(temporary, "w", encoding="utf-8") as handle:
         json.dump(value, handle, indent=2, sort_keys=True); handle.write("\n")
     os.replace(temporary, path)
+
+
+def write_startup_ready(path, value):
+    if not path:
+        return
+    marker = Path(path).resolve()
+    if marker.exists():
+        raise FileExistsError(
+            f"stale Stage3-v6 startup-ready marker exists: {marker}"
+        )
+    write_json(marker, value)
 
 
 def log_jsonl(path, value):
@@ -440,7 +458,24 @@ def main():
             "actor_checkpoint_sha256": file_hash(config["bc_rnn_checkpoint"]),
         })
 
-        evaluation_steps = set()  # V5 gates formal evaluation through CriticHandoff.
+        # Launcher wave barrier: reaching this point means StaggeredVectorEnv
+        # has completed construction (all requested simulator workers have
+        # returned their initial observations), the NPU model / Critic source
+        # are loaded, and replay / rollout executors are initialized.
+        write_startup_ready(args.startup_ready_file, {
+            "status": "READY",
+            "stage": "stage3-v6",
+            "target_mode": args.target_mode,
+            "group": args.group,
+            "device": args.device,
+            "num_envs": int(num_envs),
+            "startup_parallelism": int(parallel["startup_parallelism"]),
+            "vector_env_initial_observation_count": int(len(vector.initial_observations)),
+            "all_vector_envs_initialized": len(vector.initial_observations) == num_envs,
+            "critic_target_mode": agent.critic_target_mode,
+        })
+
+        evaluation_steps = set()  # V6 gates formal evaluation through CriticHandoff.
         evaluation_seeds = (config.get("smoke_evaluation_seeds", config["evaluation"]["seeds"][:2])
                             if args.smoke else config["evaluation"]["seeds"])
         checkpoint_steps = set(range(int(config["checkpoint_interval_steps"]), total + 1,
