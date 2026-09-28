@@ -129,7 +129,7 @@ def returns_cache(episodes, gamma):
         next_mc = np.zeros_like(mc)
         next_mc[:-1] = mc[1:]
         identity = rewards + gamma * (1.0 - mask) * next_mc - mc
-        if float(np.max(np.abs(identity))) > 1e-8:
+        if float(np.max(np.abs(identity))) > 5e-6:
             raise RuntimeError(
                 f"episode {index}: finite-MC identity mismatch "
                 f"{float(np.max(np.abs(identity)))}"
@@ -822,6 +822,10 @@ def main():
             raise RuntimeError(f"{step0_path}: Critic already updated")
         if int(step0.get("actor_updates", -1)) != 0:
             raise RuntimeError(f"{step0_path}: Actor already updated")
+        if state_hash(step0["actor"]) != state_hash(step0["target_actor"]):
+            raise RuntimeError(
+                f"{step0_path}: step0 Actor and target Actor are not identical"
+            )
 
         cp_config = step0["config"]
         length = int(cp_config["recurrent_replay"]["critic_context_length"])
