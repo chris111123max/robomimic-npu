@@ -23,9 +23,11 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 STAGE2_2 = HERE.parent / "stage2_2_history_aware_critic"
+# Keep Stage2.3 modules first (notably its own evaluation.py), while
+# resolving the shared historical dataset modules from Stage2.2.
 for directory in (HERE, STAGE2_2):
-    if str(directory) not in sys.path:
-        sys.path.insert(0, str(directory))
+    sys.path = [entry for entry in sys.path if entry != str(directory)]
+sys.path[:0] = [str(HERE), str(STAGE2_2)]
 
 from evaluation import evaluate, select_best_checkpoint  # noqa: E402
 from fiveq_critic import (  # noqa: E402
