@@ -2,6 +2,7 @@
 """Static/CPU validation for the Stage3-v6 four-run contract."""
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 from pathlib import Path
@@ -36,6 +37,11 @@ def main():
     }
 
     launcher_source = (HERE / "launch_stage3_v6_4npu.py").read_text()
+    launcher_literals = " ".join(
+        node.value
+        for node in ast.walk(ast.parse(launcher_source))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    )
     checks["launcher_starts_multi_before_rnn"] = (
         "wave1 = [" in launcher_source
         and "wait_wave_ready(wave1, 1)" in launcher_source
@@ -43,7 +49,7 @@ def main():
         and "wait_wave_ready(wave2, 2)" in launcher_source
     )
     checks["launcher_requires_multi_ready_barrier"] = (
-        "both Multi were READY before either RNN was launched" in launcher_source
+        "both Multi were READY before either RNN was launched" in launcher_literals
         and "startup-ready" in launcher_source
     )
 
