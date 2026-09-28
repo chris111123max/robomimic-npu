@@ -35,6 +35,18 @@ def main():
         f"{mode}/{group}": device for mode, group, device in EXPECTED_RUNS
     }
 
+    launcher_source = (HERE / "launch_stage3_v6_4npu.py").read_text()
+    checks["launcher_starts_multi_before_rnn"] = (
+        "wave1 = [" in launcher_source
+        and "wait_wave_ready(wave1, 1)" in launcher_source
+        and "wave2 = [" in launcher_source
+        and "wait_wave_ready(wave2, 2)" in launcher_source
+    )
+    checks["launcher_requires_multi_ready_barrier"] = (
+        "both Multi were READY before either RNN was launched" in launcher_source
+        and "startup-ready" in launcher_source
+    )
+
     bellman_source = inspect.getsource(RecurrentGMMTD3V6.bellman_target)
     checks["v6_bellman_has_no_torch_minimum"] = "torch.minimum" not in bellman_source
     checks["v6_bellman_uses_two_member_expectations"] = (
@@ -74,6 +86,11 @@ def main():
     checks["trainer_enforces_prepared_npu_mapping"] = (
         "expected_device = fairness[\"npu_mapping\"].get(run_key)"
         in trainer_source
+    )
+    checks["trainer_supports_startup_ready_marker"] = (
+        "--startup-ready-file" in trainer_source
+        and "all_vector_envs_initialized" in trainer_source
+        and "write_startup_ready" in trainer_source
     )
     checks["checkpoint_saves_selector_state"] = (
         "\"target_selector_state\": agent.target_selector_state_dict()"
