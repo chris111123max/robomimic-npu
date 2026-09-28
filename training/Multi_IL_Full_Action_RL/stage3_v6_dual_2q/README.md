@@ -48,6 +48,30 @@ NPU3 = random2q / rnn_q
 
 The trainer validates this mapping and refuses a mismatched device assignment.
 
+## Startup order
+
+The four jobs are **not** allowed to create simulator environments at the same
+time. The launcher uses a two-wave startup barrier:
+
+```text
+Wave 1:
+  NPU0 = mean2q   / multi_q
+  NPU2 = random2q / multi_q
+
+Wait until BOTH Multi trainers report READY after all of their requested
+simulator envs and trainer runtime have initialized.
+
+Wave 2:
+  NPU1 = mean2q   / rnn_q
+  NPU3 = random2q / rnn_q
+```
+
+For formal runs, each trainer still uses 16 envs with
+`startup_parallelism=4`, i.e. its own simulator creation proceeds
+4 + 4 + 4 + 4. The second RNN wave is launched only after both Multi runs have
+completed this startup phase. A startup-ready marker is written by the trainer
+and validated by the launcher; no fixed sleep is used.
+
 ## Workflow
 
 First prepare one immutable four-run directory with
