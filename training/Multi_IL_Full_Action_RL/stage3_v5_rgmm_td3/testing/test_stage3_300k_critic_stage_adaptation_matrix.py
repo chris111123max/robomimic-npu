@@ -24,8 +24,10 @@ Important contracts:
   not file modification time;
 - the first completed episode per env after each 100K/200K boundary is excluded
   conservatively because it may have started before that boundary;
-- history encoding reuses the exact sliding horizon-10 zero-state Stage3
-  readiness implementation.
+- history encoding follows the selected historical run's own Stage3 replay
+  contract. The 20260922 run uses an 11-step zero-state replay window on a
+  full-episode-prefix Stage2.2 recurrent Twin-Q source; no later h10 contract
+  is imposed on these checkpoints.
 """
 from __future__ import annotations
 
@@ -42,18 +44,18 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 STAGE3 = HERE.parent
-for directory in (HERE, STAGE3):
+STAGE2 = STAGE3.parent / "stage2_2_history_aware_critic"
+for directory in (HERE, STAGE3, STAGE2):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 
-from stage3_v5_agent import strict_stage2_load  # noqa: E402
+from history_critic import HistoryAwareTwinQ  # noqa: E402
 from stage3_v5_replay import (  # noqa: E402
     OnlineSequenceReplay,
     Stage1OfflineSequenceReplay,
 )
 from stage3_v5_readiness import auc, correlation, discounted_returns  # noqa: E402
 from test_stage2_stage3_readiness_compare import (  # noqa: E402
-    q_values_for_episode,
     resolve_device,
     sync,
 )
@@ -377,18 +379,165 @@ def old_dataset(config, group):
     }
 
 
+def load_stage2_source_critic(stage2_path, device):
+    """Load the exact historical Stage2.2 architecture without later h10 checks."""
+    payload = torch.load(stage2_path, map_location="cpu")
+    if payload.get("stage_version") != "2.2":
+        raise RuntimeError(f"{stage2_path}: not a Stage2.2 checkpoint")
+    if payload.get("critic_type") != "history_aware_twin_q":
+        raise RuntimeError(
+            f"{stage2_path}: unsupported critic_type={payload.get('critic_type')}"
+        )
+    if not math.isclose(
+        float(payload.get("gamma", -1.0)), 0.99, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise RuntimeError(f"{stage2_path}: Stage2.2 gamma is not 0.99")
+
+    architecture = payload.get("architecture", {})
+    required = (
+        "obs_dim",
+        "action_dim",
+        "token_dim",
+        "lstm_hidden_dim",
+        "lstm_layers",
+        "head_hidden_dim",
+        "history_semantics",
+    )
+    missing = [key for key in required if key not in architecture]
+    if missing:
+        raise RuntimeError(
+            f"{stage2_path}: Stage2.2 architecture missing {missing}"
+        )
+    if int(architecture["obs_dim"]) != 59 or int(
+        architecture["action_dim"]
+    ) != 14:
+        raise RuntimeError(f"{stage2_path}: unexpected obs/action dimensions")
+
+    critic = HistoryAwareTwinQ(
+        obs_dim=int(architecture["obs_dim"]),
+        action_dim=int(architecture["action_dim"]),
+        token_dim=int(architecture["token_dim"]),
+        hidden_dim=int(architecture["lstm_hidden_dim"]),
+        layers=int(architecture["lstm_layers"]),
+        head_hidden_dim=int(architecture["head_hidden_dim"]),
+    ).to(device)
+    critic.load_state_dict(payload["critic_state_dict"], strict=True)
+    critic.eval()
+    return critic, payload
+
+
 def load_stage3_critic(stage2_path, stage3_path, device):
-    critic, stage2_payload = strict_stage2_load(stage2_path, device)
     payload = torch.load(stage3_path, map_location="cpu")
     if payload.get("stage") != "stage3-v5":
         raise RuntimeError(f"Not Stage3-v5: {stage3_path}")
-    config = payload.get("config", {})
-    recurrent = config.get("recurrent_replay", {})
-    if int(recurrent.get("critic_context_length", -1)) != 10:
-        raise RuntimeError(f"{stage3_path}: Critic context is not 10")
+
+    critic, stage2_payload = load_stage2_source_critic(stage2_path, device)
     critic.load_state_dict(payload["q1_q2"], strict=True)
     critic.eval()
-    return critic, payload, stage2_payload
+
+    recurrent = payload.get("config", {}).get("recurrent_replay", {})
+    context_length = int(recurrent.get("critic_context_length", -1))
+    if context_length < 1:
+        raise RuntimeError(
+            f"{stage3_path}: invalid critic_context_length={context_length}"
+        )
+
+    source_semantics = stage2_payload.get(
+        "history_semantics",
+        stage2_payload.get("architecture", {}).get("history_semantics"),
+    )
+    if source_semantics != "full_episode_prefix_unroll_learning_mask":
+        raise RuntimeError(
+            f"{stage2_path}: historical 300K source history semantics changed: "
+            f"{source_semantics!r}"
+        )
+
+    return critic, payload, stage2_payload, context_length
+
+
+@torch.no_grad()
+def q_values_for_episode_run_contract(
+    critic,
+    episode,
+    device,
+    context_length,
+    horizon=700,
+):
+    """Executed-action Q under the historical Stage3 replay-window contract.
+
+    The 20260922 Stage3-v5 run sampled fixed recurrent windows and started each
+    sampled window from zero LSTM state. For each transition, reproduce that
+    contract with the most recent <=context_length tokens. The first token's
+    unavailable previous action is zero even when a window begins mid-episode.
+    """
+    observations = np.asarray(episode["observations"], dtype=np.float32)
+    actions = np.asarray(episode["actions"], dtype=np.float32)
+    episode_steps = np.asarray(
+        episode.get("episode_steps", np.arange(len(actions))),
+        dtype=np.int64,
+    )
+    length = len(actions)
+    if observations.shape != (length, 59) or actions.shape != (length, 14):
+        raise RuntimeError("Unexpected episode tensor shape")
+
+    q1_all = []
+    q2_all = []
+    chunk = 2048
+    for first in range(0, length, chunk):
+        last = min(length, first + chunk)
+        count = last - first
+        obs_windows = np.zeros(
+            (count, context_length, 59), dtype=np.float32
+        )
+        action_windows = np.zeros(
+            (count, context_length, 14), dtype=np.float32
+        )
+        step_windows = np.zeros(
+            (count, context_length), dtype=np.int64
+        )
+        final_indices = np.empty(count, dtype=np.int64)
+
+        for row, target in enumerate(range(first, last)):
+            start = max(0, target - context_length + 1)
+            n = target - start + 1
+            obs_windows[row, :n] = observations[start:target + 1]
+            action_windows[row, :n] = actions[start:target + 1]
+            step_windows[row, :n] = episode_steps[start:target + 1]
+            final_indices[row] = n - 1
+
+        obs_t = torch.as_tensor(obs_windows, device=device)
+        act_t = torch.as_tensor(action_windows, device=device)
+        steps_t = torch.as_tensor(step_windows, device=device)
+
+        previous = torch.zeros_like(act_t)
+        previous[:, 1:] = act_t[:, :-1]
+        previous = previous.masked_fill(
+            steps_t.eq(0).unsqueeze(-1), 0.0
+        )
+        progress = (
+            steps_t.to(dtype=obs_t.dtype).unsqueeze(-1)
+            / float(horizon)
+        )
+
+        contexts, _ = critic.encode_history(
+            obs_t, previous, progress
+        )
+        rows = torch.arange(count, device=device)
+        indices = torch.as_tensor(
+            final_indices, dtype=torch.long, device=device
+        )
+        final_contexts = (
+            contexts[0][rows, indices],
+            contexts[1][rows, indices],
+        )
+        executed = torch.as_tensor(
+            actions[first:last], device=device
+        )
+        q1, q2 = critic.q_from_context(final_contexts, executed)
+        q1_all.append(q1.reshape(-1).cpu().numpy())
+        q2_all.append(q2.reshape(-1).cpu().numpy())
+
+    return np.concatenate(q1_all), np.concatenate(q2_all)
 
 
 def safe_auc(labels, scores):
@@ -398,7 +547,9 @@ def safe_auc(labels, scores):
     return float(auc(labels, scores))
 
 
-def evaluate_dataset(critic, episodes, device, gamma):
+def evaluate_dataset(
+    critic, episodes, device, gamma, context_length
+):
     q1_parts = []
     q2_parts = []
     qmin_parts = []
@@ -410,8 +561,12 @@ def evaluate_dataset(critic, episodes, device, gamma):
     critic.eval()
     with torch.no_grad():
         for episode in episodes:
-            q1, q2 = q_values_for_episode(
-                critic, episode, device, horizon=700, context_length=10
+            q1, q2 = q_values_for_episode_run_contract(
+                critic,
+                episode,
+                device,
+                context_length=context_length,
+                horizon=700,
             )
             qmin = np.minimum(q1, q2)
             mc = discounted_returns(episode, gamma)
@@ -649,7 +804,7 @@ def evaluate_group(run_dir, group, shared, device):
     matrix = {}
 
     for checkpoint_name, checkpoint_path in checkpoints.items():
-        critic, payload, stage2_payload = load_stage3_critic(
+        critic, payload, stage2_payload, context_length = load_stage3_critic(
             stage2_path, checkpoint_path, device
         )
         sync(device)
@@ -678,7 +833,11 @@ def evaluate_group(run_dir, group, shared, device):
                 flush=True,
             )
             metrics = evaluate_dataset(
-                critic, datasets[dataset_name], device, gamma
+                critic,
+                datasets[dataset_name],
+                device,
+                gamma,
+                context_length,
             )
             matrix[checkpoint_name][dataset_name] = {
                 "checkpoint_path": str(checkpoint_path.resolve()),
@@ -692,6 +851,13 @@ def evaluate_group(run_dir, group, shared, device):
                         stage2_payload.get("step", -1),
                     )
                 ),
+                "stage2_source_history_semantics": stage2_payload.get(
+                    "history_semantics",
+                    stage2_payload.get("architecture", {}).get(
+                        "history_semantics"
+                    ),
+                ),
+                "critic_context_length": int(context_length),
                 "metrics": metrics,
             }
             if not metrics["finite"]:
@@ -799,7 +965,10 @@ def main():
         "read_only": True,
         "stage3_run_dir": str(run_dir),
         "device": str(device),
-        "history_contract": "sliding_horizon_10_zero_state",
+        "history_contract": (
+            "historical_run_native_zero_state_replay_window; "
+            f"configured={config.get('recurrent_replay')}"
+        ),
         "finite_mc_complete_episodes_only": True,
         "stage_boundaries_env_steps": [100_000, 200_000, 300_000],
         "boundary_policy": (
