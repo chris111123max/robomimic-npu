@@ -9,6 +9,8 @@ and consume the exact same frozen 50/50 old+late minibatch schedule:
 
   A production_moving_min : production component-mean target, twin min, Polyak.
   B moving_mean           : same moving target Critic, twin mean instead of min.
+  R moving_random_one     : moving target; sample Q1 or Q2 once per Critic update
+                            and use that one target estimator for the whole batch.
   C frozen_step0_min      : production twin-min target, target Critic frozen.
   D oracle_mc             : exact finite-MC target; target Critic still Polyak-updated
                             only for diagnostics (it is never used for supervision).
@@ -57,6 +59,7 @@ from test_stage3_300k_td_bias_decomposition import terminal_mask  # noqa: E402
 BRANCHES = (
     "production_moving_min",
     "moving_mean",
+    "moving_random_one",
     "frozen_step0_min",
     "oracle_mc",
 )
@@ -354,10 +357,15 @@ def policy_expected_values(
         target_critic, final, distribution, scale, offset
     )
     probs = params["probs"]
-    qmean = (
-        probs * (0.5 * (q1_modes + q2_modes))
-    ).sum(-1)
-    return qmin.reshape(-1, 1), qmean.reshape(-1, 1)
+    q1_mean = (probs * q1_modes).sum(-1)
+    q2_mean = (probs * q2_modes).sum(-1)
+    qmean = 0.5 * (q1_mean + q2_mean)
+    return (
+        qmin.reshape(-1, 1),
+        qmean.reshape(-1, 1),
+        q1_mean.reshape(-1, 1),
+        q2_mean.reshape(-1, 1),
+    )
 
 
 @torch.no_grad()
@@ -373,7 +381,7 @@ def behavior_future_values(target_critic, batch_t, config):
     final = (contexts[0][:, -1], contexts[1][:, -1])
     q1, q2 = target_critic.q_from_context(final, batch_t["next_actions"])
     q1, q2 = q1.reshape(-1, 1), q2.reshape(-1, 1)
-    return torch.minimum(q1, q2), 0.5 * (q1 + q2)
+    return torch.minimum(q1, q2), 0.5 * (q1 + q2), q1, q2
 
 
 def online_values(critic, batch_t, config):
@@ -457,10 +465,14 @@ def evaluate_probe(
     scale, offset = action_norm_tensors(payload, device)
 
     qmin_parts = []
+    qmean_parts = []
     mc_parts = []
     behavior_future_error = []
+    behavior_future_mean_error = []
     production_error = []
     mean_target_error = []
+    q1_target_error = []
+    q2_target_error = []
     min_minus_mean = []
     training_target_error = []
 
@@ -473,17 +485,24 @@ def evaluate_probe(
         b = tensor_batch(batch, device)
         q1, q2 = online_values(critic, b, config)
         qmin = torch.minimum(q1, q2)
-        policy_min, policy_mean = policy_expected_values(
+        qmean = 0.5 * (q1 + q2)
+        policy_min, policy_mean, policy_q1, policy_q2 = policy_expected_values(
             target_critic, target_actor, b, config, scale, offset
         )
-        behavior_min, _ = behavior_future_values(target_critic, b, config)
+        behavior_min, behavior_mean, _, _ = behavior_future_values(
+            target_critic, b, config
+        )
 
         mask = 1.0 - b["terminals"]
         y_prod = b["rewards"] + gamma * mask * policy_min
         y_mean = b["rewards"] + gamma * mask * policy_mean
+        y_q1 = b["rewards"] + gamma * mask * policy_q1
+        y_q2 = b["rewards"] + gamma * mask * policy_q2
         if branch == "production_moving_min" or branch == "frozen_step0_min":
             y_train = y_prod
-        elif branch == "moving_mean":
+        elif branch in ("moving_mean", "moving_random_one"):
+            # For random-one, this is E_j[y | j], not a realized probe draw.
+            # The realized per-update selector is recorded in train metrics.
             y_train = y_mean
         elif branch == "oracle_mc":
             y_train = b["mc"]
@@ -498,31 +517,57 @@ def evaluate_probe(
                     - b["mc_next"].reshape(-1)[nonterminal]
                 ).cpu().numpy()
             )
+            behavior_future_mean_error.append(
+                (
+                    behavior_mean.reshape(-1)[nonterminal]
+                    - b["mc_next"].reshape(-1)[nonterminal]
+                ).cpu().numpy()
+            )
         qmin_parts.append(qmin.reshape(-1).cpu().numpy())
+        qmean_parts.append(qmean.reshape(-1).cpu().numpy())
         mc_parts.append(b["mc"].reshape(-1).cpu().numpy())
         production_error.append((y_prod - b["mc"]).reshape(-1).cpu().numpy())
         mean_target_error.append((y_mean - b["mc"]).reshape(-1).cpu().numpy())
+        q1_target_error.append((y_q1 - b["mc"]).reshape(-1).cpu().numpy())
+        q2_target_error.append((y_q2 - b["mc"]).reshape(-1).cpu().numpy())
         min_minus_mean.append((y_prod - y_mean).reshape(-1).cpu().numpy())
         training_target_error.append((y_train - b["mc"]).reshape(-1).cpu().numpy())
 
     critic.train()
     qmin = np.concatenate(qmin_parts).astype(np.float64)
+    qmean = np.concatenate(qmean_parts).astype(np.float64)
     mc = np.concatenate(mc_parts).astype(np.float64)
     spearman, pearson = correlation(qmin, mc)
+    mean_spearman, mean_pearson = correlation(qmean, mc)
     return {
         "count": int(len(qmin)),
         "spearman_qmin_mc": float(spearman),
         "pearson_qmin_mc": float(pearson),
         "qmin_minus_mc": error_stats(qmin - mc),
+        "spearman_qmean_mc": float(mean_spearman),
+        "pearson_qmean_mc": float(mean_pearson),
+        "qmean_minus_mc": error_stats(qmean - mc),
         "behavior_future_qmin_minus_mc_next": error_stats(
             np.concatenate(behavior_future_error)
         ),
+        "behavior_future_qmean_minus_mc_next": error_stats(
+            np.concatenate(behavior_future_mean_error)
+        ),
         "production_target_minus_mc": error_stats(np.concatenate(production_error)),
         "mean_target_minus_mc": error_stats(np.concatenate(mean_target_error)),
+        "q1_target_minus_mc": error_stats(np.concatenate(q1_target_error)),
+        "q2_target_minus_mc": error_stats(np.concatenate(q2_target_error)),
         "production_min_minus_mean": error_stats(np.concatenate(min_minus_mean)),
         "training_target_minus_mc": error_stats(np.concatenate(training_target_error)),
+        "training_target_semantics": (
+            "selector_expectation_over_q1_q2"
+            if branch == "moving_random_one"
+            else "actual_branch_target"
+        ),
         "qmin_mean": float(qmin.mean()),
         "qmin_std": float(qmin.std()),
+        "qmean_mean": float(qmean.mean()),
+        "qmean_std": float(qmean.std()),
         "mc_mean": float(mc.mean()),
         "mc_std": float(mc.std()),
     }
@@ -537,6 +582,7 @@ def train_step(
     batch,
     payload,
     device,
+    random_one_choice=None,
 ):
     config = payload["config"]
     gamma = float(config["gamma"])
@@ -548,10 +594,19 @@ def train_step(
         if branch == "oracle_mc":
             td_target = b["mc"]
         else:
-            policy_min, policy_mean = policy_expected_values(
+            policy_min, policy_mean, policy_q1, policy_q2 = policy_expected_values(
                 target_critic, target_actor, b, config, scale, offset
             )
-            expected = policy_mean if branch == "moving_mean" else policy_min
+            if branch == "moving_mean":
+                expected = policy_mean
+            elif branch == "moving_random_one":
+                if random_one_choice not in (0, 1):
+                    raise ValueError(
+                        "moving_random_one requires per-update selector 0 or 1"
+                    )
+                expected = policy_q1 if random_one_choice == 0 else policy_q2
+            else:
+                expected = policy_min
             td_target = (
                 b["rewards"]
                 + gamma * (1.0 - b["terminals"]) * expected
@@ -585,6 +640,11 @@ def train_step(
         "loss_q2": float(loss_q2.detach().cpu()),
         "td_target_mean": float(td_target.mean().detach().cpu()),
         "qmin_mean": float(torch.minimum(q1, q2).mean().detach().cpu()),
+        "qmean_mean": float((0.5 * (q1 + q2)).mean().detach().cpu()),
+        "random_one_selected_q": (
+            None if branch != "moving_random_one"
+            else int(random_one_choice) + 1
+        ),
         "grad_norm_preclip": float(torch.as_tensor(grad_norm).detach().cpu()),
     }
 
@@ -608,6 +668,7 @@ def run_branch(
     device,
     milestones,
     probe_batch_size,
+    random_seed,
 ):
     critic, target_critic, target_actor, optimizer, stage2_payload = make_agent_parts(
         stage2_path, step0_payload, device
@@ -619,6 +680,8 @@ def run_branch(
     }
     trajectory = []
     last_train = None
+    selector_rng = np.random.default_rng(int(random_seed))
+    random_one_selection_counts = {"q1": 0, "q2": 0}
 
     def record(update):
         sync(device)
@@ -631,6 +694,7 @@ def run_branch(
                 current_target_hash != initial["target_hash"]
             ),
             "last_train_metrics": last_train,
+            "random_one_selection_counts": dict(random_one_selection_counts),
             "datasets": {},
         }
         for name in ("old", "late"):
@@ -653,6 +717,8 @@ def run_branch(
             f"[{branch}] update={update} "
             f"late_spear={late['spearman_qmin_mc']:.6f} "
             f"late_qbias={late['qmin_minus_mc']['mean']:.6f} "
+            f"late_qmean_spear={late['spearman_qmean_mc']:.6f} "
+            f"late_qmean_bias={late['qmean_minus_mc']['mean']:.6f} "
             f"future_bias={late['behavior_future_qmin_minus_mc_next']['mean']:.6f} "
             f"train_target_bias={late['training_target_minus_mc']['mean']:.6f}",
             flush=True,
@@ -671,6 +737,12 @@ def run_branch(
             datasets["late"]["episodes"], caches["late"], late_refs, length
         )
         batch = merge_batches(left, right)
+        random_one_choice = None
+        if branch == "moving_random_one":
+            random_one_choice = int(selector_rng.integers(0, 2))
+            random_one_selection_counts[
+                "q1" if random_one_choice == 0 else "q2"
+            ] += 1
         try:
             last_train = train_step(
                 branch,
@@ -681,6 +753,7 @@ def run_branch(
                 batch,
                 step0_payload,
                 device,
+                random_one_choice=random_one_choice,
             )
         except Exception as exc:
             failure = {
@@ -703,6 +776,12 @@ def run_branch(
         "final_online_hash": module_hash(critic),
         "final_target_hash": module_hash(target_critic),
         "target_changed": module_hash(target_critic) != initial["target_hash"],
+        "random_one_selector": {
+            "enabled": branch == "moving_random_one",
+            "granularity": "one_q_for_entire_critic_update_minibatch",
+            "seed": int(random_seed),
+            "counts": dict(random_one_selection_counts),
+        },
         "stage2_history_semantics": stage2_payload.get(
             "history_semantics",
             stage2_payload.get("architecture", {}).get("history_semantics"),
@@ -735,6 +814,12 @@ def compare_branches(branch_results):
             item[f"{branch}_late_q_bias"] = float(
                 late["qmin_minus_mc"]["mean"]
             )
+            item[f"{branch}_late_qmean_spearman"] = float(
+                late["spearman_qmean_mc"]
+            )
+            item[f"{branch}_late_qmean_bias"] = float(
+                late["qmean_minus_mc"]["mean"]
+            )
             item[f"{branch}_late_future_bias"] = float(
                 late["behavior_future_qmin_minus_mc_next"]["mean"]
             )
@@ -764,6 +849,12 @@ def write_outputs(output_dir, report):
                         "spearman_qmin_mc": metrics["spearman_qmin_mc"],
                         "qmin_bias": metrics["qmin_minus_mc"]["mean"],
                         "qmin_mae": metrics["qmin_minus_mc"]["mae"],
+                        "spearman_qmean_mc": metrics["spearman_qmean_mc"],
+                        "qmean_bias": metrics["qmean_minus_mc"]["mean"],
+                        "qmean_mae": metrics["qmean_minus_mc"]["mae"],
+                        "future_qmean_bias": metrics[
+                            "behavior_future_qmean_minus_mc_next"
+                        ]["mean"],
                         "future_qmin_bias": metrics[
                             "behavior_future_qmin_minus_mc_next"
                         ]["mean"],
@@ -831,9 +922,16 @@ def main():
             "actor_learning": False,
             "environment_or_rollout": False,
             "purpose": (
-                "separate recursive moving-target bootstrap feedback "
-                "from clipped twin-min bias"
+                "compare moving twin-mean bootstrap with RLPD-like "
+                "per-update random-one target selection without hard min"
             ),
+            "moving_random_one_contract": {
+                "selector_scope": "one Q index sampled once per Critic update",
+                "selector_applies_to": "entire 256-transition minibatch",
+                "selector_distribution": "uniform over q1/q2",
+                "both_online_qs_fit_same_selected_target": True,
+                "target_update": "Polyak tau=0.005",
+            },
         },
         "safety": {
             "environment_steps": 0,
@@ -934,6 +1032,7 @@ def main():
                 device,
                 milestones,
                 args.probe_batch_size,
+                random_seed=group_seed + 3_000_003,
             )
             branches[branch] = result
             initial_hash_sets["online"].add(
@@ -984,6 +1083,10 @@ def main():
                 "moving_mean_target_changed": (
                     branches["moving_mean"]["target_changed"]
                     if "moving_mean" in branches else True
+                ),
+                "moving_random_one_target_changed": (
+                    branches["moving_random_one"]["target_changed"]
+                    if "moving_random_one" in branches else True
                 ),
                 "oracle_diagnostic_target_changed": (
                     branches["oracle_mc"]["target_changed"]
