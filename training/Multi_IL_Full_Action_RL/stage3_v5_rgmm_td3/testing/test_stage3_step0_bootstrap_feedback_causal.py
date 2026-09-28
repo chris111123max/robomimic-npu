@@ -70,6 +70,8 @@ def arguments():
     parser.add_argument("--device", default="npu:0")
     parser.add_argument("--groups", nargs="+", choices=("multi_q", "rnn_q"),
                         default=("multi_q", "rnn_q"))
+    parser.add_argument("--branches", nargs="+", choices=BRANCHES,
+                        default=BRANCHES)
     parser.add_argument("--updates", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--probe-size", type=int, default=4096)
@@ -725,7 +727,7 @@ def compare_branches(branch_results):
     rows = []
     for update in sorted(common):
         item = {"update": int(update)}
-        for branch in BRANCHES:
+        for branch in branch_results:
             late = lookup[branch][update]["datasets"]["late"]
             item[f"{branch}_late_spearman"] = float(
                 late["spearman_qmin_mc"]
@@ -822,7 +824,7 @@ def main():
         "stage3_run_dir": str(run_dir),
         "device": str(device),
         "design": {
-            "branches": list(BRANCHES),
+            "branches": list(args.branches),
             "frozen_dataset_mix": "128 old + 128 late per update",
             "same_minibatch_schedule_across_branches": True,
             "same_step0_initialization_across_branches": True,
@@ -914,7 +916,7 @@ def main():
 
         branches = {}
         initial_hash_sets = {"online": set(), "target": set(), "actor": set()}
-        for branch in BRANCHES:
+        for branch in args.branches:
             print(
                 f"[GROUP={group}] branch={branch} updates={args.updates} "
                 f"milestones={milestones}",
@@ -967,21 +969,26 @@ def main():
                 "same_initial_online_hash": len(initial_hash_sets["online"]) == 1,
                 "same_initial_target_hash": len(initial_hash_sets["target"]) == 1,
                 "same_initial_target_actor_hash": len(initial_hash_sets["actor"]) == 1,
-                "all_branches_completed": all(
-                    value["completed"] for value in branches.values()
+                "all_requested_branches_completed": (
+                    set(branches) == set(args.branches)
+                    and all(value["completed"] for value in branches.values())
                 ),
-                "frozen_target_really_frozen": not branches[
-                    "frozen_step0_min"
-                ]["target_changed"],
-                "moving_min_target_changed": branches[
-                    "production_moving_min"
-                ]["target_changed"],
-                "moving_mean_target_changed": branches[
-                    "moving_mean"
-                ]["target_changed"],
-                "oracle_diagnostic_target_changed": branches[
-                    "oracle_mc"
-                ]["target_changed"],
+                "frozen_target_really_frozen": (
+                    not branches["frozen_step0_min"]["target_changed"]
+                    if "frozen_step0_min" in branches else True
+                ),
+                "moving_min_target_changed": (
+                    branches["production_moving_min"]["target_changed"]
+                    if "production_moving_min" in branches else True
+                ),
+                "moving_mean_target_changed": (
+                    branches["moving_mean"]["target_changed"]
+                    if "moving_mean" in branches else True
+                ),
+                "oracle_diagnostic_target_changed": (
+                    branches["oracle_mc"]["target_changed"]
+                    if "oracle_mc" in branches else True
+                ),
             },
         }
         report["groups"][group] = group_result
