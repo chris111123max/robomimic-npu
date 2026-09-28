@@ -210,11 +210,13 @@ def main():
             log_dir / f"{mode}_{group}_{device.replace(':', '')}.log"
         )
         log_handle = open(log_path, "w", encoding="utf-8", buffering=1)
+        runtime_workdir = quad / "runtime_workdirs" / f"{mode}_{group}"
+        runtime_workdir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
         env["PYTHONUNBUFFERED"] = "1"
         process = subprocess.Popen(
             command,
-            cwd=str(HERE.parents[2]),
+            cwd=str(runtime_workdir),
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             env=env,
@@ -237,6 +239,7 @@ def main():
             "wave": int(wave_index),
             "pid": int(process.pid),
             "log": str(log_path),
+            "runtime_workdir": str(runtime_workdir.resolve()),
             "startup_ready_marker": str(marker),
             "startup_ready": False,
             "command": command,
