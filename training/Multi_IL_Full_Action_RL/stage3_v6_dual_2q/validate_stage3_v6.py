@@ -90,8 +90,14 @@ def main():
         "sum_k p'_k*min(Q1',Q2')" not in trainer_source
     )
     checks["trainer_enforces_prepared_npu_mapping"] = (
-        "expected_device = fairness[\"npu_mapping\"].get(run_key)"
+        'expected_device = fairness["npu_mapping"].get(run_key)'
         in trainer_source
+    )
+    checks["manual_multi_mapping_is_explicit_and_group_limited"] = (
+        '"--manual-multi-two-card"' in trainer_source
+        and '"mean2q/multi_q": "npu:0"' in trainer_source
+        and '"random2q/multi_q": "npu:1"' in trainer_source
+        and 'if args.group != "multi_q"' in trainer_source
     )
     checks["trainer_supports_startup_ready_marker"] = (
         "--startup-ready-file" in trainer_source

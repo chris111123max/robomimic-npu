@@ -34,6 +34,11 @@ def arguments():
     parser.add_argument("--group", required=True, choices=("rnn_q", "multi_q"))
     parser.add_argument("--target-mode", required=True, choices=("mean2q", "random2q"))
     parser.add_argument("--device", required=True, choices=("npu:0", "npu:1", "npu:2", "npu:3"))
+    parser.add_argument(
+        "--manual-multi-two-card",
+        action="store_true",
+        help="Use npu:0 for mean2q/multi_q and npu:1 for random2q/multi_q only.",
+    )
     parser.add_argument("--quad-run-dir", required=True)
     parser.add_argument("--critic-init-checkpoint", required=True)
     parser.add_argument(
@@ -263,10 +268,19 @@ def main():
     if not fairness["actor_hashes_identical"]:
         raise RuntimeError("QUAD_FAIRNESS_FAIL")
     run_key = f"{args.target_mode}/{args.group}"
-    expected_device = fairness["npu_mapping"].get(run_key)
+    if args.manual_multi_two_card:
+        if args.group != "multi_q":
+            raise RuntimeError("--manual-multi-two-card only allows group=multi_q")
+        manual_mapping = {
+            "mean2q/multi_q": "npu:0",
+            "random2q/multi_q": "npu:1",
+        }
+        expected_device = manual_mapping.get(run_key)
+    else:
+        expected_device = fairness["npu_mapping"].get(run_key)
     if expected_device != args.device:
         raise RuntimeError(
-            f"Stage3-v6 fixed NPU mapping requires {run_key} on "
+            f"Stage3-v6 device mapping requires {run_key} on "
             f"{expected_device}, got {args.device}"
         )
     sources = read_json(pair / "shared" / "stage2_source_manifest.json")
