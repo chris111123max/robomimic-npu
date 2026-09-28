@@ -4,7 +4,7 @@
 Historical target:
   stage3v5_stage22_rnn4k_multi6k_20260922
 
-Four branches start from the exact same Stage3 step0 Critic / optimizer state
+Five branches start from the exact same Stage3 step0 Critic / optimizer state
 and consume the exact same frozen 50/50 old+late minibatch schedule:
 
   A production_moving_min : production component-mean target, twin min, Polyak.
