@@ -105,6 +105,26 @@ def validate_config(config):
         raise RuntimeError("Stage3-v6 requires fixed evaluation seeds 20000..20009")
     if "hard_clipped_min_critic_target" not in config.get("forbidden_mechanisms", []):
         raise RuntimeError("Stage3-v6 must explicitly forbid hard clipped-min target")
+    v2 = config.get("critic_readiness_v2", {})
+    if (v2.get("version") != 2 or v2.get("min_online_steps") != 100000
+            or v2.get("check_interval_steps") != 10000
+            or v2.get("data") != {"min_completed_episodes": 150,
+                                   "min_success_episodes": 30,
+                                   "min_failure_episodes": 30}
+            or v2.get("rank") != {"metric": "qmean_mc_spearman", "min_spearman": 0.7}
+            or v2.get("td_health") != {
+                "metric": "member_max_mae", "sustained_worsening_fraction": 0.35,
+                "required_consecutive_worsening_intervals": 2,
+                "required_history_points": 3}
+            or v2.get("numeric") != {
+                "qmean_mean_shift_z_max": 0.5, "qmean_std_ratio_max": 1.5,
+                "finite_required": True, "epsilon": 1e-6}
+            or v2.get("consecutive_passes") != 2
+            or v2.get("critic_only_warning_steps") != 300000
+            or v2.get("hard_stop_on_readiness_timeout") is not False):
+        raise RuntimeError("Stage3-v6 Critic Readiness V2 contract changed")
+    if config.get("critic_readiness", {}).get("diagnostic_only") is not True:
+        raise RuntimeError("Legacy V5 readiness fields must be diagnostic-only")
 
 
 def main():

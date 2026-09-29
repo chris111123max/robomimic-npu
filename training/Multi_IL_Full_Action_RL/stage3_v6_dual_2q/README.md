@@ -1,8 +1,10 @@
 # Stage3-v6: Dual 2Q Target A/B
 
-Stage3-v6 keeps the Stage3-v5 architecture, replay, handoff, Actor objective,
+Stage3-v6 keeps the Stage3-v5 architecture, replay, Actor objective,
 optimizers, UTD, policy delay, Polyak update and evaluation protocol unchanged.
-The controlled variable is the **Critic Bellman target estimator**.
+The mean-vs-random controlled variable is the **Critic Bellman target estimator**.
+Readiness V2 is a V6-only handoff change shared by both target modes; Stage3-v5
+readiness behavior is not modified.
 
 ## Target mechanisms
 
@@ -94,3 +96,29 @@ python training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/launch_stage3_v6_4npu.
 ```
 
 Formal runs use 16 simulator envs per training process, matching Stage3-v5.
+
+## Critic Readiness V2 (formal)
+
+Prerequisite `DATA_READY`: at least 100K env steps, 150 completed episodes,
+30 successes and 30 failures. Hard conditions are `RANK_READY` (Spearman of
+Qmean vs finite episode MC return >= 0.70), `TD_HEALTHY` (fixed-set Emax finite
+and no two consecutive 10K Emax increases each >= 35%; first two checks are
+NOT_READY), and `NUMERIC_SAFE` (finite Q/target/TD and recorded loss/grad norm;
+Qmean mean shift <= 0.5 previous/reference standard deviations, symmetric
+standard-deviation ratio <= 1.5). Two consecutive full passes enter
+`ACTOR_WARMUP`. The Stage2.2-initialized Critic is evaluated on the first
+frozen readiness set for the Qmean reference; the current 100K Critic is never
+used as a surrogate. Mean and random share identical gate code and thresholds;
+readiness does not advance random selector RNG.
+
+Twin disagreement, AUC, old TD plateau, and OOD remain diagnostic-only. An
+unready Critic at 300K produces a warning and continues `CRITIC_ONLY`; a true
+NUMERIC_SAFE catastrophe remains fatal. Legacy `critic_readiness` config keys
+exist solely for the old diagnostic calculations. The active gate is
+`critic_readiness_v2`.
+
+For the two-card Multi-only formal variant, use `--manual-multi-two-card` with
+mean2q/multi_q on logical `npu:0` and random2q/multi_q on logical `npu:1`.
+Launch each trainer manually from an isolated runtime working directory; wait
+for mean's verified 16/16 READY marker before launching random. No RNN trainer
+or four-task launcher is part of this variant.

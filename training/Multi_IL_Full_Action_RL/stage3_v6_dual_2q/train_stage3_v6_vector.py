@@ -174,6 +174,8 @@ def checkpoint_payload(agent, config, group, env_steps, generations,
                        episodes, successes, online, torch, handoff=None, update_credit=0.0, offline=None):
     return {
         "stage": "stage3-v6", "group": group,
+        "readiness_version": 2,
+        "stage2_critic_reference_state": agent.initial_critic_state,
         "critic_target_mode": agent.critic_target_mode,
         "env_steps": int(env_steps),
         "updates": int(agent.critic_updates), "actor_updates": int(agent.actor_updates),
@@ -219,6 +221,12 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
     payload = torch.load(path, map_location=agent.device)
     if payload.get("stage") != "stage3-v6":
         raise RuntimeError("Resume checkpoint is not Stage3-v6")
+    if payload.get("readiness_version") != 2 or not payload.get("training_state"):
+        raise RuntimeError("Cannot resume pre-V2 readiness checkpoint")
+    if payload["config"].get("critic_source_sha256") != config.get("critic_source_sha256"):
+        raise RuntimeError("Resume Stage2 Critic source differs")
+    if payload["config"].get("critic_readiness_v2") != config.get("critic_readiness_v2"):
+        raise RuntimeError("Resume Critic Readiness V2 rules differ")
     if payload.get("critic_target_mode") != config.get("critic_target_mode"):
         raise RuntimeError("Resume Critic target mode differs")
     if payload["config"].get("bc_rnn_checkpoint_sha256") != config.get("bc_rnn_checkpoint_sha256"):
@@ -236,6 +244,10 @@ def restore_checkpoint(path, agent, config, torch, OnlineSequenceReplay):
     agent.actor_optimizer.load_state_dict(payload["actor_optimizer"])
     agent.critic_optimizer.load_state_dict(payload["critic_optimizer"])
     agent.load_target_selector_state_dict(payload["target_selector_state"])
+    agent.initial_critic_state = {
+        key: value.detach().cpu().clone()
+        for key, value in payload["stage2_critic_reference_state"].items()
+    }
     agent.critic_updates = int(payload["updates"]); agent.actor_updates = int(payload["actor_updates"])
     agent.actor_enabled_critic_updates = int(payload.get("actor_enabled_critic_updates", 0))
     agent.actor_gate_open = bool(payload["actor_gate_open"])
@@ -288,6 +300,9 @@ def main():
     actual = str(Path(args.critic_init_checkpoint).resolve())
     if actual != expected:
         raise RuntimeError(f"QUAD_FAIRNESS_FAIL: Critic path {actual} != {expected}")
+    if file_hash(actual) != sources[args.group]["sha256"]:
+        raise RuntimeError("QUAD_FAIRNESS_FAIL: Stage2 Critic SHA256 changed")
+    config["critic_source_sha256"] = sources[args.group]["sha256"]
 
     parallel = config["parallel_env"]
     num_envs = int(args.num_envs or parallel["num_envs"])
@@ -307,12 +322,17 @@ def main():
     if args.smoke:
         # Smoke alters only timing/thresholds to exercise all FSM edges; the
         # immutable JSON remains the formal configuration.
-        config["critic_readiness"] = dict(config["critic_readiness"], min_online_steps=4,
-                                           max_critic_only_steps=10000, check_interval_steps=2,
-                                           min_completed_episodes=0, min_success_episodes=0,
-                                           min_failure_episodes=0, min_spearman=-1.0, min_auc=0.0,
-                                           max_twin_median=1.0, max_twin_p95=1.0,
-                                           consecutive_passes=1, ood_max_excess_q=float("inf"))
+        # V5 fields remain explanatory only; smoke timing overrides V6 gate.
+        config["critic_readiness"] = dict(config["critic_readiness"],
+                                           min_success_episodes=0, min_failure_episodes=0)
+        v2 = dict(config["critic_readiness_v2"])
+        v2["min_online_steps"] = 4
+        v2["check_interval_steps"] = 2
+        v2["data"] = dict(v2["data"], min_completed_episodes=0,
+                          min_success_episodes=0, min_failure_episodes=0)
+        v2["rank"] = dict(v2["rank"], min_spearman=-1.0)
+        v2["consecutive_passes"] = 1
+        config["critic_readiness_v2"] = v2
         config["actor_warmup"] = dict(config["actor_warmup"])
         config["smoke_warmup_steps"] = 4
 
@@ -370,12 +390,13 @@ def main():
         if args.benchmark_mode in ("A", "B"):
             profiler.device = None
         from stage3_v5_execution import prepare_round_batches, enable_npu_compile
-        from stage3_v5_schedule import CriticHandoff, HandoffState, TrainingState
-        from stage3_v5_readiness import replay_metrics
+        from stage3_v5_schedule import TrainingState
+        from stage3_v6_readiness import (
+            CriticHandoffV2, HandoffStateV2, fixed_set_digest, replay_metrics_v2)
         from stage3_v5_pipeline import TransitionCredit, overlap_burst, interval_overlap
         from stage3_v5_rollout import BoundarySnapshotExecutor
         from stage3_v5_diagnostics import isolated_training_rng
-        handoff = CriticHandoff(config)
+        handoff = CriticHandoffV2(config)
         critic_lr_ready = float(config["critic_lr"])
         update_credit = 0.0
         optimization = config.get("execution_optimization", {})
@@ -416,7 +437,12 @@ def main():
                 {env_id: contexts[env_id]["seed"] for env_id in range(num_envs)})
             observations = [observations_by_env[env_id] for env_id in range(num_envs)]
             executor.reset_indices(range(num_envs))
-            handoff = CriticHandoff(config, HandoffState.restore(saved["training_state"]))
+            handoff = CriticHandoffV2(config, HandoffStateV2.restore(saved["training_state"]))
+            if handoff.state.fixed_diagnostic_sha256:
+                if online.fixed_critic_diagnostic_set is None:
+                    raise RuntimeError("Resume lost frozen readiness set")
+                if fixed_set_digest(online.fixed_critic_diagnostic_set) != handoff.state.fixed_diagnostic_sha256:
+                    raise RuntimeError("Resume frozen readiness set identity differs")
             update_credit = float(saved.get("update_credit", 0.0))
             if saved.get("offline_sampler_state") and hasattr(offline, "load_state_dict"):
                 offline.load_state_dict(saved["offline_sampler_state"])
@@ -442,7 +468,8 @@ def main():
             "prefetch_minibatches": bool(prefetch), "compile_backend": compile_backend,
             "actor_update_schedule": "one Actor step per four Critic steps after readiness",
             "critic_batch": "128 offline + 128 online sliding horizon-10 sequences; final transition",
-            "handoff": "CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL; evaluation only in JOINT_RL",
+            "handoff": "V2 CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL; evaluation only in JOINT_RL",
+            "critic_readiness_v2": config["critic_readiness_v2"],
             "online_replay_capacity_configured": int(config["online_replay_capacity"]),
             "online_sequence_capacity_effective": int(config["online_sequence_capacity"]),
             "offline_sources": config.get("offline_source_metadata", config["offline_sources"]),
@@ -485,7 +512,9 @@ def main():
             "num_envs": int(num_envs),
             "startup_parallelism": int(parallel["startup_parallelism"]),
             "vector_env_initial_observation_count": int(len(vector.initial_observations)),
+            "initial_observation_count": int(len(vector.initial_observations)),
             "all_vector_envs_initialized": len(vector.initial_observations) == num_envs,
+            "all_initialized": len(vector.initial_observations) == num_envs,
             "critic_target_mode": agent.critic_target_mode,
         })
 
@@ -600,6 +629,7 @@ def main():
                             **source_sample_metrics(offline), **credit.metrics(),
                             **executor.metrics()})
             if collect_metrics:
+                handoff.note_training_metrics(metrics)
                 metric_rows.append(metrics)
                 log_jsonl(group_dir / "train_metrics.jsonl", aggregate(metric_rows))
                 metric_rows = []
@@ -754,19 +784,24 @@ def main():
                     if credit.updates_due:
                         catch_up()
                     with profiler.measure("readiness_ms", device=True):
-                        readiness = replay_metrics(agent, online, episodes, successes, config,
-                                                   handoff.state.readiness_history, env_steps=env_steps, offline=offline)
+                        readiness = replay_metrics_v2(agent, online, episodes, successes, config,
+                                                      handoff.state, env_steps=env_steps,
+                                                      offline=offline)
                     record = handoff.submit_readiness(readiness)
                     log_jsonl(group_dir / "readiness_metrics.jsonl", record)
+                    if record["numeric_catastrophic"]:
+                        raise FloatingPointError("Stage3-v6 V2 NUMERIC_SAFE catastrophic failure")
                     if record["critic_ready"]:
                         save_checkpoint(group_dir / "checkpoints" / "critic_ready.pth", agent,
                                         config, args.group, env_steps, generations, episodes,
                                         successes, online, torch, handoff, credit.pending, offline)
-                if not args.benchmark_mode and handoff.fail_if_timed_out(env_steps):
-                    save_checkpoint(group_dir / "checkpoints" / "critic_not_ready.pth", agent,
-                                    config, args.group, env_steps, generations, episodes,
-                                    successes, online, torch, handoff, credit.pending, offline)
-                    stop_requested = True
+                if not args.benchmark_mode and handoff.warning_if_timed_out(env_steps):
+                    log_jsonl(group_dir / "readiness_warnings.jsonl", {
+                        "env_steps": int(env_steps),
+                        "critic_readiness_timeout_warning": True,
+                        "training_state": handoff.state.state.value,
+                        "action": "CONTINUE_CRITIC_ONLY",
+                    })
                 # Evaluations are prohibited until the warm-up completes.  The
                 # transition itself schedules the first one immediately.
                 if not args.benchmark_mode and handoff.evaluation_due(env_steps):

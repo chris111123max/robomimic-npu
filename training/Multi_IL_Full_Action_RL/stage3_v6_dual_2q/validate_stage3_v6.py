@@ -115,6 +115,21 @@ def main():
     checks["actor_objective_unchanged"] = (
         "Q1(h10_final" in trainer_source
     )
+    checks["v2_gate_is_v6_specific"] = (
+        "from stage3_v6_readiness import (" in trainer_source
+        and "CriticHandoffV2" in trainer_source
+        and "replay_metrics_v2" in trainer_source
+        and "from stage3_v5_readiness import replay_metrics" not in trainer_source
+    )
+    checks["v2_timeout_is_warning_only"] = (
+        "handoff.warning_if_timed_out(env_steps)" in trainer_source
+        and "handoff.fail_if_timed_out(env_steps)" not in trainer_source
+    )
+    checks["v2_reference_checkpointed"] = (
+        '"stage2_critic_reference_state": agent.initial_critic_state' in trainer_source
+        and '"readiness_version": 2' in trainer_source
+        and 'HandoffStateV2.restore(saved["training_state"])' in trainer_source
+    )
 
     status = "PASS" if all(checks.values()) else "FAIL"
     print(json.dumps({"status": status, "checks": checks}, indent=2))

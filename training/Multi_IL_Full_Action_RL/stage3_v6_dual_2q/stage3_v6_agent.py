@@ -1,10 +1,12 @@
 """Stage3-v6 agent: V5 training with mean-2Q or random-one-2Q targets.
 
-Only the Bellman target estimator changes. Actor objective, replay, handoff,
-optimizers, Polyak updates and all other Stage3-v5 mechanics are inherited.
+The Bellman target estimator changes; Critic Readiness V2 is V6-specific.
+Actor objective, replay, optimizers, Polyak updates and other training mechanics
+are inherited from Stage3-v5.
 """
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 
@@ -43,6 +45,28 @@ class RecurrentGMMTD3V6(_V5RecurrentGMMTD3):
         self.target_selector = TargetSelector2Q(mode, seed)
         self._active_target_q = None
         self._last_update_selected_q = None
+        # Exact pre-Stage3 Critic, retained on CPU for later evaluation on the
+        # first frozen readiness set. It is never an optimizer parameter.
+        self.initial_critic_state = {
+            key: value.detach().cpu().clone()
+            for key, value in self.critic.state_dict().items()
+        }
+
+    @torch.no_grad()
+    def initial_qmean_on_sequences(self, sequences):
+        """Evaluate the true Stage2-initialized Critic on frozen V2 windows."""
+        reference = copy.deepcopy(self.critic)
+        try:
+            reference.load_state_dict(self.initial_critic_state, strict=True)
+            reference.eval()
+            reference.requires_grad_(False)
+            actions = self._tensor_batch({"actions": sequences["actions"][:, -1]})["actions"]
+            contexts = self._history_contexts(reference, sequences)
+            q1, q2 = reference.q_from_context(
+                (contexts[0][:, -1], contexts[1][:, -1]), actions)
+            return (0.5 * (q1 + q2)).detach().cpu().numpy().reshape(-1)
+        finally:
+            del reference
 
     @property
     def critic_target_mode(self):
