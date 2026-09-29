@@ -384,8 +384,12 @@ class RecurrentGMMTD3:
         with torch.no_grad():
             # Counterfactual learned-std Q is logged only and has no RL gradient.
             if contexts is not None:
+                # The Actor objective above evaluates only the final horizon token.
+                # Keep this learned-std diagnostic on the exact same final Critic
+                # context and final GMM distribution. Using the full context tensor
+                # is shape-incompatible, and `distribution` is not defined here.
                 sampled_diagnostic, _, _, _, _ = sampled_q(
-                    self.critic, contexts, distribution,
+                    self.critic, final_contexts, final_distribution,
                     self.action_scale, self.action_offset,
                     samples=int(self.config["diagnostic_learned_std_samples_per_mode"]),
                     twin_min=False)
