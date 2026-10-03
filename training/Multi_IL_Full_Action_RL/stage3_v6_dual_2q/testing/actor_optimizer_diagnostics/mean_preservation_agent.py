@@ -125,8 +125,18 @@ class MeanPreservationAgent(Original):
             copy.deepcopy(self.actor).eval().requires_grad_(False)
         )
         self.mean_reference_hash = module_hash(self.mean_reference)
+        # Compatibility with the existing testing-only milestone diagnostics.
+        self.module_reference = self.mean_reference
+        self.module_reference_hash = self.mean_reference_hash
+        self.module_branch = self.mean_preservation_branch
         self.mean_preservation_configured = False
         self._mean_record = None
+
+    @property
+    def allowed_actor_groups(self):
+        # This experiment never masks parameter groups; the intervention is
+        # exclusively an output-space component-mean penalty.
+        return None
 
     def configure_after_resume(self, payload):
         if payload.get("critic_target_mode") != "random2q":
@@ -308,12 +318,12 @@ class MeanPreservationAgent(Original):
                         .sqrt()
                     )
 
-                    final_distribution = V5.torch.distributions.MixtureSameFamily(
-                        V5.torch.distributions.Categorical(
+                    final_distribution = torch.distributions.MixtureSameFamily(
+                        torch.distributions.Categorical(
                             logits=post_distribution.mixture_distribution.logits[:, -1]
                         ),
-                        V5.torch.distributions.Independent(
-                            V5.torch.distributions.Normal(
+                        torch.distributions.Independent(
+                            torch.distributions.Normal(
                                 post_distribution.component_distribution.base_dist.loc[:, -1],
                                 post_distribution.component_distribution.base_dist.scale[:, -1],
                             ),
