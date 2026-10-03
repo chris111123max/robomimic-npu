@@ -632,7 +632,8 @@ def main():
         grad_cos = finite_values("gradient_cosine_previous")
         delta_cos = finite_values("delta_cosine_negative_gradient")
         dynamics[kind] = {
-            "updates": len(rows),
+            "actor_updates_total": int(args.updates),
+            "trace_rows": len(rows),
             "effective_amplification": {
                 "median": float(np.median(amp)),
                 "p10": float(np.percentile(amp, 10)),
