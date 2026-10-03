@@ -3,7 +3,7 @@
 
 This probe is intentionally narrow:
   * random2q / multi_q only
-  * starts from the 140K critic_ready checkpoint
+  * starts from the random2q branch's own critic_ready checkpoint
   * freezes the Critic
   * uses one fixed production-shaped Actor batch
   * computes the production Actor gradient once
@@ -46,7 +46,7 @@ from stage3_v6_agent import strict_stage2_load
 
 
 SEED = 20261003
-DEFAULT_PROBE_ENV_STEPS = (140016, 150000, 160000, 200000)
+DEFAULT_PROBE_OFFSETS = (16, 10000, 20000, 60000)
 
 
 def read_json(path):
@@ -526,7 +526,7 @@ def build_fixed_batches(config, ready_payload):
     replay_path = Path(ready_payload["online_sequence_replay"])
     if not replay_path.is_file():
         raise FileNotFoundError(
-            f"140K checkpoint online replay sidecar is missing: {replay_path}"
+            f"critic_ready checkpoint online replay sidecar is missing: {replay_path}"
         )
     online = OnlineSequenceReplay.load(replay_path)
     train_batch = aligned_sequence_batch(
@@ -578,7 +578,11 @@ def main():
         "--probe-env-steps",
         type=int,
         nargs="+",
-        default=list(DEFAULT_PROBE_ENV_STEPS),
+        default=None,
+        help=(
+            "Absolute env-step probes. If omitted, use offsets "
+            "+16/+10K/+20K/+60K from this random2q checkpoint's own critic_ready step."
+        ),
     )
     args = parser.parse_args()
 
@@ -599,8 +603,9 @@ def main():
         )
     if ready.get("group") != "multi_q":
         raise RuntimeError(f"This probe requires multi_q, got {ready.get('group')!r}")
-    if int(ready["env_steps"]) != 140000:
-        raise RuntimeError(f"Expected 140K critic_ready checkpoint, got {ready['env_steps']}")
+    ready_env_steps = int(ready["env_steps"])
+    if ready_env_steps <= 0:
+        raise RuntimeError(f"Invalid critic_ready env_steps: {ready_env_steps}")
     if int(ready["actor_updates"]) != 0:
         raise RuntimeError(
             f"Expected zero Actor updates at critic_ready, got {ready['actor_updates']}"
@@ -642,7 +647,7 @@ def main():
     reference_parameters = named_parameter_snapshot(actor)
     reference_outputs = actor_outputs(actor, diagnostic_observations, device)
 
-    # Compute exactly one production Actor gradient at the untouched 140K policy.
+    # Compute exactly one production Actor gradient at the untouched critic_ready policy.
     actor.zero_grad(set_to_none=True)
     loss, loss_details = production_actor_loss(
         actor,
@@ -676,6 +681,16 @@ def main():
         clipped_global_norm / raw_global_norm if raw_global_norm > 0 else 1.0
     )
     clip_scale_expected = min(1.0, max_grad_norm / (raw_global_norm + 1e-6))
+
+    probe_env_steps = (
+        [ready_env_steps + int(offset) for offset in DEFAULT_PROBE_OFFSETS]
+        if args.probe_env_steps is None
+        else [int(step) for step in args.probe_env_steps]
+    )
+    if any(step <= ready_env_steps for step in probe_env_steps):
+        raise RuntimeError(
+            f"All probes must be after critic_ready={ready_env_steps}, got {probe_env_steps}"
+        )
 
     results = {
         "testing_only": True,
@@ -714,6 +729,11 @@ def main():
             "clip_scale_expected": clip_scale_expected,
             "clip_triggered": raw_global_norm > max_grad_norm,
         },
+        "probe_schedule_contract": {
+            "critic_ready_env_steps": ready_env_steps,
+            "probe_env_steps": probe_env_steps,
+            "default_offsets_from_ready": list(DEFAULT_PROBE_OFFSETS),
+        },
         "probe_env_steps": {},
     }
 
@@ -721,7 +741,7 @@ def main():
     descent_gradient = negate(clipped_gradients)
     sign_direction = sign_descent(clipped_gradients)
 
-    for env_step in args.probe_env_steps:
+    for env_step in probe_env_steps:
         lr, schedule = lr_for_env_step(config, ready, int(env_step))
 
         adam_actor, adam_delta, adam_optimizer = apply_fresh_adam(
