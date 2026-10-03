@@ -308,6 +308,13 @@ class GeometryAgent(Original):
             else torch.zeros_like(target_l2_t)
         )
         scale_value = _scalar(scale)
+        before = (
+            {
+                name: parameter.detach().clone()
+                for name, parameter in self.actor.named_parameters()
+            }
+            if should_record else None
+        )
 
         for name, parameter in self.actor.named_parameters():
             grad = active_grads.get(name)
@@ -315,7 +322,16 @@ class GeometryAgent(Original):
                 parameter.add_(grad, alpha=-scale_value)
 
         if should_record:
-            actual_l2 = grad_l2_value * abs(scale_value)
+            delta_named = [
+                (name, parameter.detach() - before[name])
+                for name, parameter in self.actor.named_parameters()
+            ]
+            actual_l2 = math.sqrt(
+                sum(
+                    float(delta.float().square().sum().detach().cpu())
+                    for _, delta in delta_named
+                )
+            )
             row = {
                 "testing_only": True,
                 "branch": self.geometry_branch,
@@ -341,6 +357,7 @@ class GeometryAgent(Original):
                 ),
                 "gradient_groups_l2": _group_l2(active_grads.items()),
                 "shadow_adam_unit_groups_l2": _group_l2(update_units.items()),
+                "parameter_step_groups_l2": _group_l2(delta_named),
             }
             self._last_geometry_record = row
             _append_jsonl(
