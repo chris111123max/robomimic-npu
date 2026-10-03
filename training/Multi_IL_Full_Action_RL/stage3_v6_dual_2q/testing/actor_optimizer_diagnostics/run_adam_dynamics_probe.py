@@ -277,6 +277,7 @@ def build_batch_bank(config, ready, bank_size):
 
 def prepare_branch(reference_actor, ready_optimizer, kind):
     actor = copy.deepcopy(reference_actor)
+    actor.requires_grad_(True)
     actor.train()
     if kind == "PRODUCTION_ADAM":
         optimizer = torch.optim.Adam(actor.parameters(), lr=0.0, weight_decay=0.0)
@@ -369,10 +370,8 @@ def one_update(
         "delta_cosine_negative_gradient": delta_cos_neg_grad,
         "gradient_cosine_previous": grad_cos_prev,
         "cumulative_parameter_drift_l2": cumulative_norm.detach(),
-        "gradient_group_stats": group_stats(gradients, counts),
-        "delta_group_stats": group_stats(delta, counts),
     }
-    return record, gradients
+    return record, gradients, delta
 
 
 def host_record(record):
@@ -412,6 +411,12 @@ def main():
     parser.add_argument("--updates", type=int, default=DEFAULT_UPDATES)
     parser.add_argument("--batch-bank-size", type=int, default=DEFAULT_BATCH_BANK)
     parser.add_argument(
+        "--trace-every",
+        type=int,
+        default=10,
+        help="Write compact per-update dynamics every N updates; milestones are always written.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=HERE / "results_adam_dynamics_probe.json",
@@ -427,6 +432,8 @@ def main():
         raise ValueError("--updates must be in [1,10000]")
     if not 4 <= int(args.batch_bank_size) <= 256:
         raise ValueError("--batch-bank-size must be in [4,256]")
+    if not 1 <= int(args.trace_every) <= 1000:
+        raise ValueError("--trace-every must be in [1,1000]")
 
     run = args.run.resolve()
     device = resolve_device(args.device)
@@ -533,7 +540,7 @@ def main():
         batch = batch_bank[(update_index - 1) % len(batch_bank)]
 
         for kind, branch in branches.items():
-            record, gradient = one_update(
+            record, gradient, delta = one_update(
                 branch["actor"],
                 branch["optimizer"],
                 critic,
@@ -548,22 +555,28 @@ def main():
             )
             branch["previous_gradient"] = gradient
 
-            row = host_record(record)
-            row.update(
-                {
-                    "testing_only": True,
-                    "branch": kind,
-                    "actor_update": int(update_index),
-                    "implied_env_step": int(env_step),
-                    "actor_lr": float(lr),
-                    "batch_bank_index": int((update_index - 1) % len(batch_bank)),
-                    "schedule": schedule,
-                }
+            should_trace = (
+                update_index <= 20
+                or update_index % int(args.trace_every) == 0
+                or update_index in selected_milestones
             )
-            traces.append(row)
+            if should_trace:
+                row = host_record(record)
+                row.update(
+                    {
+                        "testing_only": True,
+                        "branch": kind,
+                        "actor_update": int(update_index),
+                        "implied_env_step": int(env_step),
+                        "actor_lr": float(lr),
+                        "batch_bank_index": int((update_index - 1) % len(batch_bank)),
+                        "schedule": schedule,
+                    }
+                )
+                traces.append(row)
 
             if update_index in selected_milestones:
-                branch["milestones"][str(update_index)] = milestone_metrics(
+                milestone = milestone_metrics(
                     branch["actor"],
                     branch["optimizer"],
                     reference_outputs,
@@ -573,6 +586,10 @@ def main():
                     device,
                     kind,
                 )
+                milestone["current_gradient"] = group_stats(gradient, counts)
+                milestone["current_parameter_step"] = group_stats(delta, counts)
+                milestone["current_update_scalars"] = host_record(record)
+                branch["milestones"][str(update_index)] = milestone
 
         if update_index in selected_milestones:
             console = {"actor_update": update_index, "env_step": env_step, "actor_lr": lr}
@@ -659,6 +676,11 @@ def main():
         "seed": SEED,
         "updates": int(args.updates),
         "batch_bank_size": int(args.batch_bank_size),
+        "trace_every": int(args.trace_every),
+        "trace_sampling": (
+            "updates 1..20, every trace_every updates, and all milestones; "
+            "gradient_cosine_previous always compares truly consecutive updates"
+        ),
         "mechanism_scope": (
             "frozen critic_ready Critic and replay; production Actor objective, "
             "production LR schedule, same pre-sampled batch order"
@@ -685,6 +707,10 @@ def main():
         },
         "branches": summary_branches,
         "dynamics": dynamics,
+        "dynamics_sampling_note": (
+            "Distribution summaries use the compact trace sample, not every update. "
+            "Each sampled gradient_cosine_previous still compares update t with t-1."
+        ),
         "paired_final_comparison": {
             "adam_to_sgd_cumulative_parameter_drift_ratio": (
                 float(adam_param / sgd_param) if sgd_param > 0 else None
