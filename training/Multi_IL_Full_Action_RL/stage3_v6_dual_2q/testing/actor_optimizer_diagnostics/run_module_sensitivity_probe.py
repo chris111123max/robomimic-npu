@@ -706,6 +706,7 @@ def main():
         }
 
     # Directional sensitivity is output drift per cumulative parameter L2.
+    full_final = final_rows["FULL_GRADIENT"]
     for branch_name, row in final_rows.items():
         parameter_l2 = row["parameter_drift_l2"]
         row["weighted_action_drift_per_parameter_l2"] = (
@@ -716,6 +717,37 @@ def main():
             row["sampled_action_drift"] / parameter_l2
             if parameter_l2 > 0 else None
         )
+        row["weighted_action_drift_vs_full"] = (
+            row["weighted_action_drift"] / full_final["weighted_action_drift"]
+            if full_final["weighted_action_drift"] > 0 else None
+        )
+        row["sampled_action_drift_vs_full"] = (
+            row["sampled_action_drift"] / full_final["sampled_action_drift"]
+            if full_final["sampled_action_drift"] > 0 else None
+        )
+
+    sensitivity_rankings = {
+        "weighted_action_drift_descending": sorted(
+            BRANCH_GROUPS,
+            key=lambda name: final_rows[name]["weighted_action_drift"],
+            reverse=True,
+        ),
+        "sampled_action_drift_descending": sorted(
+            BRANCH_GROUPS,
+            key=lambda name: final_rows[name]["sampled_action_drift"],
+            reverse=True,
+        ),
+        "hidden_l2_descending": sorted(
+            BRANCH_GROUPS,
+            key=lambda name: final_rows[name]["hidden_l2"],
+            reverse=True,
+        ),
+        "categorical_kl_descending": sorted(
+            BRANCH_GROUPS,
+            key=lambda name: final_rows[name]["categorical_kl_mean"],
+            reverse=True,
+        ),
+    }
 
     result = {
         "testing_only": True,
@@ -751,6 +783,7 @@ def main():
         "baseline_fixed_q1": baseline_q1,
         "baseline_fixed_rl_loss": baseline_rl_loss,
         "final_comparison": final_rows,
+        "sensitivity_rankings": sensitivity_rankings,
         "interpretation": {
             "goal": (
                 "localize which Actor parameter subspaces convert equal global "
