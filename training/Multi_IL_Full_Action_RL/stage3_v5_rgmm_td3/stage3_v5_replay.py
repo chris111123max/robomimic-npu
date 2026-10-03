@@ -1,4 +1,4 @@
-"""Boundary-aligned Actor windows; Critic replay retains the v3 contract."""
+"""Boundary-aligned Actor windows and full-prefix recurrent Critic replay."""
 from __future__ import annotations
 
 import sys
@@ -73,6 +73,21 @@ class Stage1OfflineSequenceReplay:
         self.samples_by_purpose[purpose] = self.samples_by_purpose.get(purpose, 0) + int(count)
         result={key:np.stack(value) for key,value in out.items()}; result["source_id"]=np.full(int(count),self.source_id,np.int8); return result
 
+    def sample_critic_prefixes(self, count, length, purpose="critic"):
+        result = _sample_prefix_sequence_batch(self.episodes, self.rng, count, length)
+        self.samples_drawn += int(count)
+        self.samples_by_purpose[purpose] = self.samples_by_purpose.get(purpose, 0) + int(count)
+        result["source_id"] = np.full(int(count), self.source_id, np.int8)
+        return result
+
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        result = _sample_aligned_prefix_batch(
+            self.episodes, self.rng, count, length, horizon)
+        self.samples_drawn += int(count)
+        self.samples_by_purpose[purpose] = self.samples_by_purpose.get(purpose, 0) + int(count)
+        result["source_id"] = np.full(int(count), self.source_id, np.int8)
+        return result
+
     def state_dict(self): return {"rng_state":self.rng.bit_generator.state,"samples_drawn":self.samples_drawn,"samples_by_purpose":dict(self.samples_by_purpose)}
     def load_state_dict(self, value):
         self.rng.bit_generator.state=value["rng_state"]; self.samples_drawn=int(value["samples_drawn"])
@@ -101,11 +116,89 @@ def _sample_sequence_batch(episodes, rng, count, length):
     }
 
 
+def _sample_prefix_sequence_batch(episodes, rng, count, length):
+    """Preserve the old final-transition sampling distribution but return episode prefixes."""
+    eligible = [episode for episode in episodes
+                if len(episode["actions"]) >= int(length)]
+    if not eligible:
+        raise RuntimeError("No complete episode is available for recurrent sampling")
+    count = int(count)
+    episode_ids = rng.integers(len(eligible), size=count)
+    start_counts = np.asarray(
+        [len(episode["actions"]) - int(length) + 1 for episode in eligible],
+        dtype=np.int64)
+    starts = rng.integers(start_counts[episode_ids], size=count)
+    fields = {key: [] for key in CORE + ("episode_steps",)}
+    lengths = []
+    for episode_id, start in zip(episode_ids, starts):
+        episode = eligible[int(episode_id)]
+        stop = int(start) + int(length)
+        lengths.append(stop)
+        for key in fields:
+            fields[key].append(np.asarray(episode[key][:stop]))
+    fields["sequence_lengths"] = np.asarray(lengths, dtype=np.int64)
+    fields["sample_window_starts"] = np.asarray(starts, dtype=np.int64)
+    return fields
+
+
+def _merge_prefix_batches(left, right):
+    merged = {}
+    for key in CORE + ("episode_steps",):
+        merged[key] = list(left[key]) + list(right[key])
+    merged["sequence_lengths"] = np.concatenate(
+        (left["sequence_lengths"], right["sequence_lengths"])).astype(np.int64)
+    merged["sample_window_starts"] = np.concatenate(
+        (left["sample_window_starts"], right["sample_window_starts"])).astype(np.int64)
+    return merged
+
+
+def _pad_prefix_batch(batch):
+    lengths = np.asarray(batch["sequence_lengths"], dtype=np.int64)
+    if len(lengths) == 0 or np.any(lengths <= 0):
+        raise RuntimeError("Invalid full-prefix Critic batch")
+    max_length = int(lengths.max())
+    result = {
+        "observations": np.zeros((len(lengths), max_length, 59), np.float32),
+        "actions": np.zeros((len(lengths), max_length, 14), np.float32),
+        "rewards": np.zeros((len(lengths), max_length, 1), np.float32),
+        "next_observations": np.zeros((len(lengths), max_length, 59), np.float32),
+        "terminals": np.zeros((len(lengths), max_length, 1), np.float32),
+        "episode_steps": np.zeros((len(lengths), max_length), np.int64),
+        "valid_mask": np.zeros((len(lengths), max_length), bool),
+        "sequence_lengths": lengths,
+        "sample_window_starts": np.asarray(batch["sample_window_starts"], dtype=np.int64),
+    }
+    for row, length in enumerate(lengths):
+        length = int(length)
+        for key in CORE + ("episode_steps",):
+            result[key][row, :length] = batch[key][row]
+        result["valid_mask"][row, :length] = True
+        if result["episode_steps"][row, 0] != 0:
+            raise RuntimeError("Full-prefix Critic replay must begin at episode step zero")
+    return result
+
+
+def final_transition(sequence_batch):
+    """Gather each row's sampled final transition, ignoring right padding."""
+    lengths = np.asarray(sequence_batch.get("sequence_lengths"), dtype=np.int64)
+    if lengths.ndim != 1 or len(lengths) != len(sequence_batch["actions"]):
+        raise ValueError("Full-prefix sequence_lengths missing or malformed")
+    rows = np.arange(len(lengths))
+    indices = lengths - 1
+    return {key: value[rows, indices].copy() for key, value in sequence_batch.items()
+            if key in CORE}
+
+
 class OfflineDemonstrations(_OfflineDemonstrations):
     """Stage3-v5-compatible replay with batched sequence index generation."""
 
     def sample_sequences(self, count, length):
         return _sample_sequence_batch(self.episodes, self.rng, count, length)
+
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        del purpose
+        return _sample_aligned_prefix_batch(
+            self.episodes, self.rng, count, length, horizon)
 
 
 class BalancedOfflineDemonstrations:
@@ -134,6 +227,52 @@ class BalancedOfflineDemonstrations:
         result = {key: np.concatenate([piece[key] for piece in pieces], axis=0) for key in keys}
         permutation = self.rng.permutation(int(count))
         return {key: value[permutation] for key, value in result.items()}
+
+    def sample_critic_prefixes(self, count, length, purpose="critic"):
+        base = int(count) // 3
+        counts = [base, base, base]
+        cursor = self.purpose_cursors.get(purpose, 0)
+        for offset in range(int(count) - 3 * base):
+            counts[(cursor + offset) % 3] += 1
+        self.purpose_cursors[purpose] = (cursor + 1) % 3
+        self._remainder_cursor = self.purpose_cursors["critic"]
+        pieces = [source.sample_critic_prefixes(n, length, purpose=purpose)
+                  for source, n in zip(self.sources, counts)]
+        result = {key: sum((list(piece[key]) for piece in pieces), [])
+                  for key in CORE + ("episode_steps",)}
+        for key in ("sequence_lengths", "sample_window_starts", "source_id"):
+            result[key] = np.concatenate([piece[key] for piece in pieces], axis=0)
+        permutation = self.rng.permutation(int(count))
+        for key in CORE + ("episode_steps",):
+            result[key] = [result[key][int(i)] for i in permutation]
+        for key in ("sequence_lengths", "sample_window_starts", "source_id"):
+            result[key] = result[key][permutation]
+        return result
+
+    def sample_actor_prefixes(self, count, length, horizon=10, purpose="actor"):
+        base = int(count) // 3
+        counts = [base, base, base]
+        cursor = self.purpose_cursors.get(purpose, 0)
+        for offset in range(int(count) - 3 * base):
+            counts[(cursor + offset) % 3] += 1
+        self.purpose_cursors[purpose] = (cursor + 1) % 3
+        pieces = [source.sample_actor_prefixes(n, length, horizon, purpose)
+                  for source, n in zip(self.sources, counts)]
+        fixed = CORE + ("episode_steps",)
+        result = {key: np.concatenate([piece[key] for piece in pieces], axis=0)
+                  for key in fixed}
+        for key in tuple(f"critic_{name}" for name in fixed):
+            result[key] = sum((list(piece[key]) for piece in pieces), [])
+        for key in ("critic_sequence_lengths", "actor_window_starts", "source_id"):
+            result[key] = np.concatenate([piece[key] for piece in pieces], axis=0)
+        permutation = self.rng.permutation(int(count))
+        for key in fixed:
+            result[key] = result[key][permutation]
+        for key in tuple(f"critic_{name}" for name in fixed):
+            result[key] = [result[key][int(i)] for i in permutation]
+        for key in ("critic_sequence_lengths", "actor_window_starts", "source_id"):
+            result[key] = result[key][permutation]
+        return result
 
     def state_dict(self): return {"rotation_index":self._remainder_cursor,"purpose_cursors":dict(self.purpose_cursors),"rng_state":self.rng.bit_generator.state,"sources":[x.state_dict() for x in self.sources]}
     def load_state_dict(self, value):
@@ -189,6 +328,16 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
             self.rng, count, length,
         )
 
+    def sample_critic_prefixes(self, count, length):
+        return _sample_prefix_sequence_batch(
+            list(self.episodes) + list(self.current.values()),
+            self.rng, count, length)
+
+    def sample_actor_prefixes(self, count, length, horizon=10):
+        return _sample_aligned_prefix_batch(
+            list(self.episodes) + list(self.current.values()),
+            self.rng, count, length, horizon)
+
     def finish(self, env_id, success=False):
         episode = self.current.pop(int(env_id), None)
         if episode:
@@ -228,6 +377,52 @@ class OnlineSequenceReplay(_OnlineSequenceReplay):
         return replay
 
 
+def _sample_aligned_prefix_batch(episodes, rng, count, length, horizon):
+    """Sample Actor windows while retaining full Critic prefixes for those timesteps."""
+    eligible = [episode for episode in episodes if len(episode["actions"]) >= int(length)]
+    if not eligible:
+        raise RuntimeError("No complete boundary-aligned Actor window available")
+    count, length, horizon = int(count), int(length), int(horizon)
+    episode_ids = rng.integers(len(eligible), size=count)
+    window_counts = np.asarray(
+        [(len(episode["actions"]) - length) // horizon + 1
+         for episode in eligible], dtype=np.int64)
+    starts = rng.integers(window_counts[episode_ids], size=count) * horizon
+    actor = {key: [] for key in CORE + ("episode_steps",)}
+    prefix = {key: [] for key in CORE + ("episode_steps",)}
+    lengths = []
+    for episode_id, start in zip(episode_ids, starts):
+        episode = eligible[int(episode_id)]
+        start, stop = int(start), int(start) + length
+        for key in actor:
+            actor[key].append(np.asarray(episode[key][start:stop]))
+            prefix[key].append(np.asarray(episode[key][:stop]))
+        lengths.append(stop)
+    result = {key: np.stack(value) for key, value in actor.items()}
+    result.update({f"critic_{key}": value for key, value in prefix.items()})
+    result["critic_sequence_lengths"] = np.asarray(lengths, dtype=np.int64)
+    result["actor_window_starts"] = np.asarray(starts, dtype=np.int64)
+    return result
+
+
+def _pad_actor_prefix_fields(batch):
+    lengths = np.asarray(batch["critic_sequence_lengths"], dtype=np.int64)
+    max_length = int(lengths.max())
+    result = {
+        "critic_observations": np.zeros((len(lengths), max_length, 59), np.float32),
+        "critic_actions": np.zeros((len(lengths), max_length, 14), np.float32),
+        "critic_episode_steps": np.zeros((len(lengths), max_length), np.int64),
+        "critic_sequence_lengths": lengths,
+        "actor_window_starts": np.asarray(batch["actor_window_starts"], dtype=np.int64),
+    }
+    for row, length in enumerate(lengths):
+        length = int(length)
+        result["critic_observations"][row, :length] = batch["critic_observations"][row]
+        result["critic_actions"][row, :length] = batch["critic_actions"][row]
+        result["critic_episode_steps"][row, :length] = batch["critic_episode_steps"][row]
+    return result
+
+
 def _sample_aligned(source, count, length, horizon, purpose="actor"):
     if isinstance(source, (Stage1OfflineSequenceReplay, BalancedOfflineDemonstrations)):
         return source.sample_sequences(count, length, aligned=True, horizon=horizon, purpose=purpose)
@@ -262,27 +457,36 @@ def aligned_sequence_batch(offline, online, count, length, horizon=10, profiler=
         raise ValueError("Aligned Actor batch requires even count and one RNN horizon")
     half = int(count) // 2
     with profiler.measure("actor_replay_sample_ms") if profiler else nullcontext():
-        left = _sample_aligned(offline, half, int(length), int(horizon))
-        right = _sample_aligned(online, half, int(length), int(horizon))
+        left = offline.sample_actor_prefixes(
+            half, int(length), int(horizon), purpose="actor")
+        right = online.sample_actor_prefixes(
+            half, int(length), int(horizon))
+    fixed = CORE + ("episode_steps",)
     batch = {key: np.concatenate((left[key], right[key]), axis=0)
-             for key in CORE + ("episode_steps",)}
-    batch["is_offline"] = np.concatenate((np.ones(half, np.float32),
-                                           np.zeros(half, np.float32)))
+             for key in fixed}
+    prefix = {}
+    for key in tuple(f"critic_{name}" for name in fixed):
+        prefix[key] = list(left[key]) + list(right[key])
+    prefix["critic_sequence_lengths"] = np.concatenate(
+        (left["critic_sequence_lengths"], right["critic_sequence_lengths"]))
+    prefix["actor_window_starts"] = np.concatenate(
+        (left["actor_window_starts"], right["actor_window_starts"]))
+    batch.update(_pad_actor_prefix_fields(prefix))
+    batch["is_offline"] = np.concatenate(
+        (np.ones(half, np.float32), np.zeros(half, np.float32)))
     if not np.all(batch["episode_steps"][:, 0] % horizon == 0):
         raise RuntimeError("Actor batch starts outside a hidden-state reset boundary")
     return batch
-
 
 def symmetric_sequence_batch(offline, online, count, length, profiler=None):
     if int(count) != 256:
         raise ValueError("V5 Critic batch must remain 128 offline + 128 online")
     with profiler.measure("offline_replay_sample_ms") if profiler else nullcontext():
-        left = offline.sample_sequences(128, length, purpose="critic")
+        left = offline.sample_critic_prefixes(128, length, purpose="critic")
     with profiler.measure("online_replay_sample_ms") if profiler else nullcontext():
-        right = online.sample_sequences(128, length)
+        right = online.sample_critic_prefixes(128, length)
     with profiler.measure("batch_prepare_ms") if profiler else nullcontext():
-        result = {key: np.concatenate((left[key], right[key]), axis=0)
-                  for key in CORE + ("episode_steps",)}
+        result = _pad_prefix_batch(_merge_prefix_batches(left, right))
         result["is_offline"] = np.r_[np.ones(128, np.float32), np.zeros(128, np.float32)]
     return result
 

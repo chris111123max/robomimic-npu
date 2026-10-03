@@ -25,24 +25,34 @@ def load_stage2_2_critic_checkpoint(path, device):
 
 
 def previous_actions(actions, episode_steps):
-    """Build a_(t-1) for a contiguous replay window without crossing resets."""
+    """Build exact a_(t-1) for episode-prefix replay."""
     if actions.ndim != 3 or episode_steps.shape != actions.shape[:2]:
         raise ValueError("History Critic expects actions [B,T,A] and steps [B,T]")
     result = torch.zeros_like(actions)
     result[:, 1:] = actions[:, :-1]
-    # A sampled window can start after step zero. Its unavailable predecessor is
-    # deliberately zero-initialized, matching the zero recurrent state used at
-    # the beginning of the fixed 11-step Stage3-v5 context. True episode starts
-    # are also exactly zero by the Stage2.2 token contract.
     result = result.masked_fill(episode_steps.eq(0).unsqueeze(-1), 0.0)
     return result
 
 
+def _padded_context(network, observations, previous, progress):
+    """Dense full-prefix unroll; right padding is ignored by final-state gathering."""
+    context, _ = network.encode_history(observations, previous, progress)
+    return context
+
 def encode_replay_contexts(critic, observations, actions, episode_steps,
-                           horizon, next_observations=None):
-    """Encode current or successor replay histories with Stage2.2 token semantics."""
+                           horizon, next_observations=None, sequence_lengths=None):
+    """Encode current or successor histories using Stage2.2 full-prefix semantics."""
     if observations.ndim != 3 or actions.ndim != 3:
         raise ValueError("History Critic replay inputs must be rank-three sequences")
+    if sequence_lengths is None:
+        sequence_lengths = torch.full(
+            (observations.shape[0],), observations.shape[1],
+            dtype=torch.long, device=observations.device)
+    else:
+        sequence_lengths = torch.as_tensor(
+            sequence_lengths, dtype=torch.long, device=observations.device)
+    if torch.any(sequence_lengths <= 0) or torch.any(sequence_lengths > observations.shape[1]):
+        raise ValueError("Invalid full-prefix sequence lengths")
     if next_observations is None:
         tokens = observations
         prior = previous_actions(actions, episode_steps)
@@ -50,13 +60,38 @@ def encode_replay_contexts(critic, observations, actions, episode_steps,
     else:
         if next_observations.shape != observations.shape:
             raise ValueError("next_observations must match observations")
-        tokens = next_observations
-        # next_observation_t is conditioned on the action executed at t.
-        prior = actions
-        steps = episode_steps + 1
+        # Exact successor history:
+        #   (o_0, 0), (o_1, a_0), ... , (o_{t+1}, a_t)
+        # rather than the old shifted window that dropped the episode-start token.
+        batch, time_steps = observations.shape[:2]
+        tokens = torch.zeros(
+            (batch, time_steps + 1, observations.shape[-1]),
+            dtype=observations.dtype, device=observations.device)
+        prior = torch.zeros(
+            (batch, time_steps + 1, actions.shape[-1]),
+            dtype=actions.dtype, device=actions.device)
+        steps = torch.zeros(
+            (batch, time_steps + 1), dtype=episode_steps.dtype,
+            device=episode_steps.device)
+        tokens[:, 0] = observations[:, 0]
+        tokens[:, 1:] = next_observations
+        prior[:, 1:] = actions
+        steps[:, 1:] = episode_steps + 1
+        sequence_lengths = sequence_lengths + 1
     progress = steps.to(dtype=observations.dtype).unsqueeze(-1) / float(horizon)
-    contexts, _ = critic.encode_history(tokens, prior, progress)
-    return contexts
+    return (
+        _padded_context(critic.q1, tokens, prior, progress),
+        _padded_context(critic.q2, tokens, prior, progress),
+    )
+
+
+def final_contexts(contexts, sequence_lengths):
+    """Gather each row's final valid recurrent state from a padded prefix batch."""
+    lengths = torch.as_tensor(sequence_lengths, dtype=torch.long,
+                              device=contexts[0].device)
+    rows = torch.arange(len(lengths), device=contexts[0].device)
+    indices = lengths - 1
+    return contexts[0][rows, indices], contexts[1][rows, indices]
 
 
 def component_mean_q(critic, contexts, distribution, action_scale, action_offset,
