@@ -1,0 +1,3159 @@
+{
+  "a2_groups": {
+    "bc_rnn_success": 64,
+    "online_failure": 64,
+    "online_success": 64
+  },
+  "a2_indices": [
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 65,
+      "source": "bc_rnn_success",
+      "start": 430,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 65,
+      "source": "bc_rnn_success",
+      "start": 450,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 12,
+      "source": "bc_rnn_success",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 47,
+      "source": "bc_rnn_success",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 69,
+      "source": "bc_rnn_success",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 72,
+      "source": "bc_rnn_success",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 96,
+      "source": "bc_rnn_success",
+      "start": 410,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 32,
+      "source": "bc_rnn_success",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 42,
+      "source": "bc_rnn_success",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 66,
+      "source": "bc_rnn_success",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 34,
+      "source": "bc_rnn_success",
+      "start": 270,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 99,
+      "source": "bc_rnn_success",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 10,
+      "source": "bc_rnn_success",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 72,
+      "source": "bc_rnn_success",
+      "start": 150,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 13,
+      "source": "bc_rnn_success",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 46,
+      "source": "bc_rnn_success",
+      "start": 10,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 54,
+      "source": "bc_rnn_success",
+      "start": 400,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 60,
+      "source": "bc_rnn_success",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 72,
+      "source": "bc_rnn_success",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 50,
+      "source": "bc_rnn_success",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 82,
+      "source": "bc_rnn_success",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 87,
+      "source": "bc_rnn_success",
+      "start": 320,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 97,
+      "source": "bc_rnn_success",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 80,
+      "source": "bc_rnn_success",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 21,
+      "source": "bc_rnn_success",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 41,
+      "source": "bc_rnn_success",
+      "start": 430,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 84,
+      "source": "bc_rnn_success",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 39,
+      "source": "bc_rnn_success",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 52,
+      "source": "bc_rnn_success",
+      "start": 100,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 69,
+      "source": "bc_rnn_success",
+      "start": 490,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 29,
+      "source": "bc_rnn_success",
+      "start": 470,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 89,
+      "source": "bc_rnn_success",
+      "start": 210,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 53,
+      "source": "bc_rnn_success",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 84,
+      "source": "bc_rnn_success",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 67,
+      "source": "bc_rnn_success",
+      "start": 320,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 74,
+      "source": "bc_rnn_success",
+      "start": 160,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 64,
+      "source": "bc_rnn_success",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 88,
+      "source": "bc_rnn_success",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 64,
+      "source": "bc_rnn_success",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 96,
+      "source": "bc_rnn_success",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 38,
+      "source": "bc_rnn_success",
+      "start": 210,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 58,
+      "source": "bc_rnn_success",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 50,
+      "source": "bc_rnn_success",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 13,
+      "source": "bc_rnn_success",
+      "start": 350,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 87,
+      "source": "bc_rnn_success",
+      "start": 260,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 99,
+      "source": "bc_rnn_success",
+      "start": 160,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 20,
+      "source": "bc_rnn_success",
+      "start": 400,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 80,
+      "source": "bc_rnn_success",
+      "start": 60,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 29,
+      "source": "bc_rnn_success",
+      "start": 110,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 29,
+      "source": "bc_rnn_success",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 82,
+      "source": "bc_rnn_success",
+      "start": 260,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 50,
+      "source": "bc_rnn_success",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 94,
+      "source": "bc_rnn_success",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 52,
+      "source": "bc_rnn_success",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 63,
+      "source": "bc_rnn_success",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 9,
+      "source": "bc_rnn_success",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 29,
+      "source": "bc_rnn_success",
+      "start": 270,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 77,
+      "source": "bc_rnn_success",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 11,
+      "source": "bc_rnn_success",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 49,
+      "source": "bc_rnn_success",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 53,
+      "source": "bc_rnn_success",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 76,
+      "source": "bc_rnn_success",
+      "start": 240,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 27,
+      "source": "bc_rnn_success",
+      "start": 170,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": null,
+      "episode_index": 4,
+      "source": "bc_rnn_success",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 110,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 18,
+      "episode_index": 13,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 164,
+      "episode_index": 55,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 157,
+      "episode_index": 47,
+      "source": "frozen_online",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 146,
+      "episode_index": 46,
+      "source": "frozen_online",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 19,
+      "episode_index": 14,
+      "source": "frozen_online",
+      "start": 460,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 128,
+      "episode_index": 49,
+      "source": "frozen_online",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 167,
+      "episode_index": 2,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 95,
+      "episode_index": 28,
+      "source": "frozen_online",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 40,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 51,
+      "episode_index": 35,
+      "source": "frozen_online",
+      "start": 210,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 105,
+      "episode_index": 15,
+      "source": "frozen_online",
+      "start": 380,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 138,
+      "episode_index": 30,
+      "source": "frozen_online",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 4,
+      "episode_index": 4,
+      "source": "frozen_online",
+      "start": 60,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 95,
+      "episode_index": 28,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 164,
+      "episode_index": 55,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 90,
+      "episode_index": 61,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 85,
+      "episode_index": 57,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 71,
+      "episode_index": 45,
+      "source": "frozen_online",
+      "start": 300,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 122,
+      "episode_index": 33,
+      "source": "frozen_online",
+      "start": 170,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 0,
+      "episode_index": 0,
+      "source": "frozen_online",
+      "start": 190,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 171,
+      "episode_index": 60,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 173,
+      "episode_index": 43,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 270,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 19,
+      "episode_index": 14,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 50,
+      "episode_index": 34,
+      "source": "frozen_online",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 51,
+      "episode_index": 35,
+      "source": "frozen_online",
+      "start": 240,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 250,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 149,
+      "episode_index": 29,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 47,
+      "episode_index": 31,
+      "source": "frozen_online",
+      "start": 430,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 90,
+      "episode_index": 61,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 145,
+      "episode_index": 36,
+      "source": "frozen_online",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 136,
+      "episode_index": 9,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 128,
+      "episode_index": 49,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 36,
+      "episode_index": 23,
+      "source": "frozen_online",
+      "start": 170,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 320,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 350,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 114,
+      "episode_index": 1,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 47,
+      "episode_index": 31,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 85,
+      "episode_index": 57,
+      "source": "frozen_online",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 36,
+      "episode_index": 23,
+      "source": "frozen_online",
+      "start": 260,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 50,
+      "episode_index": 34,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 50,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 143,
+      "episode_index": 5,
+      "source": "frozen_online",
+      "start": 250,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 167,
+      "episode_index": 2,
+      "source": "frozen_online",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 84,
+      "episode_index": 56,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 177,
+      "episode_index": 59,
+      "source": "frozen_online",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 145,
+      "episode_index": 36,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 178,
+      "episode_index": 41,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 410,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 178,
+      "episode_index": 41,
+      "source": "frozen_online",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 31,
+      "episode_index": 74,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 12,
+      "episode_index": 65,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 250,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 148,
+      "episode_index": 106,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 27,
+      "episode_index": 72,
+      "source": "frozen_online",
+      "start": 580,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 121,
+      "episode_index": 96,
+      "source": "frozen_online",
+      "start": 420,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 680,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 159,
+      "episode_index": 109,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 119,
+      "episode_index": 95,
+      "source": "frozen_online",
+      "start": 260,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 70,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 65,
+      "episode_index": 88,
+      "source": "frozen_online",
+      "start": 80,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 640,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 148,
+      "episode_index": 106,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 170,
+      "episode_index": 114,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 310,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 660,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 93,
+      "episode_index": 93,
+      "source": "frozen_online",
+      "start": 390,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 69,
+      "episode_index": 89,
+      "source": "frozen_online",
+      "start": 620,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 169,
+      "episode_index": 113,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 155,
+      "episode_index": 108,
+      "source": "frozen_online",
+      "start": 380,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 550,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 72,
+      "episode_index": 90,
+      "source": "frozen_online",
+      "start": 130,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 56,
+      "episode_index": 82,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 65,
+      "episode_index": 88,
+      "source": "frozen_online",
+      "start": 410,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 32,
+      "episode_index": 75,
+      "source": "frozen_online",
+      "start": 280,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 35,
+      "episode_index": 76,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 174,
+      "episode_index": 115,
+      "source": "frozen_online",
+      "start": 330,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 72,
+      "episode_index": 90,
+      "source": "frozen_online",
+      "start": 370,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 135,
+      "episode_index": 102,
+      "source": "frozen_online",
+      "start": 220,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 161,
+      "episode_index": 110,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 480,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 139,
+      "episode_index": 104,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 430,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 60,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 87,
+      "episode_index": 92,
+      "source": "frozen_online",
+      "start": 290,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 27,
+      "episode_index": 72,
+      "source": "frozen_online",
+      "start": 90,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 60,
+      "episode_index": 86,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 630,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 60,
+      "episode_index": 86,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 650,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 93,
+      "episode_index": 93,
+      "source": "frozen_online",
+      "start": 290,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 540,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 250,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 600,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 14,
+      "episode_index": 67,
+      "source": "frozen_online",
+      "start": 540,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 139,
+      "episode_index": 104,
+      "source": "frozen_online",
+      "start": 480,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 510,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 13,
+      "episode_index": 66,
+      "source": "frozen_online",
+      "start": 530,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 121,
+      "episode_index": 96,
+      "source": "frozen_online",
+      "start": 110,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 13,
+      "episode_index": 66,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 170,
+      "episode_index": 114,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 161,
+      "episode_index": 110,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    }
+  ],
+  "a3_groups": {
+    "online_failure": 128,
+    "online_success": 128
+  },
+  "a3_indices": [
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 110,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 18,
+      "episode_index": 13,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 164,
+      "episode_index": 55,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 157,
+      "episode_index": 47,
+      "source": "frozen_online",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 146,
+      "episode_index": 46,
+      "source": "frozen_online",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 19,
+      "episode_index": 14,
+      "source": "frozen_online",
+      "start": 460,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 128,
+      "episode_index": 49,
+      "source": "frozen_online",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 167,
+      "episode_index": 2,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 95,
+      "episode_index": 28,
+      "source": "frozen_online",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 40,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 51,
+      "episode_index": 35,
+      "source": "frozen_online",
+      "start": 210,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 105,
+      "episode_index": 15,
+      "source": "frozen_online",
+      "start": 380,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 138,
+      "episode_index": 30,
+      "source": "frozen_online",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 4,
+      "episode_index": 4,
+      "source": "frozen_online",
+      "start": 60,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 95,
+      "episode_index": 28,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 164,
+      "episode_index": 55,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 90,
+      "episode_index": 61,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 85,
+      "episode_index": 57,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 71,
+      "episode_index": 45,
+      "source": "frozen_online",
+      "start": 300,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 122,
+      "episode_index": 33,
+      "source": "frozen_online",
+      "start": 170,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 0,
+      "episode_index": 0,
+      "source": "frozen_online",
+      "start": 190,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 171,
+      "episode_index": 60,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 173,
+      "episode_index": 43,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 270,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 19,
+      "episode_index": 14,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 50,
+      "episode_index": 34,
+      "source": "frozen_online",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 51,
+      "episode_index": 35,
+      "source": "frozen_online",
+      "start": 240,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 250,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 149,
+      "episode_index": 29,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 47,
+      "episode_index": 31,
+      "source": "frozen_online",
+      "start": 430,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 90,
+      "episode_index": 61,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 145,
+      "episode_index": 36,
+      "source": "frozen_online",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 136,
+      "episode_index": 9,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 128,
+      "episode_index": 49,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 36,
+      "episode_index": 23,
+      "source": "frozen_online",
+      "start": 170,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 120,
+      "episode_index": 16,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 320,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 350,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 114,
+      "episode_index": 1,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 47,
+      "episode_index": 31,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 85,
+      "episode_index": 57,
+      "source": "frozen_online",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 36,
+      "episode_index": 23,
+      "source": "frozen_online",
+      "start": 260,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 50,
+      "episode_index": 34,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 50,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 143,
+      "episode_index": 5,
+      "source": "frozen_online",
+      "start": 250,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 101,
+      "episode_index": 6,
+      "source": "frozen_online",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 167,
+      "episode_index": 2,
+      "source": "frozen_online",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 84,
+      "episode_index": 56,
+      "source": "frozen_online",
+      "start": 0,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 177,
+      "episode_index": 59,
+      "source": "frozen_online",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 145,
+      "episode_index": 36,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 178,
+      "episode_index": 41,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 410,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 178,
+      "episode_index": 41,
+      "source": "frozen_online",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 0,
+      "episode_index": 0,
+      "source": "frozen_online",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 190,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 440,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 115,
+      "episode_index": 19,
+      "source": "frozen_online",
+      "start": 250,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 84,
+      "episode_index": 56,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 17,
+      "episode_index": 12,
+      "source": "frozen_online",
+      "start": 470,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 171,
+      "episode_index": 60,
+      "source": "frozen_online",
+      "start": 330,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 160,
+      "episode_index": 58,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 4,
+      "episode_index": 4,
+      "source": "frozen_online",
+      "start": 290,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 157,
+      "episode_index": 47,
+      "source": "frozen_online",
+      "start": 410,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 104,
+      "episode_index": 53,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 166,
+      "episode_index": 21,
+      "source": "frozen_online",
+      "start": 370,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 470,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 167,
+      "episode_index": 2,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 240,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 82,
+      "episode_index": 54,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 125,
+      "episode_index": 48,
+      "source": "frozen_online",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 350,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 40,
+      "episode_index": 26,
+      "source": "frozen_online",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 120,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 310,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 490,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 113,
+      "episode_index": 40,
+      "source": "frozen_online",
+      "start": 80,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 50,
+      "episode_index": 34,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 70,
+      "episode_index": 44,
+      "source": "frozen_online",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 100,
+      "episode_index": 17,
+      "source": "frozen_online",
+      "start": 420,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 144,
+      "episode_index": 32,
+      "source": "frozen_online",
+      "start": 110,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 4,
+      "episode_index": 4,
+      "source": "frozen_online",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 67,
+      "episode_index": 42,
+      "source": "frozen_online",
+      "start": 390,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 130,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 17,
+      "episode_index": 12,
+      "source": "frozen_online",
+      "start": 30,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 410,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 115,
+      "episode_index": 19,
+      "source": "frozen_online",
+      "start": 460,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 62,
+      "episode_index": 39,
+      "source": "frozen_online",
+      "start": 500,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 171,
+      "episode_index": 60,
+      "source": "frozen_online",
+      "start": 240,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 130,
+      "episode_index": 20,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 117,
+      "episode_index": 25,
+      "source": "frozen_online",
+      "start": 260,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 128,
+      "episode_index": 49,
+      "source": "frozen_online",
+      "start": 200,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 143,
+      "episode_index": 5,
+      "source": "frozen_online",
+      "start": 340,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 143,
+      "episode_index": 5,
+      "source": "frozen_online",
+      "start": 400,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 37,
+      "episode_index": 24,
+      "source": "frozen_online",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 157,
+      "episode_index": 47,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 17,
+      "episode_index": 12,
+      "source": "frozen_online",
+      "start": 50,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 54,
+      "episode_index": 37,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 91,
+      "episode_index": 62,
+      "source": "frozen_online",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 114,
+      "episode_index": 1,
+      "source": "frozen_online",
+      "start": 160,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 40,
+      "episode_index": 26,
+      "source": "frozen_online",
+      "start": 360,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 0,
+      "episode_index": 0,
+      "source": "frozen_online",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 8,
+      "episode_index": 8,
+      "source": "frozen_online",
+      "start": 50,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 107,
+      "episode_index": 50,
+      "source": "frozen_online",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 123,
+      "episode_index": 22,
+      "source": "frozen_online",
+      "start": 280,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 164,
+      "episode_index": 55,
+      "source": "frozen_online",
+      "start": 140,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 18,
+      "episode_index": 13,
+      "source": "frozen_online",
+      "start": 220,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 94,
+      "episode_index": 18,
+      "source": "frozen_online",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 104,
+      "episode_index": 53,
+      "source": "frozen_online",
+      "start": 180,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 4,
+      "episode_index": 4,
+      "source": "frozen_online",
+      "start": 230,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 18,
+      "episode_index": 13,
+      "source": "frozen_online",
+      "start": 90,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 117,
+      "episode_index": 25,
+      "source": "frozen_online",
+      "start": 190,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 179,
+      "episode_index": 27,
+      "source": "frozen_online",
+      "start": 190,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 157,
+      "episode_index": 47,
+      "source": "frozen_online",
+      "start": 20,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 92,
+      "episode_index": 63,
+      "source": "frozen_online",
+      "start": 70,
+      "success": true
+    },
+    {
+      "diagnostic_episode_id": 31,
+      "episode_index": 74,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 12,
+      "episode_index": 65,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 250,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 148,
+      "episode_index": 106,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 27,
+      "episode_index": 72,
+      "source": "frozen_online",
+      "start": 580,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 121,
+      "episode_index": 96,
+      "source": "frozen_online",
+      "start": 420,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 680,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 159,
+      "episode_index": 109,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 119,
+      "episode_index": 95,
+      "source": "frozen_online",
+      "start": 260,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 70,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 65,
+      "episode_index": 88,
+      "source": "frozen_online",
+      "start": 80,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 640,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 148,
+      "episode_index": 106,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 170,
+      "episode_index": 114,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 310,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 660,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 93,
+      "episode_index": 93,
+      "source": "frozen_online",
+      "start": 390,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 69,
+      "episode_index": 89,
+      "source": "frozen_online",
+      "start": 620,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 169,
+      "episode_index": 113,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 155,
+      "episode_index": 108,
+      "source": "frozen_online",
+      "start": 380,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 550,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 72,
+      "episode_index": 90,
+      "source": "frozen_online",
+      "start": 130,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 56,
+      "episode_index": 82,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 65,
+      "episode_index": 88,
+      "source": "frozen_online",
+      "start": 410,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 32,
+      "episode_index": 75,
+      "source": "frozen_online",
+      "start": 280,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 35,
+      "episode_index": 76,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 174,
+      "episode_index": 115,
+      "source": "frozen_online",
+      "start": 330,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 72,
+      "episode_index": 90,
+      "source": "frozen_online",
+      "start": 370,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 240,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 135,
+      "episode_index": 102,
+      "source": "frozen_online",
+      "start": 220,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 161,
+      "episode_index": 110,
+      "source": "frozen_online",
+      "start": 40,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 480,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 139,
+      "episode_index": 104,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 430,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 60,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 87,
+      "episode_index": 92,
+      "source": "frozen_online",
+      "start": 290,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 27,
+      "episode_index": 72,
+      "source": "frozen_online",
+      "start": 90,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 60,
+      "episode_index": 86,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 630,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 60,
+      "episode_index": 86,
+      "source": "frozen_online",
+      "start": 520,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 650,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 93,
+      "episode_index": 93,
+      "source": "frozen_online",
+      "start": 290,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 540,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 250,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 600,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 14,
+      "episode_index": 67,
+      "source": "frozen_online",
+      "start": 540,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 139,
+      "episode_index": 104,
+      "source": "frozen_online",
+      "start": 480,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 510,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 13,
+      "episode_index": 66,
+      "source": "frozen_online",
+      "start": 530,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 121,
+      "episode_index": 96,
+      "source": "frozen_online",
+      "start": 110,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 13,
+      "episode_index": 66,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 170,
+      "episode_index": 114,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 161,
+      "episode_index": 110,
+      "source": "frozen_online",
+      "start": 160,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 680,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 148,
+      "episode_index": 106,
+      "source": "frozen_online",
+      "start": 680,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 174,
+      "episode_index": 115,
+      "source": "frozen_online",
+      "start": 560,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 139,
+      "episode_index": 104,
+      "source": "frozen_online",
+      "start": 290,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 132,
+      "episode_index": 99,
+      "source": "frozen_online",
+      "start": 300,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 170,
+      "episode_index": 114,
+      "source": "frozen_online",
+      "start": 340,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 220,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 119,
+      "episode_index": 95,
+      "source": "frozen_online",
+      "start": 300,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 470,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 174,
+      "episode_index": 115,
+      "source": "frozen_online",
+      "start": 650,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 155,
+      "episode_index": 108,
+      "source": "frozen_online",
+      "start": 690,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 155,
+      "episode_index": 108,
+      "source": "frozen_online",
+      "start": 510,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 27,
+      "episode_index": 72,
+      "source": "frozen_online",
+      "start": 100,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 180,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 280,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 69,
+      "episode_index": 89,
+      "source": "frozen_online",
+      "start": 190,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 39,
+      "episode_index": 77,
+      "source": "frozen_online",
+      "start": 390,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 121,
+      "episode_index": 96,
+      "source": "frozen_online",
+      "start": 690,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 13,
+      "episode_index": 66,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 560,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 31,
+      "episode_index": 74,
+      "source": "frozen_online",
+      "start": 120,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 690,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 165,
+      "episode_index": 112,
+      "source": "frozen_online",
+      "start": 80,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 87,
+      "episode_index": 92,
+      "source": "frozen_online",
+      "start": 300,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 159,
+      "episode_index": 109,
+      "source": "frozen_online",
+      "start": 500,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 141,
+      "episode_index": 105,
+      "source": "frozen_online",
+      "start": 390,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 159,
+      "episode_index": 109,
+      "source": "frozen_online",
+      "start": 50,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 59,
+      "episode_index": 85,
+      "source": "frozen_online",
+      "start": 410,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 152,
+      "episode_index": 107,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 93,
+      "episode_index": 93,
+      "source": "frozen_online",
+      "start": 280,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 127,
+      "episode_index": 98,
+      "source": "frozen_online",
+      "start": 440,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 124,
+      "episode_index": 97,
+      "source": "frozen_online",
+      "start": 570,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 270,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 230,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 620,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 23,
+      "episode_index": 69,
+      "source": "frozen_online",
+      "start": 340,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 58,
+      "episode_index": 84,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 220,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 162,
+      "episode_index": 111,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 44,
+      "episode_index": 79,
+      "source": "frozen_online",
+      "start": 60,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 25,
+      "episode_index": 70,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 530,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 133,
+      "episode_index": 100,
+      "source": "frozen_online",
+      "start": 280,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 14,
+      "episode_index": 67,
+      "source": "frozen_online",
+      "start": 550,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 44,
+      "episode_index": 79,
+      "source": "frozen_online",
+      "start": 420,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 118,
+      "episode_index": 94,
+      "source": "frozen_online",
+      "start": 150,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 11,
+      "episode_index": 64,
+      "source": "frozen_online",
+      "start": 140,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 134,
+      "episode_index": 101,
+      "source": "frozen_online",
+      "start": 630,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 23,
+      "episode_index": 69,
+      "source": "frozen_online",
+      "start": 350,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 14,
+      "episode_index": 67,
+      "source": "frozen_online",
+      "start": 460,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 72,
+      "episode_index": 90,
+      "source": "frozen_online",
+      "start": 210,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 55,
+      "episode_index": 81,
+      "source": "frozen_online",
+      "start": 640,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 141,
+      "episode_index": 105,
+      "source": "frozen_online",
+      "start": 410,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 174,
+      "episode_index": 115,
+      "source": "frozen_online",
+      "start": 190,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 57,
+      "episode_index": 83,
+      "source": "frozen_online",
+      "start": 630,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 53,
+      "episode_index": 80,
+      "source": "frozen_online",
+      "start": 430,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 64,
+      "episode_index": 87,
+      "source": "frozen_online",
+      "start": 320,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 73,
+      "episode_index": 91,
+      "source": "frozen_online",
+      "start": 250,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 118,
+      "episode_index": 94,
+      "source": "frozen_online",
+      "start": 590,
+      "success": false
+    },
+    {
+      "diagnostic_episode_id": 87,
+      "episode_index": 92,
+      "source": "frozen_online",
+      "start": 540,
+      "success": false
+    }
+  ],
+  "frozen_episode_count": 116,
+  "frozen_failure_episode_count": 52,
+  "frozen_replay_path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_readiness_v2_multi_mean_random_formal_20260929_130945/mean2q/multi_q/checkpoints/last.sequences.npy",
+  "frozen_seed": 20995829,
+  "frozen_source": "branch-local online stratified reservoir",
+  "frozen_success_episode_count": 64,
+  "horizon": 10,
+  "rng_seed": 20260929
+}

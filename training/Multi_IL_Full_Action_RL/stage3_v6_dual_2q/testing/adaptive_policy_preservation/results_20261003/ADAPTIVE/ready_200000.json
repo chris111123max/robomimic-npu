@@ -1,0 +1,14 @@
+{
+  "all_initialized": true,
+  "all_vector_envs_initialized": true,
+  "critic_target_mode": "mean2q",
+  "device": "npu:0",
+  "group": "multi_q",
+  "initial_observation_count": 16,
+  "num_envs": 16,
+  "stage": "stage3-v6",
+  "startup_parallelism": 4,
+  "status": "READY",
+  "target_mode": "mean2q",
+  "vector_env_initial_observation_count": 16
+}

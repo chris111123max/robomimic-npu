@@ -1,0 +1,22 @@
+{
+  "all_16_diagnostic_envs_closed": true,
+  "closed_by_branch": {
+    "ORIGINAL_140K": 4,
+    "BASELINE": 4,
+    "WEAK": 4,
+    "STRONG": 4
+  },
+  "active_diagnostic_or_formal_training_processes": [],
+  "production_files_hash_unchanged": {
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_agent.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_actor.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_schedule.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3_v6_agent.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/train_stage3_v6_vector.py": true,
+    "robomimic/models/policy_nets.py": true
+  },
+  "HEAD_unchanged": true,
+  "fusion_result_json_touched": false,
+  "training_checkpoint_writes": false,
+  "formal_training_remains_stopped": true
+}

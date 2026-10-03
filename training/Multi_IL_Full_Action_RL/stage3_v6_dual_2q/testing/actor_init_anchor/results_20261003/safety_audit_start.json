@@ -1,0 +1,22 @@
+{
+  "HEAD": "2419e0008a016ba0fee842b48f078edb186c0bcf",
+  "production_files_sha256": {
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_agent.py": "019d706ae97c96b3c9d9182f424c01b415f250c7fff6b28b30e5ba053434c6f7",
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_actor.py": "ccb80567bbb6f52916b820b3d27289d954d7d56e0f9b8467f57c46eedac5eea1",
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_schedule.py": "45e70477ccdb9d3ed880d929e59a28e9c0ef64f47af2545107e8b6e1b9a2bcb5",
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3_v6_agent.py": "9cc70f032bf6baf94d34e1003b2a7441fac5e412e13db720f70eee6bf168dee3",
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/train_stage3_v6_vector.py": "7d5ae0d894980e2e99bdfbde06d260743552f95bc3bf0f430d84764cae3bbdde",
+    "robomimic/models/policy_nets.py": "8b74798ed8651ba19208dd8aed6250d03d78a5e28837254d57642be9ce944892"
+  },
+  "diagnosis_directory": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_init_anchor",
+  "formal_training_started": false,
+  "training_checkpoints_written": false,
+  "testing_only_checkpoint_paths": [
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_init_anchor/results_20261003/BASELINE_testing_actor_1000.pth",
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_init_anchor/results_20261003/WEAK_testing_actor_1000.pth",
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_init_anchor/results_20261003/MEDIUM_testing_actor_1000.pth",
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_init_anchor/results_20261003/STRONG_testing_actor_1000.pth"
+  ],
+  "all_JSON_floating_fields_finite": true,
+  "finite_field_count": 216578
+}

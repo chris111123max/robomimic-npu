@@ -1,0 +1,77 @@
+{
+  "status": "COMPLETE",
+  "testing_only": true,
+  "completed_stages": [
+    {
+      "branch": "BASELINE",
+      "target": 160000,
+      "critic_updates": 39732,
+      "actor_updates": 1246,
+      "success": 0,
+      "execution_drift": 0.21885886231548887,
+      "duration_seconds": 0.40956783294677734,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/BASELINE/mean2q/multi_q/checkpoints/step_0160000.pth"
+    },
+    {
+      "branch": "ADAPTIVE",
+      "target": 160000,
+      "critic_updates": 39728,
+      "actor_updates": 1245,
+      "success": 4,
+      "execution_drift": 0.001970614703997061,
+      "duration_seconds": 1178.6735713481903,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/ADAPTIVE/mean2q/multi_q/checkpoints/step_0160000.pth"
+    },
+    {
+      "branch": "BASELINE",
+      "target": 180000,
+      "critic_updates": 44699,
+      "actor_updates": 2487,
+      "success": 0,
+      "execution_drift": 0.7132446447840762,
+      "duration_seconds": 1341.9415962696075,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/BASELINE/mean2q/multi_q/checkpoints/step_0180000.pth"
+    },
+    {
+      "branch": "ADAPTIVE",
+      "target": 180000,
+      "critic_updates": 44744,
+      "actor_updates": 2499,
+      "success": 4,
+      "execution_drift": 0.002394987383739544,
+      "duration_seconds": 1211.8301708698273,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/ADAPTIVE/mean2q/multi_q/checkpoints/step_0180000.pth"
+    },
+    {
+      "branch": "BASELINE",
+      "target": 200000,
+      "critic_updates": 49736,
+      "actor_updates": 3747,
+      "success": 0,
+      "execution_drift": 1.3149064342614536,
+      "duration_seconds": 1297.0487003326416,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/BASELINE/mean2q/multi_q/checkpoints/step_0200000.pth"
+    },
+    {
+      "branch": "ADAPTIVE",
+      "target": 200000,
+      "critic_updates": 49696,
+      "actor_updates": 3737,
+      "success": 3,
+      "execution_drift": 0.0019763096277967307,
+      "duration_seconds": 1216.588559627533,
+      "software_and_numeric_safety_pass": true,
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/ADAPTIVE/mean2q/multi_q/checkpoints/step_0200000.pth"
+    }
+  ],
+  "formal_training_resumed": false,
+  "active_branch": null,
+  "active_target": 200000,
+  "active_log": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/adaptive_policy_preservation/results_20261003/ADAPTIVE/stage_200000.log",
+  "active_pid": null
+}

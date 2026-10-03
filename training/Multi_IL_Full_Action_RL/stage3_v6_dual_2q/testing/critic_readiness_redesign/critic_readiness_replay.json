@@ -1,0 +1,1641 @@
+{
+  "modes": {
+    "mean2q": {
+      "designs": {
+        "CURRENT": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "spearman_low",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": null,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 0,
+          "pass_steps": []
+        },
+        "FINAL_MINIMAL_LOG_PROXY": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "RANK_READY_QMIN_PROXY",
+                "NUMERIC_SAFE"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "NUMERIC_SAFE"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [],
+              "pass": true
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 120000,
+            "2": 130000,
+            "3": 180000
+          },
+          "pass_count": 11,
+          "pass_steps": [
+            120000,
+            130000,
+            160000,
+            170000,
+            180000,
+            220000,
+            230000,
+            270000,
+            280000,
+            290000,
+            300000
+          ]
+        },
+        "NO_PLATEAU_P95_SOFT": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "spearman_low"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [],
+              "pass": true
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 120000,
+            "2": 130000,
+            "3": 180000
+          },
+          "pass_count": 11,
+          "pass_steps": [
+            120000,
+            130000,
+            160000,
+            170000,
+            180000,
+            220000,
+            230000,
+            270000,
+            280000,
+            290000,
+            300000
+          ]
+        },
+        "NO_STRICT_PLATEAU": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "spearman_low",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": null,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 0,
+          "pass_steps": []
+        },
+        "NO_TWIN_P95_HARD": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "spearman_low",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 120000,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 1,
+          "pass_steps": [
+            120000
+          ]
+        }
+      },
+      "source": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_multi_mean_random_formal_20260928/mean2q/multi_q/readiness_metrics.jsonl"
+    },
+    "random2q": {
+      "designs": {
+        "CURRENT": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "td_not_plateau",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": null,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 0,
+          "pass_steps": []
+        },
+        "FINAL_MINIMAL_LOG_PROXY": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "NUMERIC_SAFE"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "NUMERIC_SAFE"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "TD_HEALTHY_OLD_QMIN_PROXY"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [],
+              "pass": true
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 130000,
+            "2": 140000,
+            "3": 180000
+          },
+          "pass_count": 14,
+          "pass_steps": [
+            130000,
+            140000,
+            160000,
+            170000,
+            180000,
+            200000,
+            210000,
+            220000,
+            230000,
+            240000,
+            270000,
+            280000,
+            290000,
+            300000
+          ]
+        },
+        "NO_PLATEAU_P95_SOFT": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [],
+              "pass": true
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 130000,
+            "2": 140000,
+            "3": 180000
+          },
+          "pass_count": 14,
+          "pass_steps": [
+            130000,
+            140000,
+            160000,
+            170000,
+            180000,
+            200000,
+            210000,
+            220000,
+            230000,
+            240000,
+            270000,
+            280000,
+            290000,
+            300000
+          ]
+        },
+        "NO_STRICT_PLATEAU": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [
+                "twin_q_disagreement_high"
+              ],
+              "pass": false
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": null,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 0,
+          "pass_steps": []
+        },
+        "NO_TWIN_P95_HARD": {
+          "checks": [
+            {
+              "env_steps": 100000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 110000,
+              "failed_conditions": [
+                "q_scale_unstable",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 120000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 130000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 140000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 150000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 160000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 170000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 180000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 190000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 200000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 210000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 220000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 230000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 240000,
+              "failed_conditions": [],
+              "pass": true
+            },
+            {
+              "env_steps": 250000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 260000,
+              "failed_conditions": [
+                "td_error_worsening",
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 270000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 280000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 290000,
+              "failed_conditions": [
+                "td_not_plateau"
+              ],
+              "pass": false
+            },
+            {
+              "env_steps": 300000,
+              "failed_conditions": [],
+              "pass": true
+            }
+          ],
+          "opening_step_by_consecutive_passes": {
+            "1": 240000,
+            "2": null,
+            "3": null
+          },
+          "pass_count": 2,
+          "pass_steps": [
+            240000,
+            300000
+          ]
+        }
+      },
+      "source": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_multi_mean_random_formal_20260928/random2q/multi_q/readiness_metrics.jsonl"
+    }
+  },
+  "note": "FINAL_MINIMAL_LOG_PROXY uses historical Qmin Spearman and Qmin TD worsening; future Qmean ranking and objective-aligned TD lack 21-point logs.",
+  "readiness_checks_per_mode": 21,
+  "source_run": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_multi_mean_random_formal_20260928"
+}

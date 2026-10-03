@@ -1,0 +1,68 @@
+{
+  "testing_only": true,
+  "target_run": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_readiness_v2_multi_mean_random_formal_20260929_130945",
+  "source_checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_readiness_v2_multi_mean_random_formal_20260929_130945/mean2q/multi_q/checkpoints/critic_ready.pth",
+  "beta": 0.3964525954794777,
+  "lambda_max": 66.63426926583601,
+  "D_safe": 7.762835646691712e-07,
+  "D_hard": 3.105134258676685e-06,
+  "budget_derivation": "D_safe = prior WEAK1000 mean combined distance on fixed192 contexts; D_hard=4*D_safe (2x RMS behavior budget), both chosen before any new rollout; no retuning",
+  "previous_fixed_metrics": {
+    "BASELINE": {
+      "D_mu": 0.009562651626765728,
+      "D_p": 0.016027753443193203,
+      "D": 0.015916896079024807,
+      "sqrt_D": 0.1261621816513364
+    },
+    "WEAK": {
+      "D_mu": 7.020253747214156e-07,
+      "D_p": 1.873066056181226e-07,
+      "D": 7.762835646691712e-07,
+      "sqrt_D": 0.0008810695572252915
+    },
+    "MEDIUM": {
+      "D_mu": 9.369720288532335e-08,
+      "D_p": 2.1805205736811986e-08,
+      "D": 1.0234193329464646e-07,
+      "sqrt_D": 0.000319909257907061
+    },
+    "STRONG": {
+      "D_mu": 1.1325977489207162e-08,
+      "D_p": 1.7787752527465224e-08,
+      "D": 1.837797814646739e-08,
+      "sqrt_D": 0.00013556540173092612
+    }
+  },
+  "controller": "lambda_max*clamp((D.detach()-D_safe)/(D_hard-D_safe),0,1), stop-gradient through coefficient",
+  "devices_visible": 1,
+  "staged_schedule": [
+    160000,
+    180000,
+    200000
+  ],
+  "execution": "NPU0 sequential BASELINE then ADAPTIVE at each stage; both use production resume semantics, partial episodes discarded/reset at matched stage boundaries",
+  "checkpoint_eval_steps": [
+    140000,
+    150000,
+    160000,
+    170000,
+    180000,
+    190000,
+    200000
+  ],
+  "seeds": [
+    20008,
+    20002,
+    20005,
+    20007
+  ],
+  "RL_retention_primary": "sum per-Actor-update Q1 expected score AFTER minus BEFORE step on identical batch and unchanged current Critic during that step; does not include Critic weight changes",
+  "RL_retention_secondary": "fixed140K Critic, identical fixed192 evaluation contexts, current Actor gain vs140K divided by matched BASELINE gain",
+  "HEAD": "2419e0008a016ba0fee842b48f078edb186c0bcf",
+  "production_sha256": {
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/train_stage3_v6_vector.py": "7d5ae0d894980e2e99bdfbde06d260743552f95bc3bf0f430d84764cae3bbdde",
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_agent.py": "019d706ae97c96b3c9d9182f424c01b415f250c7fff6b28b30e5ba053434c6f7",
+    "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3_v6_agent.py": "9cc70f032bf6baf94d34e1003b2a7441fac5e412e13db720f70eee6bf168dee3"
+  },
+  "no_supplementary_branch_preregistered": true
+}

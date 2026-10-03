@@ -1,0 +1,38 @@
+{
+  "CURRENT": {
+    "hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+    "same_parameter_hash": true,
+    "max_differences": {
+      "means": 0.0,
+      "probs": 0.0,
+      "logits": 0.0,
+      "hidden": 0.0,
+      "sampled": 0.0,
+      "q": 0.0
+    }
+  },
+  "ALL_ALIGNED": {
+    "hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+    "same_parameter_hash": true,
+    "max_differences": {
+      "means": 0.0,
+      "probs": 0.0,
+      "logits": 0.0,
+      "hidden": 0.0,
+      "sampled": 0.0,
+      "q": 0.0
+    }
+  },
+  "FINAL_ONLY_FREEZE_RNN": {
+    "hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+    "same_parameter_hash": true,
+    "max_differences": {
+      "means": 0.0,
+      "probs": 0.0,
+      "logits": 0.0,
+      "hidden": 0.0,
+      "sampled": 0.0,
+      "q": 0.0
+    }
+  }
+}

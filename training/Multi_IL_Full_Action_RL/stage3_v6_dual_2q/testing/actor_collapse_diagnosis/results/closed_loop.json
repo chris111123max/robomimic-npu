@@ -1,0 +1,188 @@
+{
+  "seeds": [
+    20008,
+    20002,
+    20005,
+    20007
+  ],
+  "horizon": 700,
+  "startup_parallelism": 1,
+  "env_count": 8,
+  "rounds": [
+    {
+      "round": "B1",
+      "checkpoints": [
+        "actor_init",
+        "step280k"
+      ],
+      "episodes": [
+        {
+          "checkpoint": "actor_init",
+          "seed": 20008,
+          "success": true,
+          "length": 460,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "actor_init",
+          "seed": 20002,
+          "success": true,
+          "length": 423,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "actor_init",
+          "seed": 20005,
+          "success": true,
+          "length": 479,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "actor_init",
+          "seed": 20007,
+          "success": true,
+          "length": 431,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step280k",
+          "seed": 20008,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step280k",
+          "seed": 20002,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step280k",
+          "seed": 20005,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step280k",
+          "seed": 20007,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        }
+      ],
+      "left": {
+        "success": 4,
+        "count": 4,
+        "mean_length": 448.25,
+        "mean_return": 1.0,
+        "sim_errors": 0
+      },
+      "right": {
+        "success": 0,
+        "count": 4,
+        "mean_length": 700.0,
+        "mean_return": 0.0,
+        "sim_errors": 0
+      }
+    },
+    {
+      "round": "B2",
+      "checkpoints": [
+        "critic_ready",
+        "step200k"
+      ],
+      "episodes": [
+        {
+          "checkpoint": "critic_ready",
+          "seed": 20008,
+          "success": true,
+          "length": 460,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "critic_ready",
+          "seed": 20002,
+          "success": true,
+          "length": 423,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "critic_ready",
+          "seed": 20005,
+          "success": true,
+          "length": 479,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "critic_ready",
+          "seed": 20007,
+          "success": true,
+          "length": 431,
+          "return": 1.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step200k",
+          "seed": 20008,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step200k",
+          "seed": 20002,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step200k",
+          "seed": 20005,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        },
+        {
+          "checkpoint": "step200k",
+          "seed": 20007,
+          "success": false,
+          "length": 700,
+          "return": 0.0,
+          "sim_error": false
+        }
+      ],
+      "left": {
+        "success": 4,
+        "count": 4,
+        "mean_length": 448.25,
+        "mean_return": 1.0,
+        "sim_errors": 0
+      },
+      "right": {
+        "success": 0,
+        "count": 4,
+        "mean_length": 700.0,
+        "mean_return": 0.0,
+        "sim_errors": 0
+      }
+    }
+  ],
+  "step_rows": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_collapse_diagnosis/results/closed_loop_steps.jsonl"
+}

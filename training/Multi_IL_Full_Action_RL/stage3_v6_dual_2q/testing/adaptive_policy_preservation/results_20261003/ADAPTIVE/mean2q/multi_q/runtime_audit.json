@@ -1,0 +1,178 @@
+{
+  "actor": {
+    "action_offset": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "action_scale": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "actor_hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+    "checkpoint_keys": [
+      "action_normalization_stats",
+      "algo_name",
+      "config",
+      "env_metadata",
+      "model",
+      "shape_metadata",
+      "variable_state"
+    ],
+    "low_noise_eval": true,
+    "missing_keys": [],
+    "network_class": "RNNGMMActorNetwork",
+    "num_modes": 5,
+    "observation_shapes": {
+      "object": [
+        41
+      ],
+      "robot0_eef_pos": [
+        3
+      ],
+      "robot0_eef_quat": [
+        4
+      ],
+      "robot0_gripper_qpos": [
+        2
+      ],
+      "robot1_eef_pos": [
+        3
+      ],
+      "robot1_eef_quat": [
+        4
+      ],
+      "robot1_gripper_qpos": [
+        2
+      ]
+    },
+    "open_loop": false,
+    "parameter_count": 2078945,
+    "rnn_horizon": 10,
+    "source_hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+    "state_dict_entries": 20,
+    "unexpected_keys": [],
+    "use_tanh": false
+  },
+  "actor_checkpoint_sha256": "95d3b599103a9c53e95b962ef0136816865b601b9a50fbc2261f97c1b294e414",
+  "actor_objective": "-mean[sum_k p_k*Q1(h10_final,mu_k)] at the final transition of each aligned Actor horizon",
+  "actor_sequence_batch": 64,
+  "actor_update_schedule": "one Actor step per four Critic steps after readiness",
+  "actor_update_std_contract": "Actor is in train mode and computes learned std, but raw-Q RL objective uses only categorical probabilities and component means; std head has no direct RL gradient.",
+  "boundary_aligned_sequence_sampling": true,
+  "boundary_evidence": "BatchedGMMExecutor resets hidden at episode timestep mod 10 == 0 and episode reset; replay stores contiguous episode_steps from 0; Actor windows begin at 0,10,... and never cross episodes",
+  "compile_backend": "none",
+  "critic_batch": "128 offline + 128 online sliding horizon-10 sequences; final transition",
+  "critic_checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/stage2_2_h10_multi_20260923_150749/multi_q/checkpoints/step_00005000.pth",
+  "critic_readiness_v2": {
+    "check_interval_steps": 10000,
+    "consecutive_passes": 2,
+    "critic_only_warning_steps": 300000,
+    "data": {
+      "min_completed_episodes": 150,
+      "min_failure_episodes": 30,
+      "min_success_episodes": 30
+    },
+    "hard_stop_on_readiness_timeout": false,
+    "min_online_steps": 100000,
+    "numeric": {
+      "epsilon": 1e-06,
+      "finite_required": true,
+      "qmean_mean_shift_z_max": 0.5,
+      "qmean_std_ratio_max": 1.5
+    },
+    "rank": {
+      "metric": "qmean_mc_spearman",
+      "min_spearman": 0.7
+    },
+    "td_health": {
+      "metric": "member_max_mae",
+      "required_consecutive_worsening_intervals": 2,
+      "required_history_points": 3,
+      "sustained_worsening_fraction": 0.35
+    },
+    "version": 2
+  },
+  "critic_target_mode": "mean2q",
+  "device": "npu:0",
+  "env_steps_semantics": "aggregate environment transitions",
+  "evaluation_seeds": [
+    20000,
+    20001,
+    20002,
+    20003,
+    20004,
+    20005,
+    20006,
+    20007,
+    20008,
+    20009
+  ],
+  "execution": "checkpoint_gmm_categorical_plus_component_sample",
+  "fixed_evaluation_std_contract": "evaluate_actor uses BatchedGMMExecutor, so eval mode and Gaussian std 1e-4 match online rollout.",
+  "group": "multi_q",
+  "handoff": "V2 CRITIC_ONLY -> ACTOR_WARMUP -> JOINT_RL; evaluation only in JOINT_RL",
+  "hard_clipped_min_target": false,
+  "num_envs": 16,
+  "objective_revision": "stage3-v6-dual-2q-target-ab",
+  "offline_sampler": "balanced RNN/Transformer/GMM rotation",
+  "offline_sources": {
+    "bc_gmm": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_gmm/transitions.hdf5",
+      "sha256": "62a17385ae4c36af6471438395cf927dac07a1082e9acdb2265cd9b4b168c035"
+    },
+    "bc_rnn": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_rnn/transitions.hdf5",
+      "sha256": "36de1401dec001ec597411587865a4eddd1871f646acb1a2137ac4878f462929"
+    },
+    "bc_transformer": {
+      "path": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage1_rollout_collection/datasets/20260820_160603/bc_transformer/transitions.hdf5",
+      "sha256": "5923545a11b4320b8a0cf7ec2cbedbb3a7e48117c7b2e7b6e10f3796092e7976"
+    }
+  },
+  "online_cql": false,
+  "online_replay_capacity_configured": 1000000,
+  "online_sequence_capacity_effective": 250000,
+  "policy_delay": 4,
+  "prefetch_minibatches": true,
+  "random_one_selector_contract": {
+    "distribution": "uniform_q1_q2",
+    "granularity": "one_target_q_for_entire_critic_update_minibatch",
+    "rng_stream": "dedicated_numpy_generator_not_global_training_rng",
+    "seed_offset": 6006001
+  },
+  "replay_action_contract": "The exact denormalized action array returned by BatchedGMMExecutor is passed to vector.step and online.add; no external noise or clipping.",
+  "rollout_snapshot_contract": "Separate rollout snapshots synchronize only at per-env recurrent reset boundaries; hidden and weights remain consistent for the entire block.",
+  "rollout_std_contract": "BatchedGMMExecutor temporarily calls actor.eval(); checkpoint low_noise_eval=True fixes Gaussian component std to 1e-4; categorical mode is sampled.",
+  "run_type": "TESTING_ONLY_REAL_SHORT_RUN",
+  "sampled_learned_std_q": "no_grad diagnostic only; excluded from losses",
+  "smoke_evaluation_policy": "10 fixed seeds at configured milestones",
+  "stage": "stage3-v6",
+  "startup_parallelism": 4,
+  "target_actor_contract": "Independent frozen Polyak-updated Actor remains eval with low_noise_eval=True; Bellman target enumerates component means under no_grad.",
+  "td_target": "r + gamma*(1-terminal)*sum_k p'_k*0.5*(Q1'(h',mu'_k)+Q2'(h',mu'_k))",
+  "utd": 0.25
+}

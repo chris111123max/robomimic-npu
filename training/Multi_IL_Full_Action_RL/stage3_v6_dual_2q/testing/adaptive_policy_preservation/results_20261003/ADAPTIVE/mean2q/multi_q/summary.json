@@ -1,0 +1,27 @@
+{
+  "actor_gate_open": true,
+  "actor_hash_final": "dd7370ff44ee6eca5e895d88e6d8a4ccb2c5547398eafb4a35af10df3aaa6e0c",
+  "actor_updates": 3750,
+  "critic_target_mode": "mean2q",
+  "device": "npu:0",
+  "env_steps": 200000,
+  "episodes": 342,
+  "gate_open_step": 140001,
+  "group": "multi_q",
+  "online_sequence_transitions": 183300,
+  "run_type": "TESTING_ONLY_REAL_SHORT_RUN",
+  "stage": "stage3-v6",
+  "status": "COMPLETE",
+  "successes": 238,
+  "target_selector": {
+    "granularity": "one_target_q_for_entire_critic_update_minibatch",
+    "last_update_selected_q": null,
+    "mode": "mean2q",
+    "q1_updates": 0,
+    "q2_updates": 0,
+    "random_updates": 0,
+    "rng_stream": "dedicated_numpy_generator_not_global_training_rng",
+    "seed": 26266919
+  },
+  "updates": 49750
+}

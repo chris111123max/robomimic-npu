@@ -1,0 +1,10 @@
+{
+  "env_steps": 140000,
+  "actor_updates": 0,
+  "critic_updates": 34750,
+  "actor_equals_init": true,
+  "Adam_state_empty": true,
+  "source_sha256": "903c9b8812a8bb7cc6a8947ee95ad25da6a2200f66d67a471daf41f9ce64edf2",
+  "replay": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3v6_readiness_v2_multi_mean_random_formal_20260929_130945/mean2q/multi_q/checkpoints/critic_ready.sequences.npy",
+  "preregistration_sha256": "b4a36b3d14f3d24d33740674224b09fcb888648c8e1462017e41261b624c3350"
+}

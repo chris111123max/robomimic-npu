@@ -1,0 +1,94 @@
+{
+  "actor_checkpoint_sha256": "95d3b599103a9c53e95b962ef0136816865b601b9a50fbc2261f97c1b294e414",
+  "actor_hash": "f1e203241312301be92a504543727fb70daef33abf880ee7552218ce3ce2e873",
+  "actor_hashes_identical": true,
+  "actor_objective_unchanged_from_v5": "Q1 component-mean objective; intentionally unchanged so target mechanism is the only mean-vs-random variable",
+  "actor_optimizer": {
+    "lr": 2e-06,
+    "type": "Adam",
+    "weight_decay": 0.0
+  },
+  "critic_initialization": {
+    "multi_q": {
+      "architecture": {
+        "action_dim": 14,
+        "head_hidden_dim": 128,
+        "history_semantics": "sliding_horizon_10_zero_state_final_step_supervision",
+        "learning_sequence_length": 16,
+        "legacy_replay_burn_in_length": 32,
+        "lstm_hidden_dim": 96,
+        "lstm_layers": 1,
+        "matched_hidden_dims": [
+          240,
+          256
+        ],
+        "obs_dim": 59,
+        "recurrent_context_length": 10,
+        "token_dim": 64
+      },
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/stage2_2_h10_multi_20260923_150749/multi_q/checkpoints/step_00005000.pth",
+      "checkpoint_step": 5000,
+      "critic_type": "history_aware_twin_q",
+      "gamma": 0.99,
+      "initial_hash": "608298ddef70150046602009e4b629ed635770277f6eb5315d66ad7254632937",
+      "sha256": "4a6bdeffb2a20bd82f9b45d62391649c5de96d88535745285095e966f7a97ee5"
+    },
+    "rnn_q": {
+      "architecture": {
+        "action_dim": 14,
+        "head_hidden_dim": 128,
+        "history_semantics": "sliding_horizon_10_zero_state_final_step_supervision",
+        "learning_sequence_length": 16,
+        "legacy_replay_burn_in_length": 32,
+        "lstm_hidden_dim": 96,
+        "lstm_layers": 1,
+        "matched_hidden_dims": [
+          240,
+          256
+        ],
+        "obs_dim": 59,
+        "recurrent_context_length": 10,
+        "token_dim": 64
+      },
+      "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/stage2_2_h10_rnn_20260923_150633/rnn_q/checkpoints/step_00046000.pth",
+      "checkpoint_step": 46000,
+      "critic_type": "history_aware_twin_q",
+      "gamma": 0.99,
+      "initial_hash": "6f04119e182674a900f072545c92ccd33e318858296b45f1a022d4ebf7d40762",
+      "sha256": "eac89b6ec379739446700d50b7a8a401e58c006d160d1ab3ea70f7406ee09e1f"
+    }
+  },
+  "critic_optimizer": {
+    "lr": 0.0003,
+    "type": "AdamW",
+    "weight_decay": 0.0001
+  },
+  "environment_seeds_identical_across_target_modes": true,
+  "evaluation_seeds_identical_across_target_modes": true,
+  "npu_mapping": {
+    "mean2q/multi_q": "npu:0",
+    "mean2q/rnn_q": "npu:1",
+    "random2q/multi_q": "npu:2",
+    "random2q/rnn_q": "npu:3"
+  },
+  "offline_replay_composition": {
+    "multi_q": "balanced RNN/Transformer/GMM Stage1 sources",
+    "rnn_q": "RNN-only Stage1 rollout source"
+  },
+  "only_intended_mean_vs_random_difference": "Bellman target estimator: twin mean versus one uniformly sampled target Q per Critic update",
+  "replay_settings_identical_across_target_modes": true,
+  "runs": [
+    "mean2q/multi_q",
+    "mean2q/rnn_q",
+    "random2q/multi_q",
+    "random2q/rnn_q"
+  ],
+  "selector_rng_isolated": true,
+  "stage": "stage3-v6",
+  "status": "PREPARED",
+  "target_modes": [
+    "mean2q",
+    "random2q"
+  ],
+  "training_schedules_identical_across_target_modes": true
+}

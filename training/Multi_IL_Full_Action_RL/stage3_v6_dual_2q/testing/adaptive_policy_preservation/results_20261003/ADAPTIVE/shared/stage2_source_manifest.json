@@ -1,0 +1,50 @@
+{
+  "multi_q": {
+    "architecture": {
+      "action_dim": 14,
+      "head_hidden_dim": 128,
+      "history_semantics": "sliding_horizon_10_zero_state_final_step_supervision",
+      "learning_sequence_length": 16,
+      "legacy_replay_burn_in_length": 32,
+      "lstm_hidden_dim": 96,
+      "lstm_layers": 1,
+      "matched_hidden_dims": [
+        240,
+        256
+      ],
+      "obs_dim": 59,
+      "recurrent_context_length": 10,
+      "token_dim": 64
+    },
+    "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/stage2_2_h10_multi_20260923_150749/multi_q/checkpoints/step_00005000.pth",
+    "checkpoint_step": 5000,
+    "critic_type": "history_aware_twin_q",
+    "gamma": 0.99,
+    "initial_hash": "608298ddef70150046602009e4b629ed635770277f6eb5315d66ad7254632937",
+    "sha256": "4a6bdeffb2a20bd82f9b45d62391649c5de96d88535745285095e966f7a97ee5"
+  },
+  "rnn_q": {
+    "architecture": {
+      "action_dim": 14,
+      "head_hidden_dim": 128,
+      "history_semantics": "sliding_horizon_10_zero_state_final_step_supervision",
+      "learning_sequence_length": 16,
+      "legacy_replay_burn_in_length": 32,
+      "lstm_hidden_dim": 96,
+      "lstm_layers": 1,
+      "matched_hidden_dims": [
+        240,
+        256
+      ],
+      "obs_dim": 59,
+      "recurrent_context_length": 10,
+      "token_dim": 64
+    },
+    "checkpoint": "/data/home/3220251075/lerobot_workspace/training_runs/Multi_IL_Full_Action_RL/stage2_2_history_aware_critic/stage2_2_h10_rnn_20260923_150633/rnn_q/checkpoints/step_00046000.pth",
+    "checkpoint_step": 46000,
+    "critic_type": "history_aware_twin_q",
+    "gamma": 0.99,
+    "initial_hash": "6f04119e182674a900f072545c92ccd33e318858296b45f1a022d4ebf7d40762",
+    "sha256": "eac89b6ec379739446700d50b7a8a401e58c006d160d1ab3ea70f7406ee09e1f"
+  }
+}

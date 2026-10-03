@@ -1,0 +1,208 @@
+{
+  "method": "Unique tensors: ignore duplicate nets.rnn.per_step_net.nets.* aliases of nets.decoder.nets.*; alias equality verified for all checkpoints",
+  "checkpoints": {
+    "actor_init": {
+      "filename": "step0_transfer.pth",
+      "env_steps": 0,
+      "actor_updates": 0,
+      "unique_global_l2": 0.0,
+      "unique_global_relative_l2": 0.0,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2020800
+        }
+      }
+    },
+    "step100k": {
+      "filename": "step_0100000.pth",
+      "env_steps": 100000,
+      "actor_updates": 0,
+      "unique_global_l2": 0.0,
+      "unique_global_relative_l2": 0.0,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2020800
+        }
+      }
+    },
+    "critic_ready": {
+      "filename": "critic_ready.pth",
+      "env_steps": 140000,
+      "actor_updates": 0,
+      "unique_global_l2": 0.0,
+      "unique_global_relative_l2": 0.0,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 2020800
+        }
+      }
+    },
+    "step200k": {
+      "filename": "step_0200000.pth",
+      "env_steps": 200000,
+      "actor_updates": 3743,
+      "unique_global_l2": 0.8694849524581918,
+      "unique_global_relative_l2": 0.008007984433193059,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.14309303243044888,
+          "relative_l2": 0.01589232359796338,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.04290502733111432,
+          "relative_l2": 0.002507706425204184,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 0.8565556755114047,
+          "relative_l2": 0.008189363278213794,
+          "numel": 2020800
+        }
+      }
+    },
+    "step280k": {
+      "filename": "best_success.pth",
+      "env_steps": 280000,
+      "actor_updates": 8750,
+      "unique_global_l2": 2.1343951254886884,
+      "unique_global_relative_l2": 0.019657847891299096,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.3572688510270478,
+          "relative_l2": 0.039679305802357324,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.09591370870800307,
+          "relative_l2": 0.005605949664966103,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 2.1020946887039993,
+          "relative_l2": 0.02009772107425792,
+          "numel": 2020800
+        }
+      }
+    },
+    "step300k": {
+      "filename": "step_0300000.pth",
+      "env_steps": 300000,
+      "actor_updates": 9995,
+      "unique_global_l2": 2.51821929134342,
+      "unique_global_relative_l2": 0.023192880828393877,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.3940216955120155,
+          "relative_l2": 0.043761182381390824,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.11384067962537578,
+          "relative_l2": 0.006653742498356112,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 2.4845956617571447,
+          "relative_l2": 0.02375473895664164,
+          "numel": 2020800
+        }
+      }
+    },
+    "last": {
+      "filename": "last.pth",
+      "env_steps": 315904,
+      "actor_updates": 10994,
+      "unique_global_l2": 2.8038541867183344,
+      "unique_global_relative_l2": 0.025823587420005685,
+      "groups": {
+        "gmm_mean": {
+          "l2": 0.43786677977233474,
+          "relative_l2": 0.04863074350124233,
+          "numel": 28070
+        },
+        "gmm_std": {
+          "l2": 0.0,
+          "relative_l2": 0.0,
+          "numel": 28070
+        },
+        "gmm_logits": {
+          "l2": 0.1193324709301821,
+          "relative_l2": 0.006974725870180143,
+          "numel": 2005
+        },
+        "rnn": {
+          "l2": 2.766881050014878,
+          "relative_l2": 0.02645361500015625,
+          "numel": 2020800
+        }
+      }
+    }
+  }
+}

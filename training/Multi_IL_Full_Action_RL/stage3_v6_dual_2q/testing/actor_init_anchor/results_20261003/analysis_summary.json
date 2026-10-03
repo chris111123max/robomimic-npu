@@ -1,0 +1,84 @@
+{
+  "verdict": "YES — strong evidence",
+  "primary": "GENERAL_UNCONSTRAINED_ACTOR_DRIFT",
+  "mechanism": "INSUFFICIENT_POLICY_PRESERVATION",
+  "reason": "The prespecified WEAK anchor restores at least 3/4 seeds while parameters still move and the frozen-score RL objective improves. This is short-horizon, four-seed mechanism evidence, not proof of a balanced formal-training fix.",
+  "selected_anchor": "WEAK",
+  "closed_loop": {
+    "ORIGINAL_140K": {
+      "success_count": 4,
+      "count": 4,
+      "mean_length": 452.25,
+      "sim_error_count": 0
+    },
+    "BASELINE": {
+      "success_count": 0,
+      "count": 4,
+      "mean_length": 700.0,
+      "sim_error_count": 0
+    },
+    "WEAK": {
+      "success_count": 3,
+      "count": 4,
+      "mean_length": 529.25,
+      "sim_error_count": 0
+    },
+    "STRONG": {
+      "success_count": 4,
+      "count": 4,
+      "mean_length": 483.5,
+      "sim_error_count": 0
+    }
+  },
+  "offline_1000": {
+    "BASELINE": {
+      "execution_drift": 0.1639431998783612,
+      "RL_improvement": 0.0045083435252308846,
+      "drift_reduction": 0.0,
+      "RL_retention": 1.0,
+      "rnn_rms": 8.117056360570786e-05,
+      "component_rms": 0.022242815505836705,
+      "categorical_KL": 0.016027753443193203
+    },
+    "WEAK": {
+      "execution_drift": 0.0004744902944821051,
+      "RL_improvement": 0.00011927579180337489,
+      "drift_reduction": 0.9971057641010169,
+      "RL_retention": 0.02645667774335507,
+      "rnn_rms": 2.0730207785094682e-05,
+      "component_rms": 0.00024849876628985545,
+      "categorical_KL": 1.873066056181226e-07
+    },
+    "MEDIUM": {
+      "execution_drift": 0.00017662725192932807,
+      "RL_improvement": 4.6724806452402845e-05,
+      "drift_reduction": 0.9989226314231979,
+      "RL_retention": 0.010364074119664592,
+      "rnn_rms": 1.1324077834935832e-05,
+      "component_rms": 0.00010048149075140585,
+      "categorical_KL": 2.1805205736811986e-08
+    },
+    "STRONG": {
+      "execution_drift": 7.293704235567582e-05,
+      "RL_improvement": 1.538843753223773e-05,
+      "drift_reduction": 0.999555107851928,
+      "RL_retention": 0.003413324083694276,
+      "rnn_rms": 4.8797471057547954e-06,
+      "component_rms": 3.702520655971813e-05,
+      "categorical_KL": 1.7787752527465224e-08
+    }
+  },
+  "diagnostic_environment_steps": 8660,
+  "diagnostic_episodes": 16,
+  "formal_training_resumed": false,
+  "success_conditioned_retuning": false,
+  "finite_JSON_and_trace_numbers_checked": 420806,
+  "production_files_hash_unchanged": {
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_agent.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_actor.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v5_rgmm_td3/stage3_v5_schedule.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/stage3_v6_agent.py": true,
+    "training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/train_stage3_v6_vector.py": true,
+    "robomimic/models/policy_nets.py": true
+  }
+}

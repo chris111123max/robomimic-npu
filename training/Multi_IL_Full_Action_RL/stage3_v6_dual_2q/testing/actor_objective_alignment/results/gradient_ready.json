@@ -1,0 +1,402 @@
+{
+  "checkpoints": {
+    "critic_ready": {
+      "actor_updates": 0,
+      "env_steps": 140000,
+      "gradients": {
+        "all": {
+          "modules": {
+            "all": {
+              "cosines": {
+                "mean_min": 0.9976863445333395,
+                "q1_mean": 0.991167818544581,
+                "q1_min": 0.9897689969413908
+              },
+              "norms": {
+                "mean": 0.3380774638368504,
+                "min": 0.3480342161759041,
+                "q1": 0.31578061671394153
+              },
+              "parameter_count": 2078945
+            },
+            "encoder": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "gmm_logits": {
+              "cosines": {
+                "mean_min": 0.9998451975549141,
+                "q1_mean": 0.9993019495763219,
+                "q1_min": 0.9996713468214635
+              },
+              "norms": {
+                "mean": 0.004917467456257234,
+                "min": 0.004906959316925674,
+                "q1": 0.0048572695022056885
+              },
+              "parameter_count": 2005
+            },
+            "gmm_mean": {
+              "cosines": {
+                "mean_min": 0.9980123370537936,
+                "q1_mean": 0.9914763064167048,
+                "q1_min": 0.9908862575466219
+              },
+              "norms": {
+                "mean": 0.3345044253987332,
+                "min": 0.3440677116674319,
+                "q1": 0.31206564714892854
+              },
+              "parameter_count": 28070
+            },
+            "gmm_std": {
+              "cosines": {
+                "mean_min": null,
+                "q1_mean": null,
+                "q1_min": null
+              },
+              "norms": {
+                "mean": 0.0,
+                "min": 0.0,
+                "q1": 0.0
+              },
+              "parameter_count": 28070
+            },
+            "other": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "rnn": {
+              "cosines": {
+                "mean_min": 0.9836667181217663,
+                "q1_mean": 0.9787990586240932,
+                "q1_min": 0.9419663879868624
+              },
+              "norms": {
+                "mean": 0.04877478300143258,
+                "min": 0.052164616047421564,
+                "q1": 0.048050355823247
+              },
+              "parameter_count": 2020800
+            }
+          },
+          "objective_values": {
+            "mean": 0.13829079270362854,
+            "min": 0.1368003487586975,
+            "q1": 0.13839147984981537
+          },
+          "std_abs_gradient": {
+            "mean": 0,
+            "min": 0,
+            "q1": 0
+          }
+        },
+        "failure": {
+          "modules": {
+            "all": {
+              "cosines": {
+                "mean_min": 0.9539530532419447,
+                "q1_mean": 0.909775773751577,
+                "q1_min": 0.8080571590826068
+              },
+              "norms": {
+                "mean": 0.11374383196732538,
+                "min": 0.12323175127142404,
+                "q1": 0.12036960673430104
+              },
+              "parameter_count": 2078945
+            },
+            "encoder": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "gmm_logits": {
+              "cosines": {
+                "mean_min": 0.9992729301076841,
+                "q1_mean": 0.9968577473274071,
+                "q1_min": 0.9971301721903737
+              },
+              "norms": {
+                "mean": 0.0027687410524895074,
+                "min": 0.0025641498947380444,
+                "q1": 0.0025906017229460157
+              },
+              "parameter_count": 2005
+            },
+            "gmm_mean": {
+              "cosines": {
+                "mean_min": 0.9648006379556094,
+                "q1_mean": 0.9069332369137916,
+                "q1_min": 0.8325223619255039
+              },
+              "norms": {
+                "mean": 0.1053191027953002,
+                "min": 0.11729050799517822,
+                "q1": 0.10710685138855847
+              },
+              "parameter_count": 28070
+            },
+            "gmm_std": {
+              "cosines": {
+                "mean_min": null,
+                "q1_mean": null,
+                "q1_min": null
+              },
+              "norms": {
+                "mean": 0.0,
+                "min": 0.0,
+                "q1": 0.0
+              },
+              "parameter_count": 28070
+            },
+            "other": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "rnn": {
+              "cosines": {
+                "mean_min": 0.8944527000829318,
+                "q1_mean": 0.9431034874093142,
+                "q1_min": 0.7350031784634327
+              },
+              "norms": {
+                "mean": 0.04287050232955519,
+                "min": 0.03771506848691206,
+                "q1": 0.05486577616066881
+              },
+              "parameter_count": 2020800
+            }
+          },
+          "objective_values": {
+            "mean": 0.03165575861930847,
+            "min": 0.030089395120739937,
+            "q1": 0.03197340667247772
+          },
+          "std_abs_gradient": {
+            "mean": 0,
+            "min": 0,
+            "q1": 0
+          }
+        },
+        "success": {
+          "modules": {
+            "all": {
+              "cosines": {
+                "mean_min": 0.9991544838595813,
+                "q1_mean": 0.9931566755730921,
+                "q1_min": 0.993941246356218
+              },
+              "norms": {
+                "mean": 0.6063436858528176,
+                "min": 0.6109661978360931,
+                "q1": 0.580779744300389
+              },
+              "parameter_count": 2078945
+            },
+            "encoder": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "gmm_logits": {
+              "cosines": {
+                "mean_min": 0.9999939633646516,
+                "q1_mean": 0.9998621018647835,
+                "q1_min": 0.9998387295218761
+              },
+              "norms": {
+                "mean": 0.007694744946007766,
+                "min": 0.007830546568850686,
+                "q1": 0.007665217666594355
+              },
+              "parameter_count": 2005
+            },
+            "gmm_mean": {
+              "cosines": {
+                "mean_min": 0.9992027965822774,
+                "q1_mean": 0.9931989657185257,
+                "q1_min": 0.9941387897425995
+              },
+              "norms": {
+                "mean": 0.5987228266383007,
+                "min": 0.6034911871965483,
+                "q1": 0.5720824680867262
+              },
+              "parameter_count": 28070
+            },
+            "gmm_std": {
+              "cosines": {
+                "mean_min": null,
+                "q1_mean": null,
+                "q1_min": null
+              },
+              "norms": {
+                "mean": 0.0,
+                "min": 0.0,
+                "q1": 0.0
+              },
+              "parameter_count": 28070
+            },
+            "other": {
+              "cosines": null,
+              "norms": null,
+              "parameter_count": 0
+            },
+            "rnn": {
+              "cosines": {
+                "mean_min": 0.9973184042579464,
+                "q1_mean": 0.9954931854573644,
+                "q1_min": 0.9919080123102774
+              },
+              "norms": {
+                "mean": 0.0955218987250549,
+                "min": 0.09495664492191046,
+                "q1": 0.09983989951692136
+              },
+              "parameter_count": 2020800
+            }
+          },
+          "objective_values": {
+            "mean": 0.24492579698562622,
+            "min": 0.24351128935813904,
+            "q1": 0.24480953812599182
+          },
+          "std_abs_gradient": {
+            "mean": 0,
+            "min": 0,
+            "q1": 0
+          }
+        }
+      },
+      "q1_vs_q2": {
+        "all": {
+          "both_positive_fraction": 0.0,
+          "count": 256,
+          "fraction_q1_positive": 0.0,
+          "fraction_q2_positive": 0.0,
+          "q1_exceeds_q2_by_margin_fraction": 0.0,
+          "q1_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_minus_q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_only_advantage_fraction": 0.0,
+          "q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          }
+        },
+        "failure": {
+          "both_positive_fraction": 0.0,
+          "count": 128,
+          "fraction_q1_positive": 0.0,
+          "fraction_q2_positive": 0.0,
+          "q1_exceeds_q2_by_margin_fraction": 0.0,
+          "q1_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_minus_q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_only_advantage_fraction": 0.0,
+          "q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          }
+        },
+        "success": {
+          "both_positive_fraction": 0.0,
+          "count": 128,
+          "fraction_q1_positive": 0.0,
+          "fraction_q2_positive": 0.0,
+          "q1_exceeds_q2_by_margin_fraction": 0.0,
+          "q1_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_minus_q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          },
+          "q1_only_advantage_fraction": 0.0,
+          "q2_gain": {
+            "max": 0.0,
+            "mean": 0.0,
+            "median": 0.0,
+            "p25": 0.0,
+            "p75": 0.0,
+            "p95": 0.0
+          }
+        }
+      },
+      "real_delta_alignment": {
+        "mean": {
+          "global": 0.060914762705839356,
+          "gmm_mean": 0.2316832559868159,
+          "rnn": 0.16180549564879998
+        },
+        "min": {
+          "global": 0.05955936649243651,
+          "gmm_mean": 0.22343593553194865,
+          "rnn": 0.15587248453347233
+        },
+        "q1": {
+          "global": 0.0666523446376376,
+          "gmm_mean": 0.25833193512494934,
+          "rnn": 0.16293715405666667
+        }
+      },
+      "real_delta_alignment_note": "140K\u2192200K net parameter delta includes ~3743 Adam steps, evolving Critic and batches; only directional context."
+    }
+  },
+  "context_counts": {
+    "all": 256,
+    "failure": 128,
+    "success": 128
+  },
+  "device": "npu:0",
+  "fixed_contexts": "/data/home/3220251075/lerobot_workspace/robomimic/training/Multi_IL_Full_Action_RL/stage3_v6_dual_2q/testing/actor_collapse_diagnosis/results/fixed_contexts.npz",
+  "margin_basis": "1% of sparse 0/1 return scale",
+  "q1_minus_q2_meaningful_margin": 0.01
+}

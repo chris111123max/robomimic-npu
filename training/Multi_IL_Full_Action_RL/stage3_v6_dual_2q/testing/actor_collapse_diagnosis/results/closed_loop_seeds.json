@@ -1,0 +1,15 @@
+{
+  "seeds": [
+    20008,
+    20002,
+    20005,
+    20007
+  ],
+  "selection": "Sorted initial-success episode lengths: 400, 444, 467, 511; short/mid/long coverage",
+  "prior_lengths": {
+    "20008": 400,
+    "20002": 444,
+    "20005": 467,
+    "20007": 511
+  }
+}
