@@ -1,0 +1,18 @@
+{
+  "algorithm_version": "stage3-v8-qse-gmm-v1",
+  "lambda_good": null,
+  "std_mode": "fixed",
+  "supervision_std": null,
+  "good_batch_size": 64,
+  "offline_weight": 1,
+  "online_weight": 1,
+  "online_fraction": 0.5,
+  "online_capacity_transitions": 200000,
+  "online_capacity_episodes": 512,
+  "dedup_history": 4096,
+  "good_rng_seed_offset": 830017,
+  "calibration_seed": 830019,
+  "gradient_norm_target_ratio": 0.25,
+  "gradient_group_max_ratio": 0.5,
+  "calibration_required": true
+}
