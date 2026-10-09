@@ -375,7 +375,7 @@ def main():
     output_root = Path(config["output_root"]).parent / "stage3_v7_pirlnav_schedule"
     group_dir = output_root / pair.name / args.target_mode / args.group
     explicit_resume = args.resume is not None
-    if not explicit_resume:
+    if not explicit_resume and not args.smoke and not args.benchmark_mode:
         source = pair / "random2q" / "multi_q" / "checkpoints" / "step_0100000.pth"
         if (not args.smoke and not args.benchmark_mode and
                 source.is_file() and source.with_suffix(".sequences.npy").is_file()):
@@ -466,8 +466,7 @@ def main():
                 offline, 64, int(config["recurrent_replay"]["train_seq_len"]), 10, purpose="diagnostic")
         online = OnlineSequenceReplay(config["online_sequence_capacity"], config["training_seed"])
         executor = BoundarySnapshotExecutor(actor, scale, offset, num_envs, 10)
-        # Do not allocate a separate evaluation simulator until the Critic
-        # handoff reaches JOINT_RL and an evaluation is actually due.
+        # Lazy evaluation simulator allocation until V7 Actor unlock or later.
         eval_env = None
 
         observations = list(vector.initial_observations)
@@ -518,7 +517,7 @@ def main():
             "utd": float(config.get("utd", 0.25)),
             "policy_delay": int(config["policy_delay"]),
             "prefetch_minibatches": bool(prefetch), "compile_backend": compile_backend,
-            "actor_update_schedule": "one Actor step per four Critic steps after readiness",
+            "actor_update_schedule": "one Actor step per four Critic steps after 200K frozen Critic LR decay",
             "critic_batch": "128 offline + 128 online sliding horizon-10 sequences; final transition",
             "handoff": "V7 CRITIC_ONLY -> CRITIC_DECAY(200K frozen Actor) -> ACTOR_WARMUP(100K) -> JOINT_RL",
             "critic_readiness_v7": config["critic_readiness_v7"],
@@ -974,7 +973,7 @@ def main():
             roundtrip = torch.load(last_path, map_location=device)
             replay_roundtrip = OnlineSequenceReplay.load(roundtrip["online_sequence_replay"])
             smoke_checks = {
-                "checkpoint_load": roundtrip.get("stage") == "stage3-v6",
+                "checkpoint_load": roundtrip.get("stage") == "stage3-v7",
                 "checkpoint_env_steps": int(roundtrip["env_steps"]) == env_steps,
                 "actor_state_entries": len(roundtrip["actor"]) == len(actor.state_dict()),
                 "target_actor_state_entries": len(roundtrip["target_actor"]) == len(agent.target_actor.state_dict()),
@@ -989,7 +988,7 @@ def main():
                 "actual_cpu_learner_overlap": measured_overlap_ms > 0 and overlap_update_count > 0,
                 "bounded_collector_lag": credit.max_collector_lag_seen <= credit.limit,
                 "bounded_rollout_policy_lag": executor.max_policy_version_lag <= executor.max_policy_lag,
-                "v6_objective": config["objective_revision"] == "stage3-v6-dual-2q-target-ab",
+                "v7_objective": config["objective_revision"] == "stage3-v7-random2q-pirlnav-inspired-handoff-v1",
                 "target_mode_contract": agent.critic_target_mode == args.target_mode,
                 "hard_clipped_min_target_absent": True,
                 "selector_update_count_contract": (
@@ -1007,7 +1006,7 @@ def main():
                 "status": "PASS" if all(smoke_checks.values()) else "FAIL",
                 "checks": smoke_checks, "resume_supported": True})
             if not all(smoke_checks.values()):
-                raise RuntimeError("Stage3-v6 smoke roundtrip failed")
+                raise RuntimeError("Stage3-v7 smoke roundtrip failed")
         write_json(group_dir / "summary.json", {
             "stage": "stage3-v7", "status": status, "run_type": config["run_type"],
             "group": args.group, "critic_target_mode": args.target_mode,
