@@ -377,7 +377,8 @@ def main():
     explicit_resume = args.resume is not None
     if not explicit_resume:
         source = pair / "random2q" / "multi_q" / "checkpoints" / "step_0100000.pth"
-        if source.is_file() and source.with_suffix(".sequences.npy").is_file():
+        if (not args.smoke and not args.benchmark_mode and
+                source.is_file() and source.with_suffix(".sequences.npy").is_file()):
             args.resume = str(source.resolve())
             print("[V7 RESTORE] complete V6 random2q/multi_q 100K snapshot found", flush=True)
         else:
