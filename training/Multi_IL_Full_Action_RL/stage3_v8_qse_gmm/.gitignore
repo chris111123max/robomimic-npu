@@ -1,0 +1,15 @@
+# Testing directory
+testing/
+
+# Generated data and checkpoints
+*.sequences.npy
+*.npy
+*.npz
+*.pth
+*.pt
+*.h5
+*.hdf5
+*.log
+*.jsonl
+__pycache__/
+*.pyc
