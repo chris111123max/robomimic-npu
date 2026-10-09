@@ -58,6 +58,7 @@ class GoodReplay:
         self.counts = Counter()
         self.source_audit = {}
         self.samples = Counter()
+        self.last_mixture = {}
 
     def add_episode(self, ep, source, *, ended, full_success, timeout=False,
                     reason="environment_done", label_source="", seed=-1, episode_id=-1):
@@ -135,8 +136,17 @@ class GoodReplay:
         if not self.offline and not self.online: raise RuntimeError("No verified good experience")
         fraction=self.config["online_fraction"] if online_fraction is None else online_fraction
         if not 0<=float(fraction)<=1: raise ValueError("Invalid good source mixture")
-        online_count=int(count*float(fraction)) if self.online else 0
-        if not self.offline: online_count=count
+        # Episode-balanced source mass, capped by the requested online fraction.
+        # No arbitrary warmup threshold: the verified offline corpus is the reference.
+        available=len(self.online)/max(1,len(self.offline)+len(self.online))
+        online_count=min(int(count*float(fraction)),int(count*available+0.5))
+        if not self.online: online_count=0
+        self.last_mixture=dict(batch_size=count,requested_online_fraction=float(fraction),
+            available_online_episode_fraction=available,online_samples=online_count,
+            offline_samples=count-online_count)
+        if not self.offline:
+            online_count=count
+            self.last_mixture.update(online_samples=count,offline_samples=0)
         rows=[]
         for source,n in (("offline",count-online_count),("online_success",online_count)):
             episodes=self.offline if source=="offline" else self.online
@@ -161,7 +171,7 @@ class GoodReplay:
         return copy.deepcopy(dict(config=self.config,rng=self.rng.bit_generator.state,
             offline=self.offline,online=list(self.online),online_transitions=self.online_transitions,
             recent_hashes=list(self.recent_hashes),counts=dict(self.counts),
-            source_audit=self.source_audit,samples=dict(self.samples)))
+            source_audit=self.source_audit,samples=dict(self.samples),last_mixture=self.last_mixture))
 
     def load_state_dict(self, state):
         if state["config"]!=self.config: raise RuntimeError("Good pool configuration mismatch")
@@ -171,6 +181,7 @@ class GoodReplay:
         self.recent_hashes=deque(state["recent_hashes"]); self.seen=set(self.recent_hashes)
         self.counts=Counter(state["counts"]); self.source_audit=copy.deepcopy(state["source_audit"])
         self.samples=Counter(state["samples"])
+        self.last_mixture=copy.deepcopy(state.get("last_mixture",{}))
 
     def metrics(self):
         online_seeds=Counter(ep["seed"] for ep in self.online)
@@ -178,7 +189,9 @@ class GoodReplay:
             good_online_transitions=self.online_transitions,good_online_distinct_seeds=len(online_seeds),
             good_online_largest_seed_fraction=max(online_seeds.values(),default=0)/max(1,len(self.online)),
             good_offline_samples=self.samples["offline"],good_online_samples=self.samples["online_success"],
-            good_online_total_accepted=self.counts["online_success_accepted"])
+            good_online_total_accepted=self.counts["online_success_accepted"],
+            good_last_online_samples=self.last_mixture.get("online_samples",0),
+            good_available_online_episode_fraction=len(self.online)/max(1,len(self.offline)+len(self.online)))
 
 class OnlineSequenceReplay(V5OnlineReplay):
     def __init__(self, capacity_transitions, seed=0, good_pool=None):

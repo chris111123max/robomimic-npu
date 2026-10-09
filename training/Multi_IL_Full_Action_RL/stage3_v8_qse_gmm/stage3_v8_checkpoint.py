@@ -35,7 +35,7 @@ def source_payload(path,config=None):
         required_replay=path.with_suffix(".sequences.npy")
     elif stage=="stage3-v8":
         if (payload.get("algorithm_version")!=VERSION or "v8_state" not in payload
-            or payload.get("checkpoint_purpose") not in ("CPU_TEST_ONLY","FORMAL_TRAINING")):
+            or payload.get("checkpoint_purpose") not in ("CPU_TEST_ONLY","INTEGRATION_TEST_ONLY","FORMAL_TRAINING")):
             raise RuntimeError("Invalid V8 checkpoint schema")
         required_replay=Path(payload["online_sequence_replay"])
     else:
@@ -49,6 +49,8 @@ def source_payload(path,config=None):
     actual_replay=Path(payload["online_sequence_replay"]).resolve()
     if not required_replay.is_file() or actual_replay!=required_replay.resolve():
         raise RuntimeError("Missing/mismatched exact companion replay")
+    if stage=="stage3-v8" and payload.get("v8_dependency_lock_sha256")!=sha(stage3_v8_paths.HERE/"stage3_v8_dependency_lock.json"):
+        raise RuntimeError("V8 checkpoint dependency lock differs; explicit compatibility review required")
     if stage=="stage3-v8" and sha(actual_replay)!=payload["replay_sha256"]:
         raise RuntimeError("V8 replay hash mismatch")
     if config is not None:
@@ -63,6 +65,8 @@ def source_payload(path,config=None):
 
 def restore_checkpoint(path,agent,config,torch_module=torch,OnlineSequenceReplay=OnlineSequenceReplay):
     payload=source_payload(path,config)
+    if payload.get("checkpoint_purpose")=="INTEGRATION_TEST_ONLY" and not config.get("v8_integration_smoke"):
+        raise RuntimeError("Integration checkpoint cannot seed formal training")
     if payload.get("checkpoint_purpose")=="CPU_TEST_ONLY" and agent.device.type!="cpu":
         raise RuntimeError("CPU validation checkpoint cannot seed formal training")
     if payload["stage"]=="stage3-v7":
@@ -128,7 +132,9 @@ def save_checkpoint(path,agent,config,group,env_steps,generations,episodes,succe
     payload=v7.checkpoint_payload(agent,config,group,env_steps,generations,episodes,
         successes,online,rng_api,handoff,update_credit,offline)
     payload.update(stage="stage3-v8",algorithm_version=VERSION,
-        checkpoint_purpose="CPU_TEST_ONLY" if agent.device.type=="cpu" else "FORMAL_TRAINING",
+        v8_dependency_lock_sha256=sha(stage3_v8_paths.HERE/"stage3_v8_dependency_lock.json"),
+        checkpoint_purpose=("CPU_TEST_ONLY" if agent.device.type=="cpu" else
+            "INTEGRATION_TEST_ONLY" if config.get("v8_integration_smoke") else "FORMAL_TRAINING"),
         online_sequence_replay=str(replay),replay_sha256=sha(replay),
         v8_state=dict(good_replay=agent.good_replay.state_dict(),
             loss_config=copy.deepcopy(agent.v8_loss),lambda_good=agent.v8_loss["lambda_good"],

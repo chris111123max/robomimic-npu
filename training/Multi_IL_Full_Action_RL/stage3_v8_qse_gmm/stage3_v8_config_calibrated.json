@@ -32,5 +32,6 @@
   "calibration_required": false,
   "calibration_checkpoint_sha256": "a9510da7c30ea87623717c52bc2bb3a86e5ed92f8602b2ae057154a76be4773e",
   "calibration_histories_sha256": "7a033f0433e26f7865c6dd5ac377aa1889a022a32c1a170e84ff40a7bf5870fe",
-  "v7_trainer_source_sha256": "ea5d435d668418e31a2b0d4273a4c7610099b40fcf6a3aae8cf09b1dd30709e2"
+  "v7_trainer_source_sha256": "ea5d435d668418e31a2b0d4273a4c7610099b40fcf6a3aae8cf09b1dd30709e2",
+  "online_sampling_policy": "episode_mass_capped_v1"
 }

@@ -14,5 +14,6 @@
   "calibration_seed": 830019,
   "gradient_norm_target_ratio": 0.25,
   "gradient_group_max_ratio": 0.5,
-  "calibration_required": true
+  "calibration_required": true,
+  "online_sampling_policy": "episode_mass_capped_v1"
 }
